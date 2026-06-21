@@ -108,6 +108,29 @@ Some settings belong to the runtime environment instead of the component itself.
 
 should normally be configured in runtime environment files such as `runtime/conf/MoquiDevConf.xml`, environment variables, or deployment-specific configuration, not hard-coded as component defaults in `MoquiConf.xml`.
 
+## OpenSearch Usage Notes
+
+`moqui-mcp` can work with different OpenSearch setups depending on the environment:
+
+- a local runtime node started directly from the Moqui environment
+- a dedicated containerized OpenSearch stack from `moqui-deploy/ai`
+- another externally managed OpenSearch service
+
+For local development, both of these patterns are acceptable:
+
+- direct local runtime endpoint such as `http://127.0.0.1:9200`
+- containerized endpoint exposed by the AI deploy profile
+
+The important rule is that the OpenSearch endpoint, credentials, and security mode belong to deployment configuration, not to the component source itself.
+
+If you switch between local runtime OpenSearch and the containerized AI profile, update only the runtime/deploy configuration that provides:
+
+- `elasticsearch_url`
+- `elasticsearch_user`
+- `elasticsearch_password`
+
+The `moqui-mcp` source code and component defaults should remain unchanged.
+
 ## Development Notes
 
 - this repository is intentionally kept aligned with the runtime copy used during local Moqui development
