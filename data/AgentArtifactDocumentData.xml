@@ -1,0 +1,327 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<https://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-facade-3.xsd" type="seed-initial">
+
+    <!--
+        Graph-authoritative artifact corpus.
+        Primary entity is the Graph-backed view-entity so DataDocument materialization stays declarative
+        while Graph/Parameter remain the authoritative source of truth.
+    -->
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="AgentArtifactVertexDocument"
+            documentName="Agent Artifact Vertex Document"
+            documentTitle="${label}"
+            primaryEntityName="moqui.agent.graph.AgentArtifactVertexMeta"
+            indexName="moqui_agent_documents_v2"
+            manualDataServiceName="org.moqui.agent.AgentDocumentServices.add#AgentArtifactManualDocumentData"
+            manualMappingServiceName="org.moqui.agent.AgentDocumentServices.transform#AgentProjectionDocumentMapping">
+        <fields fieldSeqId="01" fieldPath="graphVertexId"/>
+        <fields fieldSeqId="02" fieldPath="graphId"/>
+        <fields fieldSeqId="03" fieldPath="label"/>
+        <fields fieldSeqId="04" fieldPath="lastUpdatedStamp"/>
+        <fields fieldSeqId="20" fieldPath="vertexType"/>
+        <fields fieldSeqId="21" fieldPath="sourceVertexId"/>
+        <fields fieldSeqId="22" fieldPath="sourceArtifactUri"/>
+        <fields fieldSeqId="23" fieldPath="artifactKind"/>
+        <fields fieldSeqId="24" fieldPath="screenPath"/>
+        <fields fieldSeqId="25" fieldPath="serviceName"/>
+        <fields fieldSeqId="26" fieldPath="serviceVerb"/>
+        <fields fieldSeqId="27" fieldPath="serviceNoun"/>
+        <fields fieldSeqId="28" fieldPath="entityName"/>
+        <fields fieldSeqId="29" fieldPath="fieldName"/>
+        <fields fieldSeqId="30" fieldPath="documentType"/>
+        <fields fieldSeqId="31" fieldPath="xmlActionElement"/>
+        <fields fieldSeqId="32" fieldPath="domainObject"/>
+        <fields fieldSeqId="33" fieldPath="subject"/>
+        <fields fieldSeqId="34" fieldPath="operation"/>
+        <fields fieldSeqId="35" fieldPath="calledService"/>
+        <fields fieldSeqId="36" fieldPath="parameterRole"/>
+        <conditions conditionSeqId="01" fieldNameAlias="graphId" fieldValue="AgentArtifactGraph"/>
+    </moqui.entity.document.DataDocument>
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="AgentArtifactScreen"
+            documentName="Agent Artifact Screen"
+            documentTitle="${label}"
+            primaryEntityName="moqui.agent.graph.AgentArtifactVertexMeta"
+            indexName="moqui_agent_documents_v2"
+            manualDataServiceName="org.moqui.agent.AgentDocumentServices.add#AgentArtifactManualDocumentData"
+            manualMappingServiceName="org.moqui.agent.AgentDocumentServices.transform#AgentProjectionDocumentMapping">
+        <fields fieldSeqId="01" fieldPath="graphVertexId"/>
+        <fields fieldSeqId="02" fieldPath="graphId"/>
+        <fields fieldSeqId="03" fieldPath="label"/>
+        <fields fieldSeqId="04" fieldPath="lastUpdatedStamp"/>
+        <fields fieldSeqId="20" fieldPath="vertexType"/>
+        <fields fieldSeqId="21" fieldPath="sourceVertexId"/>
+        <fields fieldSeqId="22" fieldPath="sourceArtifactUri"/>
+        <fields fieldSeqId="23" fieldPath="artifactKind"/>
+        <fields fieldSeqId="24" fieldPath="screenPath"/>
+        <fields fieldSeqId="25" fieldPath="domainObject"/>
+        <fields fieldSeqId="26" fieldPath="documentType"/>
+        <conditions conditionSeqId="01" fieldNameAlias="graphId" fieldValue="AgentArtifactGraph"/>
+        <conditions conditionSeqId="02" fieldNameAlias="vertexType" fieldValue="Screen"/>
+    </moqui.entity.document.DataDocument>
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="AgentArtifactForm"
+            documentName="Agent Artifact Form"
+            documentTitle="${label}"
+            primaryEntityName="moqui.agent.graph.AgentArtifactVertexMeta"
+            indexName="moqui_agent_documents_v2"
+            manualDataServiceName="org.moqui.agent.AgentDocumentServices.add#AgentArtifactManualDocumentData"
+            manualMappingServiceName="org.moqui.agent.AgentDocumentServices.transform#AgentProjectionDocumentMapping">
+        <fields fieldSeqId="01" fieldPath="graphVertexId"/>
+        <fields fieldSeqId="02" fieldPath="graphId"/>
+        <fields fieldSeqId="03" fieldPath="label"/>
+        <fields fieldSeqId="04" fieldPath="lastUpdatedStamp"/>
+        <fields fieldSeqId="20" fieldPath="vertexType"/>
+        <fields fieldSeqId="21" fieldPath="sourceVertexId"/>
+        <fields fieldSeqId="22" fieldPath="sourceArtifactUri"/>
+        <fields fieldSeqId="23" fieldPath="artifactKind"/>
+        <fields fieldSeqId="24" fieldPath="screenPath"/>
+        <fields fieldSeqId="25" fieldPath="domainObject"/>
+        <fields fieldSeqId="26" fieldPath="documentType"/>
+        <conditions conditionSeqId="01" fieldNameAlias="graphId" fieldValue="AgentArtifactGraph"/>
+        <conditions conditionSeqId="02" fieldNameAlias="vertexType" fieldValue="Form"/>
+    </moqui.entity.document.DataDocument>
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="AgentArtifactTransition"
+            documentName="Agent Artifact Transition"
+            documentTitle="${label}"
+            primaryEntityName="moqui.agent.graph.AgentArtifactVertexMeta"
+            indexName="moqui_agent_documents_v2"
+            manualDataServiceName="org.moqui.agent.AgentDocumentServices.add#AgentArtifactManualDocumentData"
+            manualMappingServiceName="org.moqui.agent.AgentDocumentServices.transform#AgentProjectionDocumentMapping">
+        <fields fieldSeqId="01" fieldPath="graphVertexId"/>
+        <fields fieldSeqId="02" fieldPath="graphId"/>
+        <fields fieldSeqId="03" fieldPath="label"/>
+        <fields fieldSeqId="04" fieldPath="lastUpdatedStamp"/>
+        <fields fieldSeqId="20" fieldPath="vertexType"/>
+        <fields fieldSeqId="21" fieldPath="sourceVertexId"/>
+        <fields fieldSeqId="22" fieldPath="sourceArtifactUri"/>
+        <fields fieldSeqId="23" fieldPath="artifactKind"/>
+        <fields fieldSeqId="24" fieldPath="screenPath"/>
+        <fields fieldSeqId="25" fieldPath="serviceName"/>
+        <fields fieldSeqId="26" fieldPath="serviceVerb"/>
+        <fields fieldSeqId="27" fieldPath="serviceNoun"/>
+        <fields fieldSeqId="28" fieldPath="domainObject"/>
+        <fields fieldSeqId="29" fieldPath="documentType"/>
+        <conditions conditionSeqId="01" fieldNameAlias="graphId" fieldValue="AgentArtifactGraph"/>
+        <conditions conditionSeqId="02" fieldNameAlias="vertexType" fieldValue="Transition"/>
+    </moqui.entity.document.DataDocument>
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="AgentArtifactService"
+            documentName="Agent Artifact Service"
+            documentTitle="${label}"
+            primaryEntityName="moqui.agent.graph.AgentArtifactVertexMeta"
+            indexName="moqui_agent_documents_v2"
+            manualDataServiceName="org.moqui.agent.AgentDocumentServices.add#AgentArtifactManualDocumentData"
+            manualMappingServiceName="org.moqui.agent.AgentDocumentServices.transform#AgentProjectionDocumentMapping">
+        <fields fieldSeqId="01" fieldPath="graphVertexId"/>
+        <fields fieldSeqId="02" fieldPath="graphId"/>
+        <fields fieldSeqId="03" fieldPath="label"/>
+        <fields fieldSeqId="04" fieldPath="lastUpdatedStamp"/>
+        <fields fieldSeqId="20" fieldPath="vertexType"/>
+        <fields fieldSeqId="21" fieldPath="sourceVertexId"/>
+        <fields fieldSeqId="22" fieldPath="sourceArtifactUri"/>
+        <fields fieldSeqId="23" fieldPath="artifactKind"/>
+        <fields fieldSeqId="24" fieldPath="serviceName"/>
+        <fields fieldSeqId="25" fieldPath="serviceVerb"/>
+        <fields fieldSeqId="26" fieldPath="serviceNoun"/>
+        <fields fieldSeqId="27" fieldPath="entityName"/>
+        <fields fieldSeqId="28" fieldPath="domainObject"/>
+        <fields fieldSeqId="29" fieldPath="documentType"/>
+        <conditions conditionSeqId="01" fieldNameAlias="graphId" fieldValue="AgentArtifactGraph"/>
+        <conditions conditionSeqId="02" fieldNameAlias="vertexType" fieldValue="Service"/>
+    </moqui.entity.document.DataDocument>
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="AgentArtifactOperationPattern"
+            documentName="Agent Artifact Operation Pattern"
+            documentTitle="${label}"
+            primaryEntityName="moqui.agent.graph.AgentArtifactVertexMeta"
+            indexName="moqui_agent_documents_v2"
+            manualDataServiceName="org.moqui.agent.AgentDocumentServices.add#AgentArtifactManualDocumentData"
+            manualMappingServiceName="org.moqui.agent.AgentDocumentServices.transform#AgentProjectionDocumentMapping">
+        <fields fieldSeqId="01" fieldPath="graphVertexId"/>
+        <fields fieldSeqId="02" fieldPath="graphId"/>
+        <fields fieldSeqId="03" fieldPath="label"/>
+        <fields fieldSeqId="04" fieldPath="lastUpdatedStamp"/>
+        <fields fieldSeqId="20" fieldPath="vertexType"/>
+        <fields fieldSeqId="21" fieldPath="sourceArtifactUri"/>
+        <fields fieldSeqId="22" fieldPath="artifactKind"/>
+        <fields fieldSeqId="23" fieldPath="serviceName"/>
+        <fields fieldSeqId="24" fieldPath="serviceVerb"/>
+        <fields fieldSeqId="25" fieldPath="serviceNoun"/>
+        <fields fieldSeqId="26" fieldPath="entityName"/>
+        <fields fieldSeqId="27" fieldPath="domainObject"/>
+        <fields fieldSeqId="28" fieldPath="subject"/>
+        <fields fieldSeqId="29" fieldPath="operation"/>
+        <fields fieldSeqId="30" fieldPath="documentType"/>
+        <conditions conditionSeqId="01" fieldNameAlias="graphId" fieldValue="AgentArtifactGraph"/>
+        <conditions conditionSeqId="02" fieldNameAlias="vertexType" fieldValue="Service"/>
+    </moqui.entity.document.DataDocument>
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="AgentArtifactXmlAction"
+            documentName="Agent Artifact XML Action"
+            documentTitle="${label}"
+            primaryEntityName="moqui.agent.graph.AgentArtifactVertexMeta"
+            indexName="moqui_agent_documents_v2"
+            manualDataServiceName="org.moqui.agent.AgentDocumentServices.add#AgentArtifactManualDocumentData"
+            manualMappingServiceName="org.moqui.agent.AgentDocumentServices.transform#AgentProjectionDocumentMapping">
+        <fields fieldSeqId="01" fieldPath="graphVertexId"/>
+        <fields fieldSeqId="02" fieldPath="graphId"/>
+        <fields fieldSeqId="03" fieldPath="label"/>
+        <fields fieldSeqId="04" fieldPath="lastUpdatedStamp"/>
+        <fields fieldSeqId="20" fieldPath="vertexType"/>
+        <fields fieldSeqId="21" fieldPath="sourceArtifactUri"/>
+        <fields fieldSeqId="22" fieldPath="artifactKind"/>
+        <fields fieldSeqId="23" fieldPath="serviceName"/>
+        <fields fieldSeqId="24" fieldPath="serviceVerb"/>
+        <fields fieldSeqId="25" fieldPath="serviceNoun"/>
+        <fields fieldSeqId="26" fieldPath="xmlActionElement"/>
+        <fields fieldSeqId="27" fieldPath="entityName"/>
+        <fields fieldSeqId="28" fieldPath="fieldName"/>
+        <fields fieldSeqId="29" fieldPath="domainObject"/>
+        <fields fieldSeqId="30" fieldPath="subject"/>
+        <fields fieldSeqId="31" fieldPath="operation"/>
+        <fields fieldSeqId="32" fieldPath="calledService"/>
+        <fields fieldSeqId="33" fieldPath="documentType"/>
+        <conditions conditionSeqId="01" fieldNameAlias="graphId" fieldValue="AgentArtifactGraph"/>
+        <conditions conditionSeqId="02" fieldNameAlias="vertexType" fieldValue="XmlAction"/>
+    </moqui.entity.document.DataDocument>
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="AgentArtifactServiceParameter"
+            documentName="Agent Artifact Service Parameter"
+            documentTitle="${label}"
+            primaryEntityName="moqui.agent.graph.AgentArtifactVertexMeta"
+            indexName="moqui_agent_documents_v2"
+            manualDataServiceName="org.moqui.agent.AgentDocumentServices.add#AgentArtifactManualDocumentData"
+            manualMappingServiceName="org.moqui.agent.AgentDocumentServices.transform#AgentProjectionDocumentMapping">
+        <fields fieldSeqId="01" fieldPath="graphVertexId"/>
+        <fields fieldSeqId="02" fieldPath="graphId"/>
+        <fields fieldSeqId="03" fieldPath="label"/>
+        <fields fieldSeqId="04" fieldPath="lastUpdatedStamp"/>
+        <fields fieldSeqId="20" fieldPath="vertexType"/>
+        <fields fieldSeqId="21" fieldPath="sourceArtifactUri"/>
+        <fields fieldSeqId="22" fieldPath="artifactKind"/>
+        <fields fieldSeqId="23" fieldPath="serviceName"/>
+        <fields fieldSeqId="24" fieldPath="serviceVerb"/>
+        <fields fieldSeqId="25" fieldPath="serviceNoun"/>
+        <fields fieldSeqId="26" fieldPath="parameterRole"/>
+        <fields fieldSeqId="27" fieldPath="subject"/>
+        <fields fieldSeqId="28" fieldPath="domainObject"/>
+        <fields fieldSeqId="29" fieldPath="documentType"/>
+        <conditions conditionSeqId="01" fieldNameAlias="graphId" fieldValue="AgentArtifactGraph"/>
+        <conditions conditionSeqId="02" fieldNameAlias="vertexType" fieldValue="ServiceParameter"/>
+    </moqui.entity.document.DataDocument>
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="AgentArtifactEntity"
+            documentName="Agent Artifact Entity"
+            documentTitle="${label}"
+            primaryEntityName="moqui.agent.graph.AgentArtifactVertexMeta"
+            indexName="moqui_agent_documents_v2"
+            manualDataServiceName="org.moqui.agent.AgentDocumentServices.add#AgentArtifactManualDocumentData"
+            manualMappingServiceName="org.moqui.agent.AgentDocumentServices.transform#AgentProjectionDocumentMapping">
+        <fields fieldSeqId="01" fieldPath="graphVertexId"/>
+        <fields fieldSeqId="02" fieldPath="graphId"/>
+        <fields fieldSeqId="03" fieldPath="label"/>
+        <fields fieldSeqId="04" fieldPath="lastUpdatedStamp"/>
+        <fields fieldSeqId="20" fieldPath="vertexType"/>
+        <fields fieldSeqId="21" fieldPath="sourceArtifactUri"/>
+        <fields fieldSeqId="22" fieldPath="artifactKind"/>
+        <fields fieldSeqId="23" fieldPath="entityName"/>
+        <fields fieldSeqId="24" fieldPath="fieldName"/>
+        <fields fieldSeqId="25" fieldPath="domainObject"/>
+        <fields fieldSeqId="26" fieldPath="documentType"/>
+        <conditions conditionSeqId="01" fieldNameAlias="graphId" fieldValue="AgentArtifactGraph"/>
+        <conditions conditionSeqId="02" fieldNameAlias="vertexType" fieldValue="Entity"/>
+    </moqui.entity.document.DataDocument>
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="AgentArtifactXsdElement"
+            documentName="Agent Artifact XSD Element"
+            documentTitle="${label}"
+            primaryEntityName="moqui.agent.graph.AgentArtifactVertexMeta"
+            indexName="moqui_agent_documents_v2"
+            manualDataServiceName="org.moqui.agent.AgentDocumentServices.add#AgentArtifactManualDocumentData"
+            manualMappingServiceName="org.moqui.agent.AgentDocumentServices.transform#AgentProjectionDocumentMapping">
+        <fields fieldSeqId="01" fieldPath="graphVertexId"/>
+        <fields fieldSeqId="02" fieldPath="graphId"/>
+        <fields fieldSeqId="03" fieldPath="label"/>
+        <fields fieldSeqId="04" fieldPath="lastUpdatedStamp"/>
+        <fields fieldSeqId="20" fieldPath="vertexType"/>
+        <fields fieldSeqId="21" fieldPath="sourceArtifactUri"/>
+        <fields fieldSeqId="22" fieldPath="artifactKind"/>
+        <fields fieldSeqId="23" fieldPath="xmlActionElement"/>
+        <fields fieldSeqId="24" fieldPath="entityName"/>
+        <fields fieldSeqId="25" fieldPath="fieldName"/>
+        <fields fieldSeqId="26" fieldPath="domainObject"/>
+        <fields fieldSeqId="27" fieldPath="subject"/>
+        <fields fieldSeqId="28" fieldPath="operation"/>
+        <fields fieldSeqId="29" fieldPath="documentType"/>
+        <conditions conditionSeqId="01" fieldNameAlias="graphId" fieldValue="AgentArtifactGraph"/>
+        <conditions conditionSeqId="02" fieldNameAlias="vertexType" fieldValue="XsdElement"/>
+    </moqui.entity.document.DataDocument>
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="AgentArtifactXsdSchema"
+            documentName="Agent Artifact XSD Schema"
+            documentTitle="${label}"
+            primaryEntityName="moqui.agent.graph.AgentArtifactVertexMeta"
+            indexName="moqui_agent_documents_v2"
+            manualDataServiceName="org.moqui.agent.AgentDocumentServices.add#AgentArtifactManualDocumentData"
+            manualMappingServiceName="org.moqui.agent.AgentDocumentServices.transform#AgentProjectionDocumentMapping">
+        <fields fieldSeqId="01" fieldPath="graphVertexId"/>
+        <fields fieldSeqId="02" fieldPath="graphId"/>
+        <fields fieldSeqId="03" fieldPath="label"/>
+        <fields fieldSeqId="04" fieldPath="lastUpdatedStamp"/>
+        <fields fieldSeqId="20" fieldPath="vertexType"/>
+        <fields fieldSeqId="21" fieldPath="sourceArtifactUri"/>
+        <fields fieldSeqId="22" fieldPath="artifactKind"/>
+        <fields fieldSeqId="23" fieldPath="xmlActionElement"/>
+        <fields fieldSeqId="24" fieldPath="entityName"/>
+        <fields fieldSeqId="25" fieldPath="fieldName"/>
+        <fields fieldSeqId="26" fieldPath="domainObject"/>
+        <fields fieldSeqId="27" fieldPath="subject"/>
+        <fields fieldSeqId="28" fieldPath="operation"/>
+        <fields fieldSeqId="29" fieldPath="documentType"/>
+        <conditions conditionSeqId="01" fieldNameAlias="graphId" fieldValue="AgentArtifactGraph"/>
+        <conditions conditionSeqId="02" fieldNameAlias="vertexType" fieldValue="XsdSchema"/>
+    </moqui.entity.document.DataDocument>
+
+    <moqui.entity.feed.DataFeed dataFeedId="AgentArtifactGraphFeed" dataFeedTypeEnumId="DTFDTP_MAN_PULL"
+            feedReceiveServiceName="org.moqui.search.SearchServices.index#DataDocuments"
+            indexOnStartEmpty="N"/>
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentArtifactGraphFeed" dataDocumentId="AgentArtifactVertexDocument"/>
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentArtifactGraphFeed" dataDocumentId="AgentArtifactScreen"/>
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentArtifactGraphFeed" dataDocumentId="AgentArtifactForm"/>
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentArtifactGraphFeed" dataDocumentId="AgentArtifactTransition"/>
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentArtifactGraphFeed" dataDocumentId="AgentArtifactService"/>
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentArtifactGraphFeed" dataDocumentId="AgentArtifactOperationPattern"/>
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentArtifactGraphFeed" dataDocumentId="AgentArtifactXmlAction"/>
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentArtifactGraphFeed" dataDocumentId="AgentArtifactServiceParameter"/>
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentArtifactGraphFeed" dataDocumentId="AgentArtifactEntity"/>
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentArtifactGraphFeed" dataDocumentId="AgentArtifactXsdElement"/>
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentArtifactGraphFeed" dataDocumentId="AgentArtifactXsdSchema"/>
+
+</entity-facade-xml>

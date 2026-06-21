@@ -1,0 +1,433 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="create" noun="AgentMathModelRun" authenticate="true" allow-remote="true">
+        <in-parameters>
+            <parameter name="mathModelId"/>
+            <parameter name="runTypeEnumId"/>
+            <parameter name="runName"/>
+            <parameter name="sourceServiceName"/>
+            <parameter name="sourceToolName"/>
+            <parameter name="parametersJson"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="mathModelRunId"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import groovy.json.JsonOutput
+
+                String effectiveMathModelId = (mathModelId ?: 'AgentMoquiRagModel_v1').toString()
+                Map parameterEnvelope = [
+                    mathModelId : effectiveMathModelId,
+                    runType : runTypeEnumId,
+                    runName : runName,
+                    sourceServiceName : sourceServiceName,
+                    sourceToolName : sourceToolName
+                ]
+                if (parametersJson) parameterEnvelope.parametersJson = parametersJson
+
+                def runValue = ec.entity.makeValue('moqui.math.MathModelRun')
+                runValue.setSequencedIdPrimary()
+                mathModelRunId = runValue.mathModelRunId
+                runValue.mathModelId = effectiveMathModelId
+                runValue.parameters = JsonOutput.toJson(parameterEnvelope)
+                runValue.messages = [runName, runTypeEnumId, sourceServiceName, sourceToolName].findAll { it }.join(' | ')
+                runValue.hasError = 'N'
+                runValue.create()
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="update" noun="AgentMathModelRunMetrics" authenticate="true" allow-remote="true">
+        <in-parameters>
+            <parameter name="mathModelRunId" required="true"/>
+            <parameter name="metricsJson"/>
+            <parameter name="statusId"/>
+        </in-parameters>
+        <actions>
+            <script><![CDATA[
+                import groovy.json.JsonOutput
+                import groovy.json.JsonSlurper
+
+                def runValue = ec.entity.find('moqui.math.MathModelRun').condition('mathModelRunId', mathModelRunId).one()
+                if (!runValue) throw new IllegalArgumentException("MathModelRun not found for ${mathModelRunId}")
+                runValue = runValue.cloneValue()
+
+                JsonSlurper slurper = new JsonSlurper()
+                Map currentResults = runValue.results ? (slurper.parseText(runValue.results) as Map) : [:]
+                currentResults.metrics = metricsJson instanceof Map ? metricsJson : (metricsJson ? slurper.parseText(metricsJson.toString()) : [:])
+                if (statusId) currentResults.statusHint = statusId
+                runValue.results = JsonOutput.toJson(currentResults)
+                runValue.update()
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="complete" noun="AgentMathModelRun" authenticate="true" allow-remote="true">
+        <in-parameters>
+            <parameter name="mathModelRunId" required="true"/>
+            <parameter name="resultSummaryJson"/>
+        </in-parameters>
+        <actions>
+            <script><![CDATA[
+                import groovy.json.JsonOutput
+                import groovy.json.JsonSlurper
+
+                def runValue = ec.entity.find('moqui.math.MathModelRun').condition('mathModelRunId', mathModelRunId).one()
+                if (!runValue) throw new IllegalArgumentException("MathModelRun not found for ${mathModelRunId}")
+                runValue = runValue.cloneValue()
+
+                JsonSlurper slurper = new JsonSlurper()
+                Map currentResults = runValue.results ? (slurper.parseText(runValue.results) as Map) : [:]
+                currentResults.summary = resultSummaryJson instanceof Map ? resultSummaryJson : (resultSummaryJson ? slurper.parseText(resultSummaryJson.toString()) : [:])
+                runValue.results = JsonOutput.toJson(currentResults)
+                runValue.endDate = ec.user.nowTimestamp
+                runValue.runningTimeMillis = runValue.startTime ? ((runValue.endDate.time - runValue.startTime.time) as BigDecimal) : null
+                runValue.hasError = 'N'
+                runValue.update()
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="fail" noun="AgentMathModelRun" authenticate="true" allow-remote="true">
+        <in-parameters>
+            <parameter name="mathModelRunId" required="true"/>
+            <parameter name="errorMessage"/>
+            <parameter name="metricsJson"/>
+        </in-parameters>
+        <actions>
+            <script><![CDATA[
+                import groovy.json.JsonOutput
+                import groovy.json.JsonSlurper
+
+                def runValue = ec.entity.find('moqui.math.MathModelRun').condition('mathModelRunId', mathModelRunId).one()
+                if (!runValue) throw new IllegalArgumentException("MathModelRun not found for ${mathModelRunId}")
+                runValue = runValue.cloneValue()
+
+                JsonSlurper slurper = new JsonSlurper()
+                Map currentResults = runValue.results ? (slurper.parseText(runValue.results) as Map) : [:]
+                if (metricsJson) currentResults.metrics = metricsJson instanceof Map ? metricsJson : slurper.parseText(metricsJson.toString())
+                runValue.results = JsonOutput.toJson(currentResults)
+                runValue.endDate = ec.user.nowTimestamp
+                runValue.runningTimeMillis = runValue.startTime ? ((runValue.endDate.time - runValue.startTime.time) as BigDecimal) : null
+                runValue.hasError = 'Y'
+                runValue.errors = errorMessage ?: 'Math model run failed'
+                runValue.update()
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="link" noun="AgentMathModelData" authenticate="true" allow-remote="true">
+        <in-parameters>
+            <parameter name="mathModelId" required="true"/>
+            <parameter name="dataTypeEnumId"/>
+            <parameter name="purposeEnumId"/>
+            <parameter name="generatedByRunId"/>
+            <parameter name="vectorId"/>
+            <parameter name="matrixId"/>
+            <parameter name="tensorId"/>
+            <parameter name="transformationId"/>
+            <parameter name="approximatedFunctionId"/>
+            <parameter name="graphVertexId"/>
+            <parameter name="graphEdgeId"/>
+            <parameter name="meshKCellId"/>
+            <parameter name="meshGroupId"/>
+            <parameter name="sequenceNum" type="Integer"/>
+            <parameter name="uomId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="mathModelDataId"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                def dataValue = ec.entity.makeValue('moqui.math.MathModelData')
+                dataValue.setSequencedIdPrimary()
+                mathModelDataId = dataValue.mathModelDataId
+                dataValue.mathModelId = mathModelId
+                dataValue.dataTypeEnumId = dataTypeEnumId
+                dataValue.purposeEnumId = purposeEnumId
+                dataValue.generatedByRunId = generatedByRunId
+                dataValue.vectorId = vectorId
+                dataValue.matrixId = matrixId
+                dataValue.tensorId = tensorId
+                dataValue.transformationId = transformationId
+                dataValue.approximatedFunctionId = approximatedFunctionId
+                dataValue.graphVertexId = graphVertexId
+                dataValue.graphEdgeId = graphEdgeId
+                dataValue.meshKCellId = meshKCellId
+                dataValue.meshGroupId = meshGroupId
+                dataValue.fromDate = fromDate ?: ec.user.nowTimestamp
+                dataValue.thruDate = thruDate
+                dataValue.sequenceNum = sequenceNum
+                dataValue.uomId = uomId
+                dataValue.create()
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="register" noun="AgentEmbeddingTensor" authenticate="true" allow-remote="true">
+        <in-parameters>
+            <parameter name="tensorId"/>
+            <parameter name="mathModelId"/>
+            <parameter name="mathModelRunId"/>
+            <parameter name="indexName"/>
+            <parameter name="embeddingProvider"/>
+            <parameter name="embeddingModel"/>
+            <parameter name="embeddingDimensions" type="Integer"/>
+            <parameter name="documentCount" type="Integer"/>
+            <parameter name="contentLocation"/>
+            <parameter name="contentFormat"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="effectiveTensorId"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                String effectiveMathModelId = (mathModelId ?: 'AgentMoquiRagModel_v1').toString()
+                String embeddingKey = Integer.toHexString((embeddingModel ?: 'unknown').toString().hashCode()).toUpperCase()
+                effectiveTensorId = (tensorId ?: "AgEmbTen_${embeddingKey}_${embeddingDimensions ?: 0}").toString()
+                int dimensions = (embeddingDimensions ?: 0) as Integer
+                int docs = Math.max(0, (documentCount ?: 0) as Integer)
+
+                def tensorValue = ec.entity.find('moqui.math.Tensor').condition('tensorId', effectiveTensorId).one()
+                boolean tensorExists = tensorValue != null
+                if (tensorValue) tensorValue = tensorValue.cloneValue()
+                if (!tensorValue) {
+                    tensorValue = ec.entity.makeValue('moqui.math.Tensor')
+                    tensorValue.tensorId = effectiveTensorId
+                }
+                tensorValue.tensorTypeEnumId = 'TtDense'
+                tensorValue.purposeEnumId = 'TpOriginal'
+                tensorValue.storageTypeEnumId = 'TstContent'
+                tensorValue.memoryFormatEnumId = 'TmfContig'
+                tensorValue.name = "Agent Prompt Embeddings ${embeddingModel ?: ''}".trim()
+                tensorValue.description = "Embedding tensor metadata for index ${indexName ?: ''} via ${embeddingProvider ?: 'unknown'}".trim()
+                tensorValue.rank = 2
+                tensorValue.shape = "[${docs},${dimensions}]"
+                tensorValue.size = docs * dimensions
+                if (tensorExists) tensorValue.update() else tensorValue.create()
+
+                String tensorContentId = "${effectiveTensorId}Cnt"
+                def contentValue = ec.entity.find('moqui.math.TensorContent').condition('tensorContentId', tensorContentId).one()
+                boolean contentExists = contentValue != null
+                if (contentValue) contentValue = contentValue.cloneValue()
+                if (!contentValue) {
+                    contentValue = ec.entity.makeValue('moqui.math.TensorContent')
+                    contentValue.tensorContentId = tensorContentId
+                }
+                contentValue.tensorId = effectiveTensorId
+                contentValue.contentLocation = contentLocation ?: "opensearch://${indexName ?: ''}/embedding"
+                contentValue.contentTypeEnumId = (contentFormat == 'opensearch-knn') ? 'TCntManifest' : 'TCntCustom'
+                contentValue.description = "Embedding tensor content metadata for ${embeddingModel ?: 'unknown'}"
+                if (contentExists) contentValue.update() else contentValue.create()
+
+                ec.service.sync().name('org.moqui.agent.AgentMathModelServices.link#AgentMathModelData')
+                        .parameters([
+                            mathModelId : effectiveMathModelId,
+                            generatedByRunId : mathModelRunId,
+                            dataTypeEnumId : 'MmdtTensor',
+                            purposeEnumId : 'MmdpModelOutputs',
+                            tensorId : effectiveTensorId
+                        ]).call()
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="summarize" noun="AgentToolExecutionLogsToMathModelRun" authenticate="true" allow-remote="true">
+        <in-parameters>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="mathModelId"/>
+            <parameter name="groupBy"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="mathModelRunId"/>
+            <parameter name="summary" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import groovy.json.JsonOutput
+
+                String effectiveMathModelId = (mathModelId ?: 'AgentMoquiRagModel_v1').toString()
+                Map runResult = ec.service.sync().name('org.moqui.agent.AgentMathModelServices.create#AgentMathModelRun')
+                        .parameters([
+                            mathModelId : effectiveMathModelId,
+                            runTypeEnumId : 'AgentRunTelemetrySummary',
+                            runName : 'Tool Execution Summary',
+                            sourceServiceName : 'org.moqui.agent.AgentMathModelServices.summarize#AgentToolExecutionLogsToMathModelRun',
+                            parametersJson : JsonOutput.toJson([fromDate: fromDate, thruDate: thruDate, groupBy: groupBy])
+                        ]).call()
+                mathModelRunId = runResult.mathModelRunId
+
+                def binFind = ec.entity.find('moqui.agent.AgentToolExecutionBin')
+                if (fromDate) binFind.condition('binEndDateTime', ec.entity.conditionFactory.makeCondition('binEndDateTime', '>=', fromDate))
+                if (thruDate) binFind.condition('binStartDateTime', ec.entity.conditionFactory.makeCondition('binStartDateTime', '<=', thruDate))
+                List binRows = binFind.list()
+
+                BigDecimal totalTimeMillis = 0
+                int totalExecutions = 0
+                Map toolCounts = [:].withDefault { 0 }
+                int successCount = 0
+                int errorCount = 0
+                int deniedCount = 0
+                int confirmationRequiredCount = 0
+                int hybridLlmRerankCount = 0
+                int rerankerFallbackCount = 0
+                binRows.each { row ->
+                    String toolName = (row.toolName ?: 'unknown') as String
+                    int execCount = (row.executionCount ?: 0) as Integer
+                    toolCounts[toolName] = (toolCounts[toolName] ?: 0) + execCount
+                    totalExecutions += execCount
+                    successCount += (row.successCount ?: 0) as Integer
+                    errorCount += (row.errorCount ?: 0) as Integer
+                    deniedCount += (row.deniedCount ?: 0) as Integer
+                    confirmationRequiredCount += (row.confirmationRequiredCount ?: 0) as Integer
+                    hybridLlmRerankCount += (row.hybridLlmRerankCount ?: 0) as Integer
+                    rerankerFallbackCount += (row.rerankerFallbackCount ?: 0) as Integer
+                    totalTimeMillis += (row.totalTimeMillis ?: 0) as BigDecimal
+                }
+                BigDecimal avgRunningTimeMillis = totalExecutions ? (totalTimeMillis / totalExecutions) : 0
+
+                def logFind = ec.entity.find('moqui.agent.AgentToolExecutionElasticLog')
+                if (fromDate) logFind.condition('logDate', ec.entity.conditionFactory.makeCondition('logDate', '>=', fromDate))
+                if (thruDate) logFind.condition('logDate', ec.entity.conditionFactory.makeCondition('logDate', '<=', thruDate))
+                List logRows = logFind.list()
+                List<BigDecimal> timings = (logRows.collect { it.runningTimeMillis }.findAll { it != null } as List<BigDecimal>).sort()
+                BigDecimal p95RunningTimeMillis = timings ? timings[Math.min(timings.size() - 1, Math.max(0, ((timings.size() * 0.95d).intValue() - 1)))] : 0
+
+                Map errorCounts = [:].withDefault { 0 }
+                logRows.each { row ->
+                    if (row.errorMessage) errorCounts[row.errorMessage] = (errorCounts[row.errorMessage] ?: 0) + 1
+                }
+                if (!binRows && logRows) {
+                    totalExecutions = logRows.size()
+                    toolCounts = [:].withDefault { 0 }
+                    successCount = 0
+                    errorCount = 0
+                    deniedCount = 0
+                    confirmationRequiredCount = 0
+                    hybridLlmRerankCount = 0
+                    rerankerFallbackCount = 0
+                    BigDecimal fallbackTotalTimeMillis = 0
+                    logRows.each { row ->
+                        String toolName = (row.toolName ?: 'unknown') as String
+                        toolCounts[toolName] = (toolCounts[toolName] ?: 0) + 1
+                        if (row.success == 'Y') successCount++ else errorCount++
+                        if (row.resultStatus == 'denied') deniedCount++
+                        if (row.confirmed == 'N' && row.riskLevelEnumId) confirmationRequiredCount++
+                        if (row.searchMode == 'hybrid_llm_rerank') hybridLlmRerankCount++
+                        if (row.rerankerFallbackUsed == 'Y') rerankerFallbackCount++
+                        fallbackTotalTimeMillis += (row.runningTimeMillis ?: 0) as BigDecimal
+                    }
+                    avgRunningTimeMillis = totalExecutions ? (fallbackTotalTimeMillis / totalExecutions) : 0
+                }
+
+                summary = [
+                    totalExecutions : totalExecutions,
+                    successCount : successCount,
+                    errorCount : errorCount,
+                    deniedCount : deniedCount,
+                    confirmationRequiredCount : confirmationRequiredCount,
+                    avgRunningTimeMillis : avgRunningTimeMillis,
+                    p95RunningTimeMillis : p95RunningTimeMillis,
+                    topTools : toolCounts.entrySet().sort { -it.value }.take(10).collect { [name: it.key, count: it.value] },
+                    topErrors : errorCounts.entrySet().sort { -it.value }.take(10).collect { [name: it.key, count: it.value] },
+                    hybridLlmRerankCount : hybridLlmRerankCount,
+                    rerankerFallbackCount : rerankerFallbackCount
+                ]
+
+                ec.service.sync().name('org.moqui.agent.AgentMathModelServices.complete#AgentMathModelRun')
+                        .parameters([
+                            mathModelRunId : mathModelRunId,
+                            resultSummaryJson : JsonOutput.toJson(summary)
+                        ]).call()
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="get" noun="AgentModelLineage" authenticate="true" allow-remote="true">
+        <in-parameters>
+            <parameter name="mathModelId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="lineage" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                String effectiveMathModelId = (mathModelId ?: 'AgentMoquiRagModel_v1').toString()
+                def modelValue = ec.entity.find('moqui.math.MathModel').condition('mathModelId', effectiveMathModelId).one()
+                if (!modelValue) throw new IllegalArgumentException("MathModel not found for ${effectiveMathModelId}")
+                def modelDef = ec.entity.find('moqui.math.MathModelDef').condition('mathModelDefId', modelValue.mathModelDefId).one()
+                List childDefs = ec.entity.find('moqui.math.MathModelDef').condition('parentModelDefId', modelValue.mathModelDefId).list()
+                List modelDefIds = [modelValue.mathModelDefId]
+                childDefs.each { if (it?.mathModelDefId) modelDefIds.add(it.mathModelDefId as String) }
+                List contents = ec.entity.find('moqui.math.MathModelDefContent')
+                        .condition('mathModelDefId', 'in', modelDefIds)
+                        .list()
+                List identifications = ec.entity.find('moqui.math.MathModelDefIdentification')
+                        .condition('mathModelDefId', 'in', modelDefIds)
+                        .list()
+                List runs = ec.entity.find('moqui.math.MathModelRun').condition('mathModelId', effectiveMathModelId).orderBy('-startTime').list().take(20)
+                List modelData = ec.entity.find('moqui.math.MathModelData').condition('mathModelId', effectiveMathModelId).orderBy('-fromDate').list().take(50)
+                Set tensorIds = [] as Set
+                modelData.each { if (it?.tensorId) tensorIds.add(it.tensorId as String) }
+                List tensorContents = tensorIds ? ec.entity.find('moqui.math.TensorContent')
+                        .condition('tensorId', 'in', tensorIds as List)
+                        .list() : []
+                List graphContents = modelValue.graphId ? ec.entity.find('moqui.math.GraphContent')
+                        .condition('graphId', modelValue.graphId)
+                        .list() : []
+                Map runDataGroupedByRun = [:].withDefault { [inputs: [], outputs: [], tensors: [], graphs: []] }
+                modelData.each { md ->
+                    if (!md?.generatedByRunId) return
+                    Map bucket = runDataGroupedByRun[md.generatedByRunId as String]
+                    if (md.dataTypeEnumId == 'MmdtTensor') {
+                        bucket.tensors.add(md)
+                    } else if (md.graphVertexId || md.graphEdgeId) {
+                        bucket.graphs.add(md)
+                    } else if (md.purposeEnumId == 'MmdpModelInputs') {
+                        bucket.inputs.add(md)
+                    } else {
+                        bucket.outputs.add(md)
+                    }
+                }
+                def latestIndexRun = runs.find { ((it?.parameters ?: '') as String).contains('Index') || ((it?.messages ?: '') as String).contains('Index') }
+                def latestGraphLoadRun = runs.find { ((it?.parameters ?: '') as String).contains('ArtifactGraphLoad') || ((it?.messages ?: '') as String).contains('ArtifactGraph') }
+                def latestEvaluationRun = runs.find { ((it?.parameters ?: '') as String).contains('Evaluation') || ((it?.messages ?: '') as String).contains('Evaluation') }
+
+                lineage = [
+                    mathModel : modelValue,
+                    modelDef : modelDef,
+                    modelDefIds : modelDefIds,
+                    childModelDefs : childDefs,
+                    modelContents : contents,
+                    modelIdentifications : identifications,
+                    recentRuns : runs,
+                    recentModelData : modelData,
+                    tensorContents : tensorContents,
+                    graphContents : graphContents,
+                    runDataGroupedByRun : runDataGroupedByRun,
+                    latestIndexRun : latestIndexRun,
+                    latestGraphLoadRun : latestGraphLoadRun,
+                    latestEvaluationRun : latestEvaluationRun
+                ]
+            ]]></script>
+        </actions>
+    </service>
+
+</services>

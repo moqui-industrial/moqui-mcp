@@ -1,0 +1,230 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entity-facade-xml>
+    <moqui.agent.AgentUniversalPattern agentUniversalPatternId="AgUpRoleDecl"
+            chapterNumber="2"
+            chapterTitle="Setting Up Roles: What Parties Do"
+            patternFamily="role_declarative"
+            coreQuestion="What parties can do"
+            bookConceptName="Declarative Role"
+            active="Y"
+            description="Volume 3 Chapter 2 covers declarative roles as reusable definitions of what a party may be or do."
+            moquiRelevance="Maps strongly to Party, PartyRole, RoleType, role groups, and role semantics used by service parameters and authorization decisions."/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRoleDecl" patternLevelSeqId="01"
+            levelNumber="1"
+            levelTitle="Level 1 Declarative Role Pattern"
+            structureFocus="Simple reusable role type catalog"
+            moquiMappingNotes="Use when only role definitions are needed, such as RoleType and simple PartyRole linkage."
+            mappedAggregatePatternId="AggrPartySpec"/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRoleDecl" patternLevelSeqId="02"
+            levelNumber="2"
+            levelTitle="Level 2 Declarative Role Pattern"
+            structureFocus="Role type plus richer descriptive structure"
+            moquiMappingNotes="Useful when role definitions need attributes, grouping, or inheritance across role types."
+            mappedAggregatePatternId="AggrPartySpec"/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRoleDecl" patternLevelSeqId="03"
+            levelNumber="3"
+            levelTitle="Level 3 Declarative Role Pattern"
+            structureFocus="Role structure with advanced flexibility"
+            moquiMappingNotes="Useful when the agent must reason over role metadata instead of just assigning hardcoded role ids."
+            mappedAggregatePatternId="AggrPartySpec"/>
+
+    <moqui.agent.AgentUniversalPattern agentUniversalPatternId="AgUpRoleCtx"
+            chapterNumber="3"
+            chapterTitle="Using Roles: How Parties Are Involved"
+            patternFamily="role_contextual"
+            coreQuestion="How parties participate in a context"
+            bookConceptName="Contextual Role"
+            active="Y"
+            description="Volume 3 Chapter 3 extends roles into contextual participation patterns, where a party takes a role relative to another object or transaction."
+            moquiRelevance="Maps to WorkEffortParty, RequestParty, Order roles, customer/vendor roles, assignee roles, and any agent workflow that binds a party to a record with role semantics."/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRoleCtx" patternLevelSeqId="01"
+            levelNumber="1"
+            levelTitle="Level 1 Contextual Role Pattern"
+            structureFocus="Role participation with attributes and relationships"
+            moquiMappingNotes="Use for assignment records like WorkEffortParty or RequestParty where the relation itself has semantics."
+            mappedAggregatePatternId="AggrPartySpec"/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRoleCtx" patternLevelSeqId="02"
+            levelNumber="2"
+            levelTitle="Level 2 Contextual Role Pattern"
+            structureFocus="Context-specific role participation"
+            moquiMappingNotes="Important when the same party can play multiple roles in the same domain object."
+            mappedAggregatePatternId="AggrPartySpec"/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRoleCtx" patternLevelSeqId="03"
+            levelNumber="3"
+            levelTitle="Level 3 Contextual Role Pattern"
+            structureFocus="Advanced contextual role model"
+            moquiMappingNotes="Useful for richer orchestration and RAG explanations of who is reporter, assignee, manager, customer, vendor, or owner."
+            mappedAggregatePatternId="AggrPartySpec"/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRoleCtx" patternLevelSeqId="04"
+            levelNumber="3"
+            levelTitle="Hybrid Contextual Role Pattern"
+            structureFocus="Hybrid role strategy"
+            moquiMappingNotes="Use when Moqui mixes explicit contextual records with simpler party references on the root entity."
+            mappedAggregatePatternId="AggrPartySpec"/>
+
+    <moqui.agent.AgentUniversalPattern agentUniversalPatternId="AgUpRecursive"
+            chapterNumber="4"
+            chapterTitle="Hierarchies, Aggregations, and Peer-to-Peer Relationships"
+            patternFamily="recursive_aggregate"
+            coreQuestion="How similar data is organized"
+            bookConceptName="Recursive Relationship"
+            active="Y"
+            description="Volume 3 Chapter 4 covers recursive structures, hierarchies, aggregations, and peer-to-peer organization of similar data."
+            moquiRelevance="This is the central chapter for WorkEffort, Facility, RequestItem, OrderPart/OrderItem, BudgetItem, and agent aggregate orchestration."/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRecursive" patternLevelSeqId="01"
+            levelNumber="1"
+            levelTitle="Level 1 Recursive Pattern"
+            structureFocus="Simple parent-child hierarchy"
+            moquiMappingNotes="Maps well to Facility parentFacilityId trees."
+            mappedAggregatePatternId="AggrFacilityTree"/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRecursive" patternLevelSeqId="02"
+            levelNumber="2"
+            levelTitle="Level 2 Recursive Pattern"
+            structureFocus="Hierarchy with richer rollup semantics"
+            moquiMappingNotes="Maps to cases where the child still clearly belongs to a root, such as RequestItem under Request."
+            mappedAggregatePatternId="AggrReqSeq"/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRecursive" patternLevelSeqId="03"
+            levelNumber="2"
+            levelTitle="Level 2 Expanded Recursive Pattern"
+            structureFocus="Expanded recursive / aggregation structure"
+            moquiMappingNotes="Maps to multilevel aggregates such as Budget -> BudgetItem -> BudgetItemDetail."
+            mappedAggregatePatternId="AggrBudgetTree"/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRecursive" patternLevelSeqId="04"
+            levelNumber="3"
+            levelTitle="Level 3 Recursive Pattern"
+            structureFocus="Recursive pattern with advanced links"
+            moquiMappingNotes="Maps directly to WorkEffort root plus parent trees."
+            mappedAggregatePatternId="AggrWorkEffTree"/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRecursive" patternLevelSeqId="05"
+            levelNumber="3"
+            levelTitle="Level 3 Recursive Pattern with Rules"
+            structureFocus="Recursive hierarchy with explicit business constraints"
+            moquiMappingNotes="Relevant when status, sequencing, or allowed child types must be validated by the agent."
+            mappedAggregatePatternId="AggrWorkEffTree"/>
+
+    <moqui.agent.AgentUniversalPattern agentUniversalPatternId="AgUpClassify"
+            chapterNumber="5"
+            chapterTitle="Types and Categories: the Classification of Data"
+            patternFamily="classification"
+            coreQuestion="How data is classified"
+            bookConceptName="Classification Pattern"
+            active="Y"
+            description="Volume 3 Chapter 5 covers types, categorizations, and taxonomies."
+            moquiRelevance="Maps to Moqui Enumeration, type entities, status types, role groups, work effort purpose, order item types, and many other classification structures used in prompts and retrieval."/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpClassify" patternLevelSeqId="01"
+            levelNumber="1"
+            levelTitle="Level 1 Classification Pattern"
+            structureFocus="Simple type assignment"
+            moquiMappingNotes="Use for direct type fields like workEffortTypeEnumId or requestTypeEnumId."/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpClassify" patternLevelSeqId="02"
+            levelNumber="2"
+            levelTitle="Level 2 Classification Pattern"
+            structureFocus="Reusable classification structure"
+            moquiMappingNotes="Use when types are shared across multiple entities or need metadata."/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpClassify" patternLevelSeqId="03"
+            levelNumber="3"
+            levelTitle="Level 3 Classification Pattern"
+            structureFocus="Taxonomy / category hierarchy"
+            moquiMappingNotes="Use for deeper agent reasoning over product, party, work effort, or accounting classifications."/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpClassify" patternLevelSeqId="04"
+            levelNumber="3"
+            levelTitle="Level 3 Classification Pattern with Rollups and Schemes"
+            structureFocus="Classification with rollups and multiple schemes"
+            moquiMappingNotes="Important for Moqui enumerations, category schemes, and cases where the same record is classified in more than one hierarchy."/>
+
+    <moqui.agent.AgentUniversalPattern agentUniversalPatternId="AgUpStatus"
+            chapterNumber="6"
+            chapterTitle="Status: The States of Data"
+            patternFamily="status"
+            coreQuestion="What state a record is in"
+            bookConceptName="Status Pattern"
+            active="Y"
+            description="Volume 3 Chapter 6 covers status and state patterns."
+            moquiRelevance="Directly maps to Moqui StatusItem usage across requests, work efforts, orders, assignments, and lifecycle transitions that the agent must respect."/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpStatus" patternLevelSeqId="01"
+            levelNumber="1"
+            levelTitle="Level 1 Status Pattern"
+            structureFocus="Single current status field"
+            moquiMappingNotes="Common in Moqui root entities with a direct statusId."/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpStatus" patternLevelSeqId="02"
+            levelNumber="2"
+            levelTitle="Level 2 Status Pattern, Current Status"
+            structureFocus="Current status with structured semantics"
+            moquiMappingNotes="Relevant when current status is explicit but transitions are still important."/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpStatus" patternLevelSeqId="03"
+            levelNumber="3"
+            levelTitle="Level 3 Status Pattern"
+            structureFocus="Status history and lifecycle semantics"
+            moquiMappingNotes="Use when the agent must reason about status progression or previous states."/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpStatus" patternLevelSeqId="04"
+            levelNumber="4"
+            levelTitle="Level 4 Status Pattern"
+            structureFocus="Full status lifecycle model"
+            moquiMappingNotes="Useful for advanced action guards and state-machine-like prompts."/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpStatus" patternLevelSeqId="05"
+            levelNumber="4"
+            levelTitle="Status Category Pattern"
+            structureFocus="Status grouped into categories"
+            moquiMappingNotes="Useful for broad policy checks such as open/closed/cancelled classes of state."/>
+
+    <moqui.agent.AgentUniversalPattern agentUniversalPatternId="AgUpContact"
+            chapterNumber="7"
+            chapterTitle="Contact Mechanisms: How to Get in Touch"
+            patternFamily="contact_mechanism"
+            coreQuestion="How to contact or locate"
+            bookConceptName="Contact Mechanism Pattern"
+            active="Y"
+            description="Volume 3 Chapter 7 covers contact mechanism modeling."
+            moquiRelevance="Maps to Moqui Party contact structures, addresses, telecoms, emails, facilities, and user-facing prompts that involve delivery, communication, and location data."/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpContact" patternLevelSeqId="01"
+            levelNumber="1"
+            levelTitle="Level 1 Contact Mechanism Pattern"
+            structureFocus="Simple contact mechanism"
+            moquiMappingNotes="Use for a single direct contact mechanism record."/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpContact" patternLevelSeqId="02"
+            levelNumber="2"
+            levelTitle="Level 2 Contact Mechanism Pattern"
+            structureFocus="Reusable contact record"
+            moquiMappingNotes="Useful for PartyContactMech and similar linking structures."/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpContact" patternLevelSeqId="03"
+            levelNumber="3"
+            levelTitle="Level 3 Contact Mechanism Pattern"
+            structureFocus="Contextualized contact mechanism"
+            moquiMappingNotes="Use when contact data has purpose, status, or lifecycle semantics."/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpContact" patternLevelSeqId="04"
+            levelNumber="4"
+            levelTitle="Level 4 Contact Mechanism Pattern"
+            structureFocus="Advanced contact model"
+            moquiMappingNotes="Use for flexible addressing and complex communication preferences."/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpContact" patternLevelSeqId="05"
+            levelNumber="4"
+            levelTitle="Contact Mechanism Pattern with Geographic Boundary"
+            structureFocus="Contact with geographic context"
+            moquiMappingNotes="Relevant for addresses, facilities, shipping, and geography-aware routing."/>
+
+    <moqui.agent.AgentUniversalPattern agentUniversalPatternId="AgUpRule"
+            chapterNumber="8"
+            chapterTitle="Business Rules: How Things Should Work"
+            patternFamily="business_rule"
+            coreQuestion="What rules govern behavior"
+            bookConceptName="Business Rule Pattern"
+            active="Y"
+            description="Volume 3 Chapter 8 covers business rules and how to model them explicitly."
+            moquiRelevance="Useful for guarded execution, action gating, status constraints, sequencing limits, allowed child structures, and policy-driven agent behavior."/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRule" patternLevelSeqId="01"
+            levelNumber="2"
+            levelTitle="Level 2 Business Rules Pattern"
+            structureFocus="Structured rule representation"
+            moquiMappingNotes="Use for explicit rule metadata instead of burying all policy in imperative code."/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRule" patternLevelSeqId="02"
+            levelNumber="3"
+            levelTitle="Level 3 Business Rules Pattern"
+            structureFocus="Advanced rule structure"
+            moquiMappingNotes="Useful when multiple entities, statuses, or role contexts affect execution."/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRule" patternLevelSeqId="03"
+            levelNumber="3"
+            levelTitle="Business Rules with Party Roles"
+            structureFocus="Rules constrained by party role participation"
+            moquiMappingNotes="Important when agent permissions or workflow steps depend on who is manager, assignee, customer, or owner."
+            mappedAggregatePatternId="AggrPartySpec"/>
+</entity-facade-xml>

@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<https://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-facade-3.xsd" type="seed-initial">
+
+    <!--
+        Pilot DataDocuments that move aggregate extraction knowledge into standard Moqui
+        DataDocument/DataFeed recipes. These are intentionally close to Mantle patterns so
+        the agent can search denormalized aggregate read models in OpenSearch without
+        relying on Python as the authoritative extraction layer.
+    -->
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="AgentProjectAggregate"
+            documentName="Agent Project Aggregate"
+            documentTitle="${name}"
+            primaryEntityName="mantle.work.effort.WorkEffort"
+            indexName="moqui_agent_work_aggregates_v1">
+        <fields fieldSeqId="01" fieldPath="workEffortId"/>
+        <fields fieldSeqId="02" fieldPath="workEffortName" fieldNameAlias="name"/>
+        <fields fieldSeqId="03" fieldPath="workEffortTypeEnumId"/>
+        <fields fieldSeqId="04" fieldPath="statusId"/>
+        <fields fieldSeqId="05" fieldPath="status:description" fieldNameAlias="status"/>
+        <fields fieldSeqId="06" fieldPath="type:description" fieldNameAlias="type"/>
+        <fields fieldSeqId="07" fieldPath="purposeEnumId"/>
+        <fields fieldSeqId="08" fieldPath="purpose:description" fieldNameAlias="purpose"/>
+        <fields fieldSeqId="09" fieldPath="priority"/>
+        <fields fieldSeqId="10" fieldPath="ownerPartyId"/>
+        <fields fieldSeqId="11" fieldPath="estimatedStartDate"/>
+        <fields fieldSeqId="12" fieldPath="estimatedCompletionDate"/>
+        <fields fieldSeqId="13" fieldPath="actualStartDate"/>
+        <fields fieldSeqId="14" fieldPath="actualCompletionDate"/>
+
+        <fields fieldSeqId="20" fieldPath="parties:partyId"/>
+        <fields fieldSeqId="21" fieldPath="parties:roleTypeId"/>
+        <fields fieldSeqId="22" fieldPath="parties:role:description" fieldNameAlias="role"/>
+        <fields fieldSeqId="23" fieldPath="parties:person:firstName"/>
+        <fields fieldSeqId="24" fieldPath="parties:person:lastName"/>
+        <fields fieldSeqId="25" fieldPath="parties:organization:organizationName"/>
+
+        <conditions conditionSeqId="01" fieldNameAlias="workEffortTypeEnumId" fieldValue="WetProject"/>
+    </moqui.entity.document.DataDocument>
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="AgentTaskAggregate"
+            documentName="Agent Task Aggregate"
+            documentTitle="${name}"
+            primaryEntityName="mantle.work.effort.WorkEffort"
+            indexName="moqui_agent_work_aggregates_v1">
+        <fields fieldSeqId="01" fieldPath="workEffortId"/>
+        <fields fieldSeqId="02" fieldPath="rootWorkEffortId" fieldNameAlias="project"/>
+        <fields fieldSeqId="03" fieldPath="parentWorkEffortId" fieldNameAlias="parent"/>
+        <fields fieldSeqId="04" fieldPath="workEffortName" fieldNameAlias="name"/>
+        <fields fieldSeqId="05" fieldPath="workEffortTypeEnumId"/>
+        <fields fieldSeqId="06" fieldPath="statusId"/>
+        <fields fieldSeqId="07" fieldPath="status:description" fieldNameAlias="status"/>
+        <fields fieldSeqId="08" fieldPath="type:description" fieldNameAlias="type"/>
+        <fields fieldSeqId="09" fieldPath="purposeEnumId"/>
+        <fields fieldSeqId="10" fieldPath="purpose:description" fieldNameAlias="purpose"/>
+        <fields fieldSeqId="11" fieldPath="priority"/>
+        <fields fieldSeqId="12" fieldPath="description"/>
+        <fields fieldSeqId="13" fieldPath="ownerPartyId"/>
+
+        <fields fieldSeqId="20" fieldPath="parties:partyId"/>
+        <fields fieldSeqId="21" fieldPath="parties:roleTypeId"/>
+        <fields fieldSeqId="22" fieldPath="parties:role:description" fieldNameAlias="role"/>
+        <fields fieldSeqId="23" fieldPath="parties:person:firstName"/>
+        <fields fieldSeqId="24" fieldPath="parties:person:lastName"/>
+        <fields fieldSeqId="25" fieldPath="parties:organization:organizationName"/>
+
+        <conditions conditionSeqId="01" fieldNameAlias="workEffortTypeEnumId" fieldValue="WetTask"/>
+    </moqui.entity.document.DataDocument>
+
+    <moqui.entity.feed.DataFeed
+            dataFeedId="AgentWorkAggregateFeed"
+            dataFeedTypeEnumId="DTFDTP_RT_PUSH"
+            indexOnStartEmpty="N"
+            feedName="Agent Work Aggregate Feed"
+            feedReceiveServiceName="org.moqui.search.SearchServices.index#DataDocuments"
+            feedDeleteServiceName="org.moqui.search.SearchServices.delete#DataDocument"/>
+
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentWorkAggregateFeed" dataDocumentId="AgentProjectAggregate"/>
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentWorkAggregateFeed" dataDocumentId="AgentTaskAggregate"/>
+
+</entity-facade-xml>

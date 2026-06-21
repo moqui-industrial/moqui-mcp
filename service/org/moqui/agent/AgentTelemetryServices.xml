@@ -1,0 +1,268 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- This software is in the public domain under CC0 1.0 Universal plus a 
+     Grant of Patent License.
+
+     To the extent possible under law, the author(s) have dedicated all
+     copyright and related and neighboring rights to this software to the
+     public domain worldwide. This software is distributed without any warranty.
+
+     You should have received a copy of the CC0 Public Domain Dedication
+     along with this software (see the LICENSE.md file). If not, see
+     <https://creativecommons.org/publicdomain/zero/1.0/>. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="count" noun="AgentToolExecutionBin" authenticate="true">
+        <in-parameters>
+            <parameter name="logDate" type="Timestamp"/>
+            <parameter name="toolName" required="true"/>
+            <parameter name="documentKind"/>
+            <parameter name="area"/>
+            <parameter name="subArea"/>
+            <parameter name="domainObject"/>
+            <parameter name="actionKind"/>
+            <parameter name="operationEffect"/>
+            <parameter name="executionChannel"/>
+            <parameter name="serviceName"/>
+            <parameter name="searchMode"/>
+            <parameter name="indexName"/>
+            <parameter name="riskLevelEnumId"/>
+            <parameter name="confirmed"/>
+            <parameter name="success"/>
+            <parameter name="resultStatus"/>
+            <parameter name="runningTimeMillis" type="BigDecimal"/>
+            <parameter name="rerankerFallbackUsed"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agentToolExecutionBinId"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import java.sql.Timestamp
+
+                Timestamp effectiveLogDate = logDate ?: ec.user.nowTimestamp
+                Calendar cal = ec.user.getCalendarSafe()
+                cal.setTimeInMillis(effectiveLogDate.time)
+                cal.set(Calendar.MINUTE, 0)
+                cal.set(Calendar.SECOND, 0)
+                cal.set(Calendar.MILLISECOND, 0)
+                Timestamp binStartDateTime = new Timestamp(cal.timeInMillis)
+                cal.add(Calendar.HOUR_OF_DAY, 1)
+                Timestamp binEndDateTime = new Timestamp(cal.timeInMillis)
+
+                Closure<String> norm = { Object value ->
+                    String text = value != null ? value.toString().trim() : ''
+                    return text ? text : '_'
+                }
+                String binKey = [
+                        norm(toolName), norm(documentKind), norm(area), norm(subArea),
+                        norm(domainObject), norm(actionKind), norm(operationEffect),
+                        norm(executionChannel), norm(serviceName), norm(searchMode), norm(indexName)
+                ].join('|')
+
+                def binValue = ec.entity.find('moqui.agent.AgentToolExecutionBin')
+                        .condition('binStartDateTime', binStartDateTime)
+                        .condition('binKey', binKey)
+                        .forUpdate(true)
+                        .one()
+                boolean exists = binValue != null
+                if (binValue) binValue = binValue.cloneValue()
+                if (!binValue) {
+                    binValue = ec.entity.makeValue('moqui.agent.AgentToolExecutionBin')
+                    binValue.setSequencedIdPrimary()
+                    agentToolExecutionBinId = binValue.agentToolExecutionBinId
+                    binValue.binKey = binKey
+                    binValue.binStartDateTime = binStartDateTime
+                    binValue.binEndDateTime = binEndDateTime
+                    binValue.toolName = toolName
+                    binValue.documentKind = documentKind
+                    binValue.area = area
+                    binValue.subArea = subArea
+                    binValue.domainObject = domainObject
+                    binValue.actionKind = actionKind
+                    binValue.operationEffect = operationEffect
+                    binValue.executionChannel = executionChannel
+                    binValue.serviceName = serviceName
+                    binValue.searchMode = searchMode
+                    binValue.indexName = indexName
+                    binValue.executionCount = 0
+                    binValue.successCount = 0
+                    binValue.errorCount = 0
+                    binValue.deniedCount = 0
+                    binValue.confirmationRequiredCount = 0
+                    binValue.hybridLlmRerankCount = 0
+                    binValue.rerankerFallbackCount = 0
+                    binValue.totalTimeMillis = 0
+                    binValue.totalSquaredTime = 0
+                } else {
+                    agentToolExecutionBinId = binValue.agentToolExecutionBinId
+                }
+
+                BigDecimal rt = (runningTimeMillis ?: 0) as BigDecimal
+                binValue.executionCount = (binValue.executionCount ?: 0) + 1
+                if (Boolean.TRUE.equals(success) || success == 'Y') {
+                    binValue.successCount = (binValue.successCount ?: 0) + 1
+                } else {
+                    binValue.errorCount = (binValue.errorCount ?: 0) + 1
+                }
+                if ((resultStatus ?: '') == 'denied') binValue.deniedCount = (binValue.deniedCount ?: 0) + 1
+                if ((confirmed == 'N' || Boolean.FALSE.equals(confirmed)) && riskLevelEnumId) {
+                    binValue.confirmationRequiredCount = (binValue.confirmationRequiredCount ?: 0) + 1
+                }
+                if ((searchMode ?: '') == 'hybrid_llm_rerank') {
+                    binValue.hybridLlmRerankCount = (binValue.hybridLlmRerankCount ?: 0) + 1
+                }
+                if (rerankerFallbackUsed == 'Y' || Boolean.TRUE.equals(rerankerFallbackUsed)) {
+                    binValue.rerankerFallbackCount = (binValue.rerankerFallbackCount ?: 0) + 1
+                }
+
+                binValue.totalTimeMillis = (binValue.totalTimeMillis ?: 0) + rt
+                binValue.totalSquaredTime = (binValue.totalSquaredTime ?: 0) + (rt * rt)
+                if (binValue.minTimeMillis == null || rt < (binValue.minTimeMillis as BigDecimal)) binValue.minTimeMillis = rt
+                if (binValue.maxTimeMillis == null || rt > (binValue.maxTimeMillis as BigDecimal)) binValue.maxTimeMillis = rt
+                binValue.lastLogDate = effectiveLogDate
+
+                if (exists) binValue.update() else binValue.create()
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="create" noun="AgentToolExecutionElasticLog" authenticate="true">
+        <in-parameters>
+            <parameter name="agentToolExecutionLogId"/>
+            <parameter name="logDate" type="Timestamp"/>
+            <parameter name="userId"/>
+            <parameter name="visitId"/>
+            <parameter name="mcpSessionId"/>
+            <parameter name="moquiTxId"/>
+            <parameter name="toolName" required="true"/>
+            <parameter name="documentId"/>
+            <parameter name="documentKind"/>
+            <parameter name="area"/>
+            <parameter name="subArea"/>
+            <parameter name="domainObject"/>
+            <parameter name="actionKind"/>
+            <parameter name="operationEffect"/>
+            <parameter name="executionChannel"/>
+            <parameter name="artifactTypeEnumId"/>
+            <parameter name="artifactName"/>
+            <parameter name="serviceName"/>
+            <parameter name="riskLevelEnumId"/>
+            <parameter name="confirmed" type="Boolean"/>
+            <parameter name="success" type="Boolean"/>
+            <parameter name="errorType"/>
+            <parameter name="errorMessage"/>
+            <parameter name="runningTimeMillis" type="BigDecimal"/>
+            <parameter name="resultStatus"/>
+            <parameter name="parameterSummary"/>
+            <parameter name="resultSummary"/>
+            <parameter name="searchMode"/>
+            <parameter name="resultCount" type="Integer"/>
+            <parameter name="topDocumentId"/>
+            <parameter name="topScore" type="BigDecimal"/>
+            <parameter name="indexName"/>
+            <parameter name="indexRunId"/>
+            <parameter name="rerankerProvider"/>
+            <parameter name="rerankerModel"/>
+            <parameter name="rerankerMode"/>
+            <parameter name="rerankerCandidateCount" type="Integer"/>
+            <parameter name="rerankerSelectedDocumentId"/>
+            <parameter name="rerankerReasonCode"/>
+            <parameter name="rerankerConfidence" type="BigDecimal"/>
+            <parameter name="rerankerLatencyMillis" type="BigDecimal"/>
+            <parameter name="rerankerFallbackUsed"/>
+            <parameter name="llmMathModelId"/>
+            <parameter name="embeddingMathModelId"/>
+            <parameter name="rerankerMathModelId"/>
+            <parameter name="mathModelRunId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agentToolExecutionElasticLogId"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                def logValue = ec.entity.makeValue('moqui.agent.AgentToolExecutionElasticLog')
+                logValue.setSequencedIdPrimary()
+                agentToolExecutionElasticLogId = logValue.getPrimaryKeys().values().first()
+                logValue.setAll([
+                        agentToolExecutionElasticLogId : agentToolExecutionElasticLogId,
+                        agentToolExecutionLogId : agentToolExecutionLogId,
+                        logDate : logDate ?: ec.user.nowTimestamp,
+                        userId : userId ?: ec.user.userId,
+                        visitId : visitId ?: ec.user.visitId,
+                        mcpSessionId : mcpSessionId ?: visitId ?: ec.user.visitId,
+                        moquiTxId : moquiTxId,
+                        toolName : toolName,
+                        documentId : documentId,
+                        documentKind : documentKind,
+                        area : area,
+                        subArea : subArea,
+                        domainObject : domainObject,
+                        actionKind : actionKind,
+                        operationEffect : operationEffect,
+                        executionChannel : executionChannel,
+                        artifactTypeEnumId : artifactTypeEnumId,
+                        artifactName : artifactName,
+                        serviceName : serviceName,
+                        riskLevelEnumId : riskLevelEnumId,
+                        confirmed : Boolean.TRUE.equals(confirmed) ? 'Y' : 'N',
+                        success : Boolean.TRUE.equals(success) ? 'Y' : 'N',
+                        errorType : errorType,
+                        errorMessage : errorMessage,
+                        runningTimeMillis : runningTimeMillis,
+                        resultStatus : resultStatus,
+                        parameterSummary : parameterSummary,
+                        resultSummary : resultSummary,
+                        searchMode : searchMode,
+                        resultCount : resultCount,
+                        topDocumentId : topDocumentId,
+                        topScore : topScore,
+                        indexName : indexName,
+                        indexRunId : indexRunId,
+                        rerankerProvider : rerankerProvider,
+                        rerankerModel : rerankerModel,
+                        rerankerMode : rerankerMode,
+                        rerankerCandidateCount : rerankerCandidateCount,
+                        rerankerSelectedDocumentId : rerankerSelectedDocumentId,
+                        rerankerReasonCode : rerankerReasonCode,
+                        rerankerConfidence : rerankerConfidence,
+                        rerankerLatencyMillis : rerankerLatencyMillis,
+                        rerankerFallbackUsed : rerankerFallbackUsed,
+                        llmMathModelId : llmMathModelId,
+                        embeddingMathModelId : embeddingMathModelId,
+                        rerankerMathModelId : rerankerMathModelId,
+                        mathModelRunId : mathModelRunId
+                ])
+                logValue.create()
+
+                try {
+                    ec.service.sync().name('org.moqui.agent.AgentTelemetryServices.count#AgentToolExecutionBin')
+                            .disableAuthz()
+                            .parameters([
+                                logDate : logDate ?: ec.user.nowTimestamp,
+                                toolName : toolName,
+                                documentKind : documentKind,
+                                area : area,
+                                subArea : subArea,
+                                domainObject : domainObject,
+                                actionKind : actionKind,
+                                operationEffect : operationEffect,
+                                executionChannel : executionChannel,
+                                serviceName : serviceName,
+                                searchMode : searchMode,
+                                indexName : indexName,
+                                riskLevelEnumId : riskLevelEnumId,
+                                confirmed : confirmed,
+                                success : success,
+                                resultStatus : resultStatus,
+                                runningTimeMillis : runningTimeMillis,
+                                rerankerFallbackUsed : rerankerFallbackUsed
+                            ]).call()
+                } catch (Throwable t) {
+                    ec.logger.warn("Unable to update AgentToolExecutionBin for ${toolName}: ${t.message}")
+                }
+            ]]></script>
+        </actions>
+    </service>
+
+</services>

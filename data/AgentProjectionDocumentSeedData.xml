@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- This software is in the public domain under CC0 1.0 Universal plus a
+     Grant of Patent License.
+
+     To the extent possible under law, the author(s) have dedicated all
+     copyright and related and neighboring rights to this software to the
+     public domain worldwide. This software is distributed without any warranty.
+
+     You should have received a copy of the CC0 Public Domain Dedication
+     along with this software (see the LICENSE.md file). If not, see
+     <https://creativecommons.org/publicdomain/zero/1.0/>. -->
+<entity-facade-xml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-facade-3.xsd" type="seed-initial">
+
+    <!-- Draft DataDocument definitions for future DataDocument/DataFeed-based projection.
+         These are intentionally manual documents and are not wired into active feeds yet. -->
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="AgentArtifactDocument"
+            documentName="Agent Artifact Projection Document"
+            documentTitle="${canonicalPrompt ?: documentId}"
+            indexName="moqui_agent_documents_v2"
+            manualDataServiceName="org.moqui.agent.AgentDocumentServices.add#AgentProjectionManualDocumentData"
+            manualMappingServiceName="org.moqui.agent.AgentDocumentServices.transform#AgentProjectionDocumentMapping"/>
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="AgentGraphVertexDocument"
+            documentName="Agent Artifact Graph Vertex Document"
+            documentTitle="${label ?: vertexId}"
+            indexName="moqui_agent_graph_vertices_v1"
+            manualDataServiceName="org.moqui.agent.AgentDocumentServices.add#AgentProjectionManualDocumentData"
+            manualMappingServiceName="org.moqui.agent.AgentDocumentServices.transform#AgentProjectionDocumentMapping"/>
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="AgentGraphEdgeDocument"
+            documentName="Agent Artifact Graph Edge Document"
+            documentTitle="${label ?: edgeId}"
+            indexName="moqui_agent_graph_edges_v1"
+            manualDataServiceName="org.moqui.agent.AgentDocumentServices.add#AgentProjectionManualDocumentData"
+            manualMappingServiceName="org.moqui.agent.AgentDocumentServices.transform#AgentProjectionDocumentMapping"/>
+
+</entity-facade-xml>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Test user for smoke-testing MCP_RUNTIME tool separation. NOT for production. -->
+<entity-facade-xml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-facade-3.xsd" type="demo">
+    <moqui.security.UserGroupMember userGroupId="MCP_RUNTIME" userId="100000" fromDate="2026-01-01 00:00:00"/>
+</entity-facade-xml>

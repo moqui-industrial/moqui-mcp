@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<https://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+
+    <!--
+        Keep GraphVertex/GraphEdge generic and attach artifact semantics through Parameter.
+        The graph stores topology; Parameter stores flexible metadata keyed by ParameterDef.
+    -->
+    <extend-entity entity-name="Parameter" package="moqui.math" enable-audit-log="update" use="configuration" cache="true" short-alias="parameters">
+        <field name="graphId" type="id"/>
+        <field name="graphVertexId" type="id"/>
+        <field name="graphEdgeId" type="id"/>
+        <field name="textValue" type="text-long"/>
+
+        <relationship type="one" related="moqui.math.Graph" short-alias="graph"/>
+        <relationship type="one" related="moqui.math.GraphVertex" short-alias="graphVertex">
+            <key-map field-name="graphVertexId" related="graphVertexId"/>
+        </relationship>
+        <relationship type="one" related="moqui.math.GraphEdge" short-alias="graphEdge">
+            <key-map field-name="graphEdgeId" related="graphEdgeId"/>
+        </relationship>
+    </extend-entity>
+
+    <extend-entity entity-name="GraphVertex" package="moqui.math">
+        <relationship type="many" title="OutgoingEdge" related="moqui.math.GraphEdge" short-alias="outgoingEdges">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId" related="fromVertexId"/>
+        </relationship>
+        <relationship type="many" title="IncomingEdge" related="moqui.math.GraphEdge" short-alias="incomingEdges">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId" related="toVertexId"/>
+        </relationship>
+        <relationship type="many" title="GraphParameter" related="moqui.math.Parameter" short-alias="parameters">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+        </relationship>
+    </extend-entity>
+
+    <extend-entity entity-name="GraphEdge" package="moqui.math">
+        <relationship type="many" title="GraphParameter" related="moqui.math.Parameter" short-alias="parameters">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphEdgeId"/>
+        </relationship>
+    </extend-entity>
+
+    <view-entity entity-name="AgentArtifactVertexMeta" package="moqui.agent.graph">
+        <member-entity entity-alias="GV" entity-name="moqui.math.GraphVertex"/>
+        <member-entity entity-alias="PVT" entity-name="moqui.math.Parameter" join-from-alias="GV" join-optional="true">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+            <entity-condition><econdition entity-alias="PVT" field-name="parameterDefId" value="AgGraphVertexTypeParam"/></entity-condition>
+        </member-entity>
+        <member-entity entity-alias="PSVID" entity-name="moqui.math.Parameter" join-from-alias="GV" join-optional="true">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+            <entity-condition><econdition entity-alias="PSVID" field-name="parameterDefId" value="AgGraphSourceVertexIdParam"/></entity-condition>
+        </member-entity>
+        <member-entity entity-alias="PSA" entity-name="moqui.math.Parameter" join-from-alias="GV" join-optional="true">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+            <entity-condition><econdition entity-alias="PSA" field-name="parameterDefId" value="AgGraphSourceArtifactUriParam"/></entity-condition>
+        </member-entity>
+        <member-entity entity-alias="PAK" entity-name="moqui.math.Parameter" join-from-alias="GV" join-optional="true">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+            <entity-condition><econdition entity-alias="PAK" field-name="parameterDefId" value="AgGraphArtifactKindParam"/></entity-condition>
+        </member-entity>
+        <member-entity entity-alias="PSP" entity-name="moqui.math.Parameter" join-from-alias="GV" join-optional="true">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+            <entity-condition><econdition entity-alias="PSP" field-name="parameterDefId" value="AgGraphScreenPathParam"/></entity-condition>
+        </member-entity>
+        <member-entity entity-alias="PSN" entity-name="moqui.math.Parameter" join-from-alias="GV" join-optional="true">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+            <entity-condition><econdition entity-alias="PSN" field-name="parameterDefId" value="AgGraphServiceNameParam"/></entity-condition>
+        </member-entity>
+        <member-entity entity-alias="PSV" entity-name="moqui.math.Parameter" join-from-alias="GV" join-optional="true">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+            <entity-condition><econdition entity-alias="PSV" field-name="parameterDefId" value="AgGraphServiceVerbParam"/></entity-condition>
+        </member-entity>
+        <member-entity entity-alias="PSU" entity-name="moqui.math.Parameter" join-from-alias="GV" join-optional="true">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+            <entity-condition><econdition entity-alias="PSU" field-name="parameterDefId" value="AgGraphServiceNounParam"/></entity-condition>
+        </member-entity>
+        <member-entity entity-alias="PEN" entity-name="moqui.math.Parameter" join-from-alias="GV" join-optional="true">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+            <entity-condition><econdition entity-alias="PEN" field-name="parameterDefId" value="AgGraphEntityNameParam"/></entity-condition>
+        </member-entity>
+        <member-entity entity-alias="PFN" entity-name="moqui.math.Parameter" join-from-alias="GV" join-optional="true">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+            <entity-condition><econdition entity-alias="PFN" field-name="parameterDefId" value="AgGraphFieldNameParam"/></entity-condition>
+        </member-entity>
+        <member-entity entity-alias="PDT" entity-name="moqui.math.Parameter" join-from-alias="GV" join-optional="true">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+            <entity-condition><econdition entity-alias="PDT" field-name="parameterDefId" value="AgGraphDocumentTypeParam"/></entity-condition>
+        </member-entity>
+        <member-entity entity-alias="PXA" entity-name="moqui.math.Parameter" join-from-alias="GV" join-optional="true">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+            <entity-condition><econdition entity-alias="PXA" field-name="parameterDefId" value="AgGraphXmlActionElementParam"/></entity-condition>
+        </member-entity>
+        <member-entity entity-alias="PDO" entity-name="moqui.math.Parameter" join-from-alias="GV" join-optional="true">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+            <entity-condition><econdition entity-alias="PDO" field-name="parameterDefId" value="AgGraphDomainObjectParam"/></entity-condition>
+        </member-entity>
+        <member-entity entity-alias="PSB" entity-name="moqui.math.Parameter" join-from-alias="GV" join-optional="true">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+            <entity-condition><econdition entity-alias="PSB" field-name="parameterDefId" value="AgGraphSubjectParam"/></entity-condition>
+        </member-entity>
+        <member-entity entity-alias="POP" entity-name="moqui.math.Parameter" join-from-alias="GV" join-optional="true">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+            <entity-condition><econdition entity-alias="POP" field-name="parameterDefId" value="AgGraphOperationParam"/></entity-condition>
+        </member-entity>
+        <member-entity entity-alias="PCS" entity-name="moqui.math.Parameter" join-from-alias="GV" join-optional="true">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+            <entity-condition><econdition entity-alias="PCS" field-name="parameterDefId" value="AgGraphCalledServiceParam"/></entity-condition>
+        </member-entity>
+        <member-entity entity-alias="PPR" entity-name="moqui.math.Parameter" join-from-alias="GV" join-optional="true">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+            <entity-condition><econdition entity-alias="PPR" field-name="parameterDefId" value="AgGraphParameterRoleParam"/></entity-condition>
+        </member-entity>
+
+        <alias entity-alias="GV" name="graphId"/>
+        <alias entity-alias="GV" name="graphVertexId"/>
+        <alias entity-alias="GV" name="label"/>
+        <alias entity-alias="GV" name="lastUpdatedStamp"/>
+        <alias entity-alias="PVT" name="vertexType" field="textValue"/>
+        <alias entity-alias="PSVID" name="sourceVertexId" field="textValue"/>
+        <alias entity-alias="PSA" name="sourceArtifactUri" field="textValue"/>
+        <alias entity-alias="PAK" name="artifactKind" field="textValue"/>
+        <alias entity-alias="PSP" name="screenPath" field="textValue"/>
+        <alias entity-alias="PSN" name="serviceName" field="textValue"/>
+        <alias entity-alias="PSV" name="serviceVerb" field="textValue"/>
+        <alias entity-alias="PSU" name="serviceNoun" field="textValue"/>
+        <alias entity-alias="PEN" name="entityName" field="textValue"/>
+        <alias entity-alias="PFN" name="fieldName" field="textValue"/>
+        <alias entity-alias="PDT" name="documentType" field="textValue"/>
+        <alias entity-alias="PXA" name="xmlActionElement" field="textValue"/>
+        <alias entity-alias="PDO" name="domainObject" field="textValue"/>
+        <alias entity-alias="PSB" name="subject" field="textValue"/>
+        <alias entity-alias="POP" name="operation" field="textValue"/>
+        <alias entity-alias="PCS" name="calledService" field="textValue"/>
+        <alias entity-alias="PPR" name="parameterRole" field="textValue"/>
+    </view-entity>
+
+</entities>

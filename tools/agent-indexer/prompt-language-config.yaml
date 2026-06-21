@@ -1,0 +1,130 @@
+# Prompt language configuration for the agent-indexer.
+# Externalized from generate_screen_prompt_catalog.py so translations can be
+# updated without touching Python code.
+#
+# Format:
+#   verb_synonyms.<locale>.<canonical_verb>: [synonym, ...]
+#   domain_translations.<locale>.<english_term>: translated_term
+#
+# To add a new language (e.g. German "de"):
+#   1. Add a verb_synonyms.de block mirroring verb_synonyms.en
+#   2. Add a domain_translations.de block mirroring domain_translations.en
+#   3. Re-run the catalog generator
+
+verb_synonyms:
+  en:
+    approve: [approve, confirm, authorize]
+    cancel: [cancel, void]
+    create: [create, add, new]
+    update: [update, edit, modify]
+    find: [find, search, lookup]
+    print: [print, export, download]
+    validate: [validate, check, verify]
+    receive: [receive, receipt]
+    ship: [ship, send]
+
+  it:
+    approve: [approva, conferma, autorizza]
+    cancel: [annulla, cancella]
+    create: [crea, aggiungi, nuovo]
+    update: [aggiorna, modifica]
+    find: [trova, cerca]
+    print: [stampa, esporta, scarica]
+    validate: [valida, verifica, controlla]
+    receive: [ricevi]
+    ship: [spedisci, invia]
+
+domain_translations:
+  it:
+    order: ordine
+    order part: parte ordine
+    order item: riga ordine
+    item: riga
+    product: prodotto
+    customer: cliente
+    supplier: fornitore
+    party: anagrafica
+    invoice: fattura
+    shipment: spedizione
+    payment: pagamento
+    deposit: acconto
+    return: reso
+    address: indirizzo
+    shipping address: indirizzo di spedizione
+    detail: dettaglio
+
+# Italian language detection patterns (used to classify variants as IT vs EN).
+# These are regex word-boundary patterns applied to candidate variant strings.
+it_marker_words:
+  - ordine
+  - riga
+  - prodotto
+  - cliente
+  - pagamento
+  - spedizione
+  - reso
+  - indirizzo
+  - fornitore
+  - anagrafica
+  - fattura
+
+en_marker_words:
+  - order
+  - item
+  - product
+  - customer
+  - payment
+  - shipment
+  - return
+  - address
+
+# Italian verb markers (used to classify ambiguous variants as IT)
+it_verb_markers:
+  - approva
+  - conferma
+  - autorizza
+  - annulla
+  - cancella
+  - crea
+  - aggiungi
+  - aggiorna
+  - modifica
+  - trova
+  - cerca
+  - stampa
+  - esporta
+  - scarica
+  - valida
+  - verifica
+  - controlla
+  - ricevi
+  - spedisci
+  - invia
+
+# English verb markers (used to classify ambiguous variants as EN)
+en_verb_markers:
+  - approve
+  - confirm
+  - authorize
+  - cancel
+  - create
+  - update
+  - find
+  - search
+  - lookup
+  - print
+  - export
+  - download
+  - validate
+  - check
+  - verify
+  - receive
+  - ship
+  - send
+
+# Special-case variant overrides: per canonical English prompt → extra IT variants.
+# Use this for phrases the algorithmic translation gets wrong.
+# Format: canonical_prompt: {locale: [extra variant, ...]}
+manual_overrides: {}
+#  "create order":
+#    it: ["crea un ordine di vendita", "nuovo ordine cliente"]

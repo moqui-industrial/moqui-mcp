@@ -1,0 +1,129 @@
+{
+  "settings": {
+    "index": {
+      "knn": true,
+      "knn.algo_param.ef_search": 128,
+      "number_of_shards": 1,
+      "number_of_replicas": 0
+    }
+  },
+  "mappings": {
+    "properties": {
+      "documentId": { "type": "keyword" },
+      "documentKind": { "type": "keyword" },
+      "sourceKind": { "type": "keyword" },
+      "businessValidity": { "type": "keyword" },
+      "knowledgeCategory": { "type": "keyword" },
+      "area": { "type": "keyword" },
+      "subArea": { "type": "keyword" },
+      "domainObject": { "type": "keyword" },
+      "component": { "type": "keyword" },
+      "sourceFile": { "type": "keyword" },
+      "promptGroupId": { "type": "keyword" },
+      "actionKind": { "type": "keyword" },
+      "operationEffect": { "type": "keyword" },
+      "executionChannel": { "type": "keyword" },
+      "runtimeExecutable": { "type": "boolean" },
+      "knowledgeOnly": { "type": "boolean" },
+      "verifiedByTest": { "type": "boolean" },
+      "abstractPattern": { "type": "boolean" },
+      "preferredService": { "type": "keyword" },
+      "boundServices": { "type": "keyword" },
+      "supportServices": { "type": "keyword" },
+      "directEntities": { "type": "keyword" },
+      "contextEntities": { "type": "keyword" },
+      "executionRequiredContext": { "type": "keyword" },
+      "sourceScreenPath": { "type": "keyword" },
+      "relatedEntities": { "type": "keyword" },
+      "serviceSequence": { "type": "keyword" },
+      "requiredEntities": { "type": "keyword" },
+      "optionalEntities": { "type": "keyword" },
+      "relatedAgentPrompts": { "type": "keyword" },
+      "sourceExamples": { "type": "keyword" },
+      "artifactVersionHash": { "type": "keyword" },
+      "allowedIntentVerbs": { "type": "keyword" },
+      "excludedIntentVerbs": { "type": "keyword" },
+      "fieldNames": { "type": "keyword" },
+      "scenarioName": {
+        "type": "text",
+        "fields": {
+          "keyword": { "type": "keyword", "ignore_above": 256 }
+        }
+      },
+      "workflowName": {
+        "type": "text",
+        "fields": {
+          "keyword": { "type": "keyword", "ignore_above": 256 }
+        }
+      },
+      "patternName": {
+        "type": "text",
+        "fields": {
+          "keyword": { "type": "keyword", "ignore_above": 256 }
+        }
+      },
+      "canonicalPrompt": { "type": "text" },
+      "englishPromptVariants": { "type": "text" },
+      "italianPromptVariants": { "type": "text" },
+      "machineVariants": { "type": "text" },
+      "uiLabels": { "type": "text" },
+      "nearbyLabels": { "type": "text" },
+      "businessQuestions": { "type": "text" },
+      "processHints": { "type": "text" },
+      "embeddingText": { "type": "text" },
+      "humanExplanation": { "type": "text" },
+      "embedding": {
+        "type": "knn_vector",
+        "dimension": 3072,
+        "method": {
+          "name": "hnsw",
+          "engine": "lucene",
+          "space_type": "cosinesimil"
+        }
+      },
+      "sourceArtifacts": {
+        "type": "nested",
+        "properties": {
+          "artifactTypeEnumId": { "type": "keyword" },
+          "artifactName": { "type": "keyword" },
+          "authzActionEnumId": { "type": "keyword" }
+        }
+      },
+      "executableArtifacts": {
+        "type": "nested",
+        "properties": {
+          "executionChannel": { "type": "keyword" },
+          "artifactTypeEnumId": { "type": "keyword" },
+          "artifactName": { "type": "keyword" },
+          "authzActionEnumId": { "type": "keyword" }
+        }
+      },
+      "preferredServiceRules": {
+        "type": "nested",
+        "properties": {
+          "intent": { "type": "text" },
+          "preferredService": { "type": "keyword" },
+          "avoidWhenPossible": { "type": "keyword" },
+          "reason": { "type": "text" }
+        }
+      },
+      "uiActions": {
+        "type": "nested",
+        "properties": {
+          "label": { "type": "text" },
+          "transitionName": { "type": "keyword" },
+          "screenPath": { "type": "keyword" },
+          "preferredService": { "type": "keyword" }
+        }
+      },
+      "ecaSummaries": {
+        "type": "nested",
+        "properties": {
+          "trigger": { "type": "text" },
+          "calledService": { "type": "keyword" },
+          "summary": { "type": "text" }
+        }
+      }
+    }
+  }
+}

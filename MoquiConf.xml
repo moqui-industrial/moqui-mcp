@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- This software is in the public domain under CC0 1.0 Universal plus a 
+     Grant of Patent License.
+
+     To the extent possible under law, the author(s) have dedicated all
+     copyright and related and neighboring rights to this software to the
+     public domain worldwide. This software is distributed without any warranty.
+
+     You should have received a copy of the CC0 Public Domain Dedication
+     along with this software (see the LICENSE.md file). If not, see
+     <https://creativecommons.org/publicdomain/zero/1.0/>. -->
+
+<moqui-conf xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/moqui-conf-3.xsd">
+
+    <!--
+        Local validation defaults for moqui-mcp retrieval.
+        The OpenAI API keys are intentionally NOT stored here.
+        It is resolved at runtime from:
+        -Dmoqui.agent.embedding.apiKey
+        -Dmoqui.agent.reranker.apiKey
+        or the OPENAI_API_KEY environment variable.
+    -->
+    <default-property name="moqui.agent.embedding.provider" value="openai"/>
+    <default-property name="moqui.agent.embedding.model" value="text-embedding-3-large"/>
+    <default-property name="moqui.agent.embedding.dimensions" value="3072"/>
+    <default-property name="moqui.agent.embedding.cacheQueryText" value="false"/>
+    <default-property name="moqui.agent.chat.provider" value="openai_compatible"/>
+    <default-property name="moqui.agent.chat.model" value=""/>
+    <default-property name="moqui.agent.searchEngine" value="opensearch"/>
+    <default-property name="moqui.agent.search.mode" value="hybrid"/>
+    <default-property name="moqui.agent.search.debug" value="false"/>
+    <default-property name="moqui.agent.prompt.indexName" value="moqui_agent_prompts_v1"/>
+    <default-property name="moqui.agent.rag.indexName" value="moqui_artifacts_v1"/>
+    <default-property name="moqui.agent.index.batchSize" value="250"/>
+    <default-property name="moqui.agent.reranker.provider" value="none"/>
+    <default-property name="moqui.agent.reranker.model" value="gpt-5"/>
+    <default-property name="moqui.agent.reranker.maxCandidates" value="8"/>
+    <default-property name="moqui.agent.reranker.timeoutMs" value="30000"/>
+    <default-property name="moqui.agent.reranker.temperature" value="0"/>
+    <default-property name="moqui.agent.reranker.maxOutputTokens" value="1200"/>
+    <default-property name="moqui.agent.reranker.failOpen" value="true"/>
+    <!-- LLM rerank cache (used only when hybrid_llm_rerank is active and provider != none) -->
+    <default-property name="moqui.agent.reranker.cache.enabled" value="true"/>
+    <default-property name="moqui.agent.reranker.cache.name" value="moqui.agent.reranker.result"/>
+    <default-property name="moqui.agent.reranker.cache.ttlSeconds" value="86400"/>
+    <default-property name="moqui.agent.reranker.promptVersion" value="2026-05-llm-rerank-v1"/>
+    <default-property name="moqui.agent.openai.maxAttempts" value="2"/>
+    <default-property name="moqui.agent.openai.retryBackoffMs" value="750"/>
+    <!-- openai_compatible reranker (LiteLLM, vLLM, Ollama /v1, LocalAI, etc.) -->
+    <default-property name="moqui.agent.reranker.compat.baseUrl" value=""/>
+    <default-property name="moqui.agent.reranker.compat.apiKey" value=""/>
+    <default-property name="moqui.agent.reranker.compat.apiKeyEnv" value="OPENAI_COMPATIBLE_API_KEY"/>
+    <!-- openai_compatible embedding (separate endpoint/key from reranker compat) -->
+    <default-property name="moqui.agent.embedding.compat.baseUrl" value=""/>
+    <default-property name="moqui.agent.embedding.compat.apiKey" value=""/>
+    <default-property name="moqui.agent.embedding.compat.apiKeyEnv" value="OPENAI_COMPATIBLE_API_KEY"/>
+    <default-property name="moqui.agent.embedding.compat.includeDimensions" value="true"/>
+    <default-property name="moqui.agent.provider.openai_compatible.supportsChat" value="true"/>
+    <default-property name="moqui.agent.provider.openai_compatible.supportsJson" value="true"/>
+    <default-property name="moqui.agent.provider.openai_compatible.supportsEmbeddings" value="true"/>
+    <default-property name="moqui.agent.provider.openai_compatible.supportsToolCalling" value="false"/>
+    <default-property name="moqui.agent.provider.openai_compatible.supportsProviderManagedContext" value="false"/>
+    <default-property name="moqui.agent.elasticTelemetry.enabled" value="false"/>
+    <default-property name="moqui.agent.elasticTelemetry.bestEffort" value="true"/>
+    <default-property name="moqui.agent.elasticTelemetry.includeParameters" value="false"/>
+    <default-property name="moqui.agent.elasticTelemetry.includeResults" value="false"/>
+    <default-property name="moqui.agent.elasticTelemetry.maxSummaryLength" value="2000"/>
+    <default-property name="moqui.agent.find.maxLimit" value="100"/>
+    <default-property name="moqui.agent.log.parameters" value="masked"/>
+    <default-property name="moqui.agent.log.results" value="summary"/>
+
+    <!-- LibreChat Proxy Servlet settings (same pattern as kibana_host/kibana_port in MoquiDefaultConf.xml) -->
+    <default-property name="librechat_host" value="127.0.0.1"/>
+    <default-property name="librechat_port" value="3080"/>
+
+    <cache-list>
+        <cache name="agent.query.embedding.l1" key-type="String" value-type="java.util.ArrayList"
+               type="local" expire-time-idle="3600" max-elements="1000"/>
+        <cache name="agent.search.index.exists" key-type="String" value-type="java.lang.Boolean"
+               type="local" expire-time-idle="300" max-elements="200"/>
+        <!-- LLM rerank result cache; TTL is managed manually in the value wrapper -->
+        <cache name="moqui.agent.reranker.result" key-type="String" value-type="java.util.Map"
+               type="local" max-elements="2000"/>
+    </cache-list>
+
+    <webapp-list>
+        <webapp name="webroot">
+            <filter name="McpAuthFilter" class="org.moqui.impl.webapp.MoquiAuthFilter" async-supported="true">
+                <url-pattern>/mcp/*</url-pattern>
+            </filter>
+            <!-- LibreChat auth filter and proxy servlet, same pattern as Kibana in MoquiDefaultConf.xml -->
+            <filter name="LibreChatAuthFilter" class="org.moqui.impl.webapp.MoquiAuthFilter" async-supported="true">
+                <init-param name="permission" value="LibreChatRemote"/>
+                <url-pattern>/librechat/*</url-pattern>
+                <url-pattern>/assets/*</url-pattern>
+                <url-pattern>/images/*</url-pattern>
+                <url-pattern>/api/*</url-pattern>
+                <url-pattern>/auth/*</url-pattern>
+                <url-pattern>/oauth/*</url-pattern>
+                <url-pattern>/c/*</url-pattern>
+                <url-pattern>/sw.js</url-pattern>
+                <url-pattern>/manifest.webmanifest</url-pattern>
+                <url-pattern>/registerSW.js</url-pattern>
+            </filter>
+            <servlet name="LibreChatProxy" class="org.eclipse.jetty.ee11.proxy.ProxyServlet$Transparent" load-on-startup="1" async-supported="true">
+                <!-- in librechat env set APP_BASE_PATH=/librechat or equivalent to match path prefix -->
+                <init-param name="proxyTo" value="http://${librechat_host}:${librechat_port}"/>
+                <init-param name="prefix" value="/librechat"/>
+                <url-pattern>/librechat/*</url-pattern>
+            </servlet>
+            <servlet name="LibreChatAssetsProxy" class="org.eclipse.jetty.ee11.proxy.ProxyServlet$Transparent" load-on-startup="1" async-supported="true">
+                <init-param name="proxyTo" value="http://${librechat_host}:${librechat_port}/assets"/>
+                <init-param name="prefix" value="/assets"/>
+                <url-pattern>/assets/*</url-pattern>
+            </servlet>
+            <servlet name="LibreChatImagesProxy" class="org.eclipse.jetty.ee11.proxy.ProxyServlet$Transparent" load-on-startup="1" async-supported="true">
+                <init-param name="proxyTo" value="http://${librechat_host}:${librechat_port}/images"/>
+                <init-param name="prefix" value="/images"/>
+                <url-pattern>/images/*</url-pattern>
+            </servlet>
+            <servlet name="LibreChatApiProxy" class="org.eclipse.jetty.ee11.proxy.ProxyServlet$Transparent" load-on-startup="1" async-supported="true">
+                <init-param name="proxyTo" value="http://${librechat_host}:${librechat_port}/api"/>
+                <init-param name="prefix" value="/api"/>
+                <url-pattern>/api/*</url-pattern>
+            </servlet>
+            <servlet name="LibreChatAuthProxy" class="org.eclipse.jetty.ee11.proxy.ProxyServlet$Transparent" load-on-startup="1" async-supported="true">
+                <init-param name="proxyTo" value="http://${librechat_host}:${librechat_port}/auth"/>
+                <init-param name="prefix" value="/auth"/>
+                <url-pattern>/auth/*</url-pattern>
+            </servlet>
+            <servlet name="LibreChatOauthProxy" class="org.eclipse.jetty.ee11.proxy.ProxyServlet$Transparent" load-on-startup="1" async-supported="true">
+                <init-param name="proxyTo" value="http://${librechat_host}:${librechat_port}/oauth"/>
+                <init-param name="prefix" value="/oauth"/>
+                <url-pattern>/oauth/*</url-pattern>
+            </servlet>
+            <servlet name="LibreChatConversationProxy" class="org.eclipse.jetty.ee11.proxy.ProxyServlet$Transparent" load-on-startup="1" async-supported="true">
+                <init-param name="proxyTo" value="http://${librechat_host}:${librechat_port}/c"/>
+                <init-param name="prefix" value="/c"/>
+                <url-pattern>/c/*</url-pattern>
+            </servlet>
+            <servlet name="LibreChatSwProxy" class="org.eclipse.jetty.ee11.proxy.ProxyServlet$Transparent" load-on-startup="1" async-supported="true">
+                <init-param name="proxyTo" value="http://${librechat_host}:${librechat_port}/sw.js"/>
+                <init-param name="prefix" value="/sw.js"/>
+                <url-pattern>/sw.js</url-pattern>
+            </servlet>
+            <servlet name="LibreChatManifestProxy" class="org.eclipse.jetty.ee11.proxy.ProxyServlet$Transparent" load-on-startup="1" async-supported="true">
+                <init-param name="proxyTo" value="http://${librechat_host}:${librechat_port}/manifest.webmanifest"/>
+                <init-param name="prefix" value="/manifest.webmanifest"/>
+                <url-pattern>/manifest.webmanifest</url-pattern>
+            </servlet>
+            <servlet name="LibreChatRegisterSwProxy" class="org.eclipse.jetty.ee11.proxy.ProxyServlet$Transparent" load-on-startup="1" async-supported="true">
+                <init-param name="proxyTo" value="http://${librechat_host}:${librechat_port}/registerSW.js"/>
+                <init-param name="prefix" value="/registerSW.js"/>
+                <url-pattern>/registerSW.js</url-pattern>
+            </servlet>
+            <servlet name="EnhancedMcpServlet" class="org.moqui.mcp.EnhancedMcpServlet"
+                     load-on-startup="5" async-supported="true">
+                <init-param name="allowedOrigins" value=""/>
+                <init-param name="allowCredentials" value="true"/>
+                <init-param name="keepAliveIntervalSeconds" value="30"/>
+                <init-param name="maxConnections" value="100"/>
+                <url-pattern>/mcp/*</url-pattern>
+            </servlet>
+        </webapp>
+    </webapp-list>
+
+    <screen-facade>
+        <screen location="component://webroot/screen/webroot/apps.xml">
+            <subscreens-item name="agent" menu-title="Agent Chat" menu-index="97"
+                    location="component://moqui-mcp/screen/agent.xml"/>
+        </screen>
+        <screen location="component://webroot/screen/webroot/vapps.xml">
+            <subscreens-item name="agent" menu-title="Agent Chat" menu-index="97"
+                    location="component://moqui-mcp/screen/agent.xml"/>
+        </screen>
+        <screen location="component://webroot/screen/webroot/qapps.xml">
+            <subscreens-item name="agent" menu-title="Agent Chat" menu-index="97"
+                    location="component://moqui-mcp/screen/agent.xml"/>
+        </screen>
+        <!-- Register "message" and "sse" directly under webroot because WebFacadeImpl.getPathInfoList()
+             strips the servlet path (/mcp), leaving only ["message"] or ["sse"] visible to ScreenUrlInfo.
+             Without these, UserFacadeImpl.initFromHttpRequest() throws ScreenResourceNotFoundException
+             before it can create the Visit. -->
+        <screen location="component://webroot/screen/webroot.xml">
+            <subscreens-item name="message" menu-include="false" location="component://moqui-mcp/screen/mcp.xml"/>
+            <subscreens-item name="sse" menu-include="false" location="component://moqui-mcp/screen/mcp.xml"/>
+            <subscreens-item name="LibreChat" menu-title="LibreChat" location="component://moqui-mcp/screen/agent/LibreChat.xml"/>
+        </screen>
+    </screen-facade>
+</moqui-conf>

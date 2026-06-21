@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fix: update McpRuntimeServices ArtifactGroupMembers to use fully qualified service names.
+     type="install" so this is applied on every startup and overwrites the wrong seed-initial entries.
+     Also includes session service entries that must be present for mcp_runtime_test authorization. -->
+<entity-facade-xml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-facade-3.xsd" type="install">
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.mcp.McpServices.mcp#Initialize" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.mcp.McpServices.list#Tools" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.mcp.McpServices.mcp#ToolsCall" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.mcp.McpServices.mcp#Ping" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.create#AgentSessionContext" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.update#AgentSessionExternalContext" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.find#AgentSessionsForUser" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.close#AgentSessionContext" artifactTypeEnumId="AT_SERVICE"/>
+</entity-facade-xml>

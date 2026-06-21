@@ -1,0 +1,25 @@
+# Build output
+.gradle/
+bin/
+build/
+lib/
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pytest_cache/
+
+# Generated agent documents and evaluation output
+tools/output/
+tools/agent-indexer/output/
+tools/agent-indexer/**/output/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store

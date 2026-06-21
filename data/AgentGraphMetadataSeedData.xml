@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<https://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-facade-3.xsd" type="seed-initial">
+
+    <moqui.basic.Enumeration enumId="PpGraphArtifact" enumTypeId="ParameterPurpose" description="Graph Artifact Metadata"/>
+
+    <moqui.math.ParameterDef parameterDefId="AgGraphVertexTypeParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpGraphArtifact" parameterCode="graphVertexType" parameterName="Graph Vertex Type" description="Normalized artifact type stored for a graph vertex."/>
+    <moqui.math.ParameterDef parameterDefId="AgGraphSourceVertexIdParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpGraphArtifact" parameterCode="sourceVertexId" parameterName="Source Vertex Id" description="Original artifact vertex id before graph normalization."/>
+    <moqui.math.ParameterDef parameterDefId="AgGraphSourceEdgeIdParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpGraphArtifact" parameterCode="sourceEdgeId" parameterName="Source Edge Id" description="Original artifact edge id before graph normalization."/>
+    <moqui.math.ParameterDef parameterDefId="AgGraphSourceArtifactUriParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpGraphArtifact" parameterCode="sourceArtifactUri" parameterName="Source Artifact URI" description="Canonical URI of the source artifact."/>
+    <moqui.math.ParameterDef parameterDefId="AgGraphArtifactKindParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpGraphArtifact" parameterCode="artifactKind" parameterName="Artifact Kind" description="Artifact family such as screen, service, entity, or xml-action."/>
+    <moqui.math.ParameterDef parameterDefId="AgGraphScreenPathParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpGraphArtifact" parameterCode="screenPath" parameterName="Screen Path" description="Screen path associated with the artifact."/>
+    <moqui.math.ParameterDef parameterDefId="AgGraphServiceNameParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpGraphArtifact" parameterCode="serviceName" parameterName="Service Name" description="Fully qualified Moqui service name."/>
+    <moqui.math.ParameterDef parameterDefId="AgGraphServiceVerbParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpGraphArtifact" parameterCode="serviceVerb" parameterName="Service Verb" description="Service verb extracted from the service definition."/>
+    <moqui.math.ParameterDef parameterDefId="AgGraphServiceNounParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpGraphArtifact" parameterCode="serviceNoun" parameterName="Service Noun" description="Service noun extracted from the service definition."/>
+    <moqui.math.ParameterDef parameterDefId="AgGraphEntityNameParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpGraphArtifact" parameterCode="entityName" parameterName="Entity Name" description="Entity name referenced by the artifact."/>
+    <moqui.math.ParameterDef parameterDefId="AgGraphFieldNameParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpGraphArtifact" parameterCode="fieldName" parameterName="Field Name" description="Entity field referenced by the artifact."/>
+    <moqui.math.ParameterDef parameterDefId="AgGraphDocumentTypeParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpGraphArtifact" parameterCode="documentType" parameterName="Document Type" description="Document family produced from the artifact."/>
+    <moqui.math.ParameterDef parameterDefId="AgGraphXmlActionElementParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpGraphArtifact" parameterCode="xmlActionElement" parameterName="XML Action Element" description="Element name from xml-actions-3.xsd, such as service-call or entity-find."/>
+    <moqui.math.ParameterDef parameterDefId="AgGraphDomainObjectParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpGraphArtifact" parameterCode="domainObject" parameterName="Domain Object" description="Domain object or business family inferred for the artifact."/>
+    <moqui.math.ParameterDef parameterDefId="AgGraphSubjectParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpGraphArtifact" parameterCode="subject" parameterName="Subject" description="Subject extracted from the artifact semantics."/>
+    <moqui.math.ParameterDef parameterDefId="AgGraphOperationParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpGraphArtifact" parameterCode="operation" parameterName="Operation" description="Operation or effect inferred from the artifact semantics."/>
+    <moqui.math.ParameterDef parameterDefId="AgGraphCalledServiceParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpGraphArtifact" parameterCode="calledService" parameterName="Called Service" description="Service referenced by a service-call xml-action."/>
+    <moqui.math.ParameterDef parameterDefId="AgGraphParameterRoleParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpGraphArtifact" parameterCode="parameterRole" parameterName="Parameter Role" description="Service parameter role such as in-parameters or out-parameters."/>
+    <moqui.math.ParameterDef parameterDefId="AgGraphEdgeRelationParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpGraphArtifact" parameterCode="edgeRelation" parameterName="Edge Relation" description="Canonical relation label stored for a graph edge."/>
+    <moqui.math.ParameterDef parameterDefId="AgGraphEdgeRoleParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpGraphArtifact" parameterCode="edgeRole" parameterName="Edge Role" description="Additional role information stored for a graph edge."/>
+
+</entity-facade-xml>

@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- This software is in the public domain under CC0 1.0 Universal plus a 
+     Grant of Patent License.
+
+     To the extent possible under law, the author(s) have dedicated all
+     copyright and related and neighboring rights to this software to the
+     public domain worldwide. This software is distributed without any warranty.
+
+     You should have received a copy of the CC0 Public Domain Dedication
+     along with this software (see the LICENSE.md file). If not, see
+     <https://creativecommons.org/publicdomain/zero/1.0/>. -->
+<entity-facade-xml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-facade-3.xsd" type="seed-initial">
+
+    <moqui.basic.StatusType statusTypeId="AgentIndexRun" description="Agent Document Index Run"/>
+    <moqui.basic.StatusItem statusId="IndexingRunning" statusTypeId="AgentIndexRun" description="Indexing Running" sequenceNum="10"/>
+    <moqui.basic.StatusItem statusId="IndexingEmpty" statusTypeId="AgentIndexRun" description="Indexing Empty" sequenceNum="20"/>
+    <moqui.basic.StatusItem statusId="IndexingComplete" statusTypeId="AgentIndexRun" description="Indexing Complete" sequenceNum="30"/>
+    <moqui.basic.StatusItem statusId="IndexingFailed" statusTypeId="AgentIndexRun" description="Indexing Failed" sequenceNum="90"/>
+
+    <!-- ========== Agent Prompt Index (moqui_agent_prompts_v1) ========== -->
+    <moqui.entity.document.DataDocument
+            dataDocumentId="AgentPromptDocument"
+            documentName="Agent Prompt Document"
+            documentTitle="${canonicalPrompt}"
+            indexName="moqui_agent_prompts_v1"
+            manualDataServiceName="org.moqui.agent.AgentDocumentServices.add#AgentPromptManualDocumentData"
+            manualMappingServiceName="org.moqui.agent.AgentDocumentServices.transform#AgentPromptDocumentMapping"/>
+
+    <moqui.entity.feed.DataFeed
+            dataFeedId="AgentPromptFeed"
+            dataFeedTypeEnumId="DTFDTP_MAN_PULL"
+            indexOnStartEmpty="N"
+            feedName="Agent Prompt Feed"
+            feedReceiveServiceName="org.moqui.search.SearchServices.index#DataDocuments"/>
+
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentPromptFeed" dataDocumentId="AgentPromptDocument"/>
+
+    <!-- ========== Agent Tool Execution Telemetry real-time feed ========== -->
+    <!--
+        Telemetry/search projection feed. The transactional audit row remains
+        AgentToolExecutionLog, but OpenSearch indexing should use the denormalized
+        AgentToolExecutionElasticLog projection.
+    -->
+    <moqui.entity.document.DataDocument
+            dataDocumentId="AgentToolExecLog"
+            documentName="Agent Tool Execution Telemetry"
+            documentTitle="${toolName}"
+            primaryEntityName="moqui.agent.AgentToolExecutionElasticLog"
+            indexName="moqui_agent_telemetry_v1">
+        <fields fieldSeqId="01" fieldPath="agentToolExecutionElasticLogId"/>
+        <fields fieldSeqId="02" fieldPath="visitId"/>
+        <fields fieldSeqId="03" fieldPath="userId"/>
+        <fields fieldSeqId="04" fieldPath="toolName"/>
+        <fields fieldSeqId="05" fieldPath="documentId"/>
+        <fields fieldSeqId="06" fieldPath="documentKind"/>
+        <fields fieldSeqId="07" fieldPath="area"/>
+        <fields fieldSeqId="08" fieldPath="success"/>
+        <fields fieldSeqId="09" fieldPath="errorMessage"/>
+        <fields fieldSeqId="10" fieldPath="runningTimeMillis"/>
+        <fields fieldSeqId="11" fieldPath="riskLevelEnumId"/>
+        <fields fieldSeqId="12" fieldPath="confirmed"/>
+        <fields fieldSeqId="13" fieldPath="logDate"/>
+        <fields fieldSeqId="14" fieldPath="searchMode"/>
+        <fields fieldSeqId="15" fieldPath="resultCount"/>
+        <fields fieldSeqId="16" fieldPath="topDocumentId"/>
+        <fields fieldSeqId="17" fieldPath="topScore"/>
+        <fields fieldSeqId="18" fieldPath="operationEffect"/>
+        <fields fieldSeqId="19" fieldPath="actionKind"/>
+        <fields fieldSeqId="20" fieldPath="domainObject"/>
+        <fields fieldSeqId="21" fieldPath="subArea"/>
+        <fields fieldSeqId="22" fieldPath="serviceName"/>
+        <fields fieldSeqId="23" fieldPath="resultStatus"/>
+        <fields fieldSeqId="24" fieldPath="errorType"/>
+        <fields fieldSeqId="25" fieldPath="rerankerProvider"/>
+        <fields fieldSeqId="26" fieldPath="rerankerModel"/>
+        <fields fieldSeqId="27" fieldPath="rerankerMode"/>
+        <fields fieldSeqId="28" fieldPath="rerankerCandidateCount"/>
+        <fields fieldSeqId="29" fieldPath="rerankerSelectedDocumentId"/>
+        <fields fieldSeqId="30" fieldPath="rerankerReasonCode"/>
+        <fields fieldSeqId="31" fieldPath="rerankerConfidence"/>
+        <fields fieldSeqId="32" fieldPath="rerankerLatencyMillis"/>
+        <fields fieldSeqId="33" fieldPath="rerankerFallbackUsed"/>
+        <fields fieldSeqId="34" fieldPath="mathModelRunId"/>
+    </moqui.entity.document.DataDocument>
+
+    <moqui.entity.feed.DataFeed
+            dataFeedId="AgentToolExecLogFeed"
+            dataFeedTypeEnumId="DTFDTP_RT_PUSH"
+            feedName="Agent Tool Execution Log Real-Time Feed"
+            feedReceiveServiceName="org.moqui.search.SearchServices.index#DataDocuments"
+            feedDeleteServiceName="org.moqui.search.SearchServices.delete#DataDocument"/>
+
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentToolExecLogFeed" dataDocumentId="AgentToolExecLog"/>
+
+    <!-- ========== Scheduled ServiceJobs ========== -->
+    <!-- Purge old AgentSessionContext records: keeps last 30 days, runs daily at 03:00 -->
+    <moqui.service.job.ServiceJob jobName="purge_AgentSessionContexts_daily"
+            description="Purge Old Agent Session Contexts"
+            serviceName="org.moqui.agent.AgentRuntimeServices.purge#OldAgentSessionContexts"
+            cronExpression="0 0 3 * * ?" paused="N">
+        <parameters parameterName="retainDays" parameterValue="30"/>
+    </moqui.service.job.ServiceJob>
+
+    <!-- Runtime artifact discovery: scans component dirs and indexes into moqui_artifacts_v1.
+         Paused by default — activate in environments without the Python indexer pipeline. -->
+    <moqui.service.job.ServiceJob jobName="discover_Artifacts_startup"
+            description="Discover and Index Moqui Artifacts at Startup"
+            serviceName="org.moqui.agent.AgentDiscoveryServices.discover#AndIndexArtifacts"
+            cronExpression="0 5 0 * * ?" paused="Y">
+        <parameters parameterName="generateEmbeddings" parameterValue="false"/>
+        <parameters parameterName="batchSize" parameterValue="100"/>
+    </moqui.service.job.ServiceJob>
+
+</entity-facade-xml>

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- This software is in the public domain under CC0 1.0 Universal plus a
+     Grant of Patent License.
+
+     To the extent possible under law, the author(s) have dedicated all
+     copyright and related and neighboring rights to this software to the
+     public domain worldwide. This software is distributed without any warranty.
+
+     You should have received a copy of the CC0 Public Domain Dedication
+     along with this software (see the LICENSE.md file). If not, see
+     <https://creativecommons.org/publicdomain/zero/1.0/>. -->
+
+<entity-facade-xml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-facade-3.xsd" type="seed-initial">
+
+    <!-- Agent Client Type — identifies the external chat/AI client that owns a session -->
+    <moqui.basic.EnumerationType enumTypeId="AgentClientType" description="Agent Client Type"/>
+    <moqui.basic.Enumeration enumId="AgClientLibreChat" enumTypeId="AgentClientType" description="LibreChat" sequenceNum="10"/>
+    <moqui.basic.Enumeration enumId="AgClientOpenCode" enumTypeId="AgentClientType" description="OpenCode" sequenceNum="20"/>
+    <moqui.basic.Enumeration enumId="AgClientOpenCodeWeb" enumTypeId="AgentClientType" description="OpenCode Web" sequenceNum="21"/>
+    <moqui.basic.Enumeration enumId="AgClientOpenCodeDesktop" enumTypeId="AgentClientType" description="OpenCode Desktop" sequenceNum="22"/>
+    <moqui.basic.Enumeration enumId="AgClientHermesAgent" enumTypeId="AgentClientType" description="Hermes Agent" sequenceNum="25"/>
+    <moqui.basic.Enumeration enumId="AgClientChatGPT" enumTypeId="AgentClientType" description="ChatGPT" sequenceNum="31"/>
+    <moqui.basic.Enumeration enumId="AgClientMcp" enumTypeId="AgentClientType" description="Generic MCP Client" sequenceNum="40"/>
+    <moqui.basic.Enumeration enumId="AgClientApi" enumTypeId="AgentClientType" description="API Client" sequenceNum="50"/>
+
+    <!-- Agent Provider — identifies the LLM provider used by the session -->
+    <moqui.basic.EnumerationType enumTypeId="AgentProvider" description="Agent Provider"/>
+    <moqui.basic.Enumeration enumId="AgProviderOpenAI" enumTypeId="AgentProvider" description="OpenAI" sequenceNum="10"/>
+    <moqui.basic.Enumeration enumId="AgProviderOpenAICompat" enumTypeId="AgentProvider" description="OpenAI Compatible" sequenceNum="20"/>
+    <moqui.basic.Enumeration enumId="AgProviderExternalClient" enumTypeId="AgentProvider" description="External Client Managed" sequenceNum="30"/>
+
+    <!-- Agent Context Storage Mode — how conversation context is persisted -->
+    <moqui.basic.EnumerationType enumTypeId="AgentContextStorageMode" description="Agent Context Storage Mode"/>
+    <moqui.basic.Enumeration enumId="AgCtxExternalOnly" enumTypeId="AgentContextStorageMode" description="External Context Only" sequenceNum="10"/>
+    <moqui.basic.Enumeration enumId="AgCtxHybrid" enumTypeId="AgentContextStorageMode" description="Hybrid Context" sequenceNum="20"/>
+    <moqui.basic.Enumeration enumId="AgCtxMoquiFull" enumTypeId="AgentContextStorageMode" description="Full Moqui Context" sequenceNum="30"/>
+
+    <!-- Agent Session Status -->
+    <moqui.basic.StatusType statusTypeId="AgentSession" description="Agent Session"/>
+    <moqui.basic.StatusItem statusId="AgSessOpen" statusTypeId="AgentSession" description="Open" sequenceNum="10"/>
+    <moqui.basic.StatusItem statusId="AgSessActive" statusTypeId="AgentSession" description="Active" sequenceNum="20"/>
+    <moqui.basic.StatusItem statusId="AgSessClosed" statusTypeId="AgentSession" description="Closed" sequenceNum="90"/>
+    <moqui.basic.StatusItem statusId="AgSessError" statusTypeId="AgentSession" description="Error" sequenceNum="99"/>
+
+</entity-facade-xml>

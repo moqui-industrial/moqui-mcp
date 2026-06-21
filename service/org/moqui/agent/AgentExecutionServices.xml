@@ -1,0 +1,747 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- This software is in the public domain under CC0 1.0 Universal plus a 
+     Grant of Patent License.
+
+     To the extent possible under law, the author(s) have dedicated all
+     copyright and related and neighboring rights to this software to the
+     public domain worldwide. This software is distributed without any warranty.
+
+     You should have received a copy of the CC0 Public Domain Dedication
+     along with this software (see the LICENSE.md file). If not, see
+     <https://creativecommons.org/publicdomain/zero/1.0/>. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="log" noun="ToolExecution" authenticate="true">
+        <in-parameters>
+            <parameter name="visitId"/>
+            <parameter name="toolName" required="true"/>
+            <parameter name="documentId"/>
+            <parameter name="artifactTypeEnumId"/>
+            <parameter name="artifactName"/>
+            <parameter name="authzActionEnumId"/>
+            <parameter name="parameters" type="Map"/>
+            <parameter name="result" type="Map"/>
+            <parameter name="success" type="Boolean"/>
+            <parameter name="errorMessage"/>
+            <parameter name="confirmed" type="Boolean"/>
+            <parameter name="riskLevelEnumId"/>
+            <parameter name="startDate" type="Timestamp"/>
+            <parameter name="endDate" type="Timestamp"/>
+        </in-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.AgentConfigUtil
+                import org.moqui.agent.AgentToolSupport
+
+                def effectiveStart = startDate ?: ec.user.nowTimestamp
+                def effectiveEnd = endDate ?: ec.user.nowTimestamp
+                String parameterLogMode = AgentConfigUtil.getString('moqui.agent.log.parameters', 'masked')
+                String resultLogMode = AgentConfigUtil.getString('moqui.agent.log.results', 'summary')
+                def logValue = ec.entity.makeValue('moqui.agent.AgentToolExecutionLog')
+                logValue.setSequencedIdPrimary()
+                String logId = logValue.getPrimaryKeys().values().first()
+                logValue.setAll([
+                        agentToolExecutionLogId: logId,
+                        visitId : visitId ?: ec.user.visitId,
+                        userId : ec.user.userId,
+                        toolName : toolName,
+                        documentId : documentId,
+                        artifactTypeEnumId : artifactTypeEnumId,
+                        artifactName : artifactName,
+                        authzActionEnumId : authzActionEnumId,
+                        parametersJson : AgentToolSupport.toJson(AgentToolSupport.sanitizeForLogging(parameters ?: [:], parameterLogMode, false)),
+                        resultJson : AgentToolSupport.toJson(AgentToolSupport.sanitizeForLogging(result ?: [:], resultLogMode, 'summary'.equalsIgnoreCase(resultLogMode))),
+                        success : Boolean.TRUE.equals(success) ? 'Y' : 'N',
+                        errorMessage : errorMessage,
+                        startDate : effectiveStart,
+                        endDate : effectiveEnd,
+                        runningTimeMillis : Math.max(0L, effectiveEnd.time - effectiveStart.time) as Integer,
+                        confirmed : Boolean.TRUE.equals(confirmed) ? 'Y' : 'N',
+                        riskLevelEnumId : riskLevelEnumId ?: 'normal'
+                ])
+                logValue.create()
+
+                boolean elasticTelemetryEnabled = AgentConfigUtil.getBoolean('moqui.agent.elasticTelemetry.enabled', false)
+                if (elasticTelemetryEnabled) {
+                    boolean includeParameters = AgentConfigUtil.getBoolean('moqui.agent.elasticTelemetry.includeParameters', false)
+                    boolean includeResults = AgentConfigUtil.getBoolean('moqui.agent.elasticTelemetry.includeResults', false)
+                    int maxSummaryLength = AgentConfigUtil.getInt('moqui.agent.elasticTelemetry.maxSummaryLength', 2000, 1)
+                    Map sanitizedParameters = AgentToolSupport.sanitizeForLogging(parameters ?: [:], parameterLogMode, false)
+                    Map sanitizedResult = AgentToolSupport.sanitizeForLogging(result ?: [:], resultLogMode, 'summary'.equalsIgnoreCase(resultLogMode))
+                    String parameterSummary = includeParameters ? AgentToolSupport.toJson(sanitizedParameters) : "parameterKeys=" + ((parameters ?: [:]).keySet() as List).join(',')
+                    String resultSummary = includeResults ? AgentToolSupport.toJson(sanitizedResult) : "resultKeys=" + ((result ?: [:]).keySet() as List).join(',')
+                    if (parameterSummary?.length() > maxSummaryLength) parameterSummary = parameterSummary.substring(0, maxSummaryLength)
+                    if (resultSummary?.length() > maxSummaryLength) resultSummary = resultSummary.substring(0, maxSummaryLength)
+                    Map resultMap = (result instanceof Map) ? (result as Map) : [:]
+                    try {
+                        ec.service.sync().name('org.moqui.agent.AgentTelemetryServices.create#AgentToolExecutionElasticLog')
+                            .disableAuthz()
+                            .parameters([
+                                agentToolExecutionLogId : logId,
+                                logDate : effectiveEnd,
+                                userId : ec.user.userId,
+                                visitId : visitId ?: ec.user.visitId,
+                                mcpSessionId : visitId ?: ec.user.visitId,
+                                toolName : toolName,
+                                documentId : documentId,
+                                artifactTypeEnumId : artifactTypeEnumId,
+                                artifactName : artifactName,
+                                serviceName : (artifactTypeEnumId == 'AT_SERVICE' ? artifactName : null),
+                                riskLevelEnumId : riskLevelEnumId ?: 'normal',
+                                confirmed : confirmed,
+                                success : success,
+                                errorType : errorMessage ? 'tool_error' : null,
+                                errorMessage : errorMessage,
+                                runningTimeMillis : Math.max(0L, effectiveEnd.time - effectiveStart.time) as BigDecimal,
+                                resultStatus : Boolean.TRUE.equals(success) ? 'ok' : 'error',
+                                parameterSummary : parameterSummary,
+                                resultSummary : resultSummary,
+                                searchMode : resultMap.searchDebug?.modeUsed ?: resultMap.searchMode,
+                                resultCount : (resultMap.resultCount ?: resultMap.resultList?.size()) as Integer,
+                                topDocumentId : resultMap.topDocument?.documentId,
+                                topScore : resultMap.topDocument?.score != null ? (resultMap.topDocument.score as BigDecimal) : null,
+                                indexName : resultMap.searchDebug?.indexName
+                            ]).call()
+                    } catch (Throwable t) {
+                        ec.logger.warn("Unable to write AgentToolExecutionElasticLog telemetry for ${toolName}: ${t.message}")
+                    }
+                }
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="execute" noun="AgentPrompt" authenticate="true">
+        <in-parameters>
+            <parameter name="documentId" required="true"/>
+            <parameter name="queryText"/>
+            <parameter name="parameters" type="Map"/>
+            <parameter name="confirmed" type="Boolean"/>
+            <parameter name="dryRun" type="Boolean"/>
+            <parameter name="useSessionContext" type="Boolean" default="true"/>
+            <parameter name="sessionId"/>
+            <parameter name="indexName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="success" type="Boolean"/>
+            <parameter name="messages" type="List"/>
+            <parameter name="errors" type="List"/>
+            <parameter name="executedArtifact" type="Map"/>
+            <parameter name="serviceResult" type="Map"/>
+            <parameter name="updatedSessionContext" type="Map"/>
+            <parameter name="confirmationRequired" type="Boolean"/>
+            <parameter name="needsMoreContext" type="Boolean"/>
+            <parameter name="validationHints" type="Map"/>
+        </out-parameters>
+        <actions>
+            <service-call name="org.moqui.agent.AgentPromptServices.get#AgentDocument"
+                          in-map="[documentId:documentId, indexName:indexName]"
+                          out-map="agentDocumentResult"/>
+            <script><![CDATA[
+                import org.moqui.agent.AgentToolSupport
+
+                def startTs = ec.user.nowTimestamp
+                messages = []
+                errors = []
+                Map document = agentDocumentResult.document ?: [:]
+
+                Closure buildValidationHints = { String serviceName, Throwable failure, Map doc ->
+                    String msg = (failure?.message ?: failure?.toString() ?: '').toString()
+                    String lowerMsg = msg.toLowerCase()
+                    String category
+                    if (failure instanceof org.moqui.context.ArtifactAuthorizationException) {
+                        category = 'authorization'
+                    } else if (lowerMsg.contains('required') || lowerMsg.contains('missing') || lowerMsg.contains('parameter')) {
+                        category = 'validation_missing_required'
+                    } else if (lowerMsg.contains('not found') || lowerMsg.contains('does not exist') || lowerMsg.contains('non trovato')) {
+                        category = 'not_found'
+                    } else {
+                        category = 'service_error'
+                    }
+                    String docActionKind = (doc?.actionKind ?: '') as String
+                    List docRequiredContext = docActionKind == 'create' && (doc?.declaredServiceRequiredParameters instanceof List) ?
+                            (doc.declaredServiceRequiredParameters as List) :
+                            ((doc?.executionRequiredContext instanceof List) ? (doc.executionRequiredContext as List) : [])
+                    List docFieldNames = (doc?.fieldNames instanceof List) ? (doc.fieldNames as List) : []
+                    String hint
+                    if (category == 'validation_missing_required' && docRequiredContext) {
+                        hint = "Required context fields: ${docRequiredContext.join(', ')}. Known fields: ${docFieldNames.take(10).join(', ')}"
+                    } else if (category == 'authorization') {
+                        hint = "User lacks authorization to execute ${serviceName ?: 'the requested service'}. Check user group membership."
+                    } else if (category == 'not_found') {
+                        hint = "The record was not found. Verify the identifier values passed as parameters."
+                    } else {
+                        hint = "Service call failed. Review parameters and try again."
+                    }
+                    [
+                        errorCategory: category,
+                        serviceName: serviceName,
+                        requiredContext: docRequiredContext,
+                        knownFields: docFieldNames.take(20),
+                        hint: hint
+                    ]
+                }
+                Map mergedParameters = [:]
+                String originalQueryText = (queryText ?: '') as String
+                Map directParameters = (parameters instanceof Map) ? (parameters as Map) : [:]
+                Map inferredContextDefaults = [:]
+                String riskLevelEnumId = 'normal'
+                try {
+                    if (!document) {
+                        success = false
+                        errors.add("Agent document non trovato: ${documentId}")
+                        return
+                    }
+
+                    if (!Boolean.TRUE.equals(document.runtimeExecutable)) {
+                        success = false
+                        errors.add("Il documento ${documentId} non e' eseguibile a runtime")
+                        return
+                    }
+
+                    if (Boolean.TRUE.equals(useSessionContext) && sessionId) {
+                        Map sessionContextResult = ec.service.sync().name('org.moqui.agent.AgentRuntimeServices.get#AgentSessionContext')
+                                .parameters([
+                                    sessionId : sessionId,
+                                    createIfMissing : true
+                                ]).call()
+                        Map sessionContext = sessionContextResult.agentSessionContext ?: [:]
+                        if (sessionContext.currentBusinessObjects instanceof Map) mergedParameters.putAll(sessionContext.currentBusinessObjects as Map)
+                        updatedSessionContext = sessionContext
+                    }
+                    if (directParameters) mergedParameters.putAll(directParameters)
+
+                    ['ownerPartyId', 'organizationPartyId'].each { String fieldName ->
+                        if (!mergedParameters.containsKey(fieldName) || mergedParameters[fieldName] == null || mergedParameters[fieldName] == '') {
+                            String inferredValue = AgentToolSupport.resolveDefaultPartyContextValue(ec, mergedParameters, fieldName)
+                            if (inferredValue) {
+                                mergedParameters[fieldName] = inferredValue
+                                inferredContextDefaults[fieldName] = inferredValue
+                            }
+                        }
+                    }
+
+                    if (originalQueryText) {
+                        if (AgentToolSupport.looksLikeProjectAggregatePrompt(originalQueryText) &&
+                                !AgentToolSupport.isProjectAggregateRootDocument(document)) {
+                            Map fallbackProjectRootDoc = ec.service.sync()
+                                    .name('org.moqui.agent.AgentPromptServices.get#AgentDocument')
+                                    .parameters([documentId : 'agent-prompt://project/findproject/createproject'])
+                                    .call()?.document as Map
+                            if (Boolean.TRUE.equals(fallbackProjectRootDoc?.runtimeExecutable)) {
+                                document = fallbackProjectRootDoc
+                            }
+                        }
+                        Map aggregateResult = AgentToolSupport.executeProjectAggregatePlan(
+                                ec, originalQueryText, document, mergedParameters, confirmed, dryRun, sessionId ?: ec.user.visitId)
+                        if (aggregateResult?.compositeExecution) {
+                            success = Boolean.TRUE.equals(aggregateResult.success)
+                            serviceResult = (aggregateResult.executionResult ?: [:]) as Map
+                            if (aggregateResult.messages) messages.addAll(aggregateResult.messages as List)
+                            if (aggregateResult.errors) errors.addAll(aggregateResult.errors as List)
+                            String aggregateServiceName = (document.preferredService ?: document.updateServiceName ?: documentId) as String
+                            executedArtifact = [
+                                    artifactTypeEnumId: 'AT_SERVICE',
+                                    artifactName : aggregateServiceName,
+                                    authzActionEnumId : aggregateServiceName?.contains('#') ?
+                                            AgentToolSupport.getServiceAuthzActionEnumId(aggregateServiceName) : 'AUTHZA_ALL',
+                                    executionChannel : 'service'
+                            ]
+                        }
+                    }
+
+                    String documentActionKind = (document.actionKind ?: '') as String
+                    String documentOperationEffect = (document.operationEffect ?: '') as String
+                    String documentPreferredService = (document.preferredService ?: '') as String
+                    List requiredContext = []
+                    if (documentActionKind == 'create' && document.declaredServiceRequiredParameters instanceof List) {
+                        requiredContext.addAll(document.declaredServiceRequiredParameters as List)
+                    } else if (document.executionRequiredContext instanceof List) {
+                        requiredContext.addAll(document.executionRequiredContext as List)
+                    }
+                    List missingKeys = requiredContext.findAll { String key -> !mergedParameters.containsKey(key) || mergedParameters[key] == null }
+                    if (missingKeys) {
+                        success = false
+                        needsMoreContext = true
+                        errors.add("Contesto mancante: ${missingKeys.join(', ')}")
+                        return
+                    }
+
+                    String resolutionPolicy = (document.resolutionPolicy ?: '') as String
+                    String primaryScreenPurpose = (document.primaryScreenPurpose ?: '') as String
+                    List stateComparisonPkFields = (document.stateComparisonPkFields instanceof List) ? (document.stateComparisonPkFields as List) : []
+                    List documentFieldNames = (document.fieldNames instanceof List) ? (document.fieldNames as List) : []
+                    Set<String> controlFieldNames = [
+                            'sessionId', 'confirmed', 'dryRun', 'useSessionContext',
+                            'documentId', 'indexName'
+                    ] as Set<String>
+                    Set<String> pkFieldNameSet = stateComparisonPkFields.collect { it as String }.findAll { it } as Set<String>
+                    Set<String> knownFieldNameSet = documentFieldNames.collect { it as String }.findAll { it } as Set<String>
+                    Map explicitMutationParameters = [:]
+                    directParameters.each { String k, Object v ->
+                        if (!k || controlFieldNames.contains(k) || pkFieldNameSet.contains(k)) return
+                        if (knownFieldNameSet && !knownFieldNameSet.contains(k)) return
+                        explicitMutationParameters[k] = v
+                    }
+                    boolean navigateThenMaybeUpdate = resolutionPolicy == 'navigate_then_maybe_update'
+                    boolean createLikeMutation = documentActionKind == 'create' ||
+                            documentOperationEffect == 'create' ||
+                            documentPreferredService.startsWith('create#')
+                    boolean hasExplicitMutationRequest = !explicitMutationParameters.isEmpty()
+                    boolean requiresValueComparison = navigateThenMaybeUpdate && !createLikeMutation
+                    String stateComparisonEntity = (document.stateComparisonEntity ?: '') as String
+                    if (!stateComparisonEntity && requiresValueComparison) {
+                        Collection stateComparisonFieldHints = !explicitMutationParameters.isEmpty() ?
+                                explicitMutationParameters.keySet() : knownFieldNameSet
+                        stateComparisonEntity = AgentToolSupport.inferStateComparisonEntity(ec, document, stateComparisonFieldHints) ?: ''
+                    }
+                    if (requiresValueComparison && stateComparisonEntity) {
+                        try {
+                            def stateEntityDef = ec.entity.getEntityDefinition(stateComparisonEntity)
+                            List entityPkFieldNames = (stateEntityDef?.getPkFieldNames() ?: []) as List
+                            if (entityPkFieldNames && entityPkFieldNames.every { String pkName ->
+                                mergedParameters.containsKey(pkName) && mergedParameters[pkName] != null && mergedParameters[pkName] != ''
+                            }) {
+                                stateComparisonPkFields = entityPkFieldNames.collect { it as String }
+                                pkFieldNameSet = stateComparisonPkFields as Set<String>
+                            }
+                        } catch (Throwable ignored) {
+                            // Best-effort only; fall back to document-provided PK hints.
+                        }
+                    }
+                    Map currentStateMap = [:]
+                    Map changedFields = [:]
+                    boolean stateComparisonAvailable = false
+
+                    if (requiresValueComparison && hasExplicitMutationRequest) {
+                        if (!stateComparisonEntity || pkFieldNameSet.isEmpty()) {
+                            success = false
+                            needsMoreContext = true
+                            errors.add("Il prompt richiede confronto stato ma manca la configurazione di state comparison")
+                            serviceResult = [
+                                    success : false,
+                                    operation : 'state_comparison_unavailable',
+                                    resolutionPolicy : resolutionPolicy,
+                                    requiresValueComparison: true
+                            ]
+                            return
+                        }
+                        List missingPkFields = pkFieldNameSet.findAll { !mergedParameters.containsKey(it) || mergedParameters[it] == null } as List
+                        if (missingPkFields) {
+                            success = false
+                            needsMoreContext = true
+                            errors.add("Contesto PK mancante per confronto stato: ${missingPkFields.join(', ')}")
+                            serviceResult = [
+                                    success : false,
+                                    operation : 'state_comparison_missing_pk',
+                                    resolutionPolicy : resolutionPolicy,
+                                    requiresValueComparison: true,
+                                    missingPkFields : missingPkFields
+                            ]
+                            return
+                        }
+                        def stateFind = ec.entity.find(stateComparisonEntity)
+                        pkFieldNameSet.each { String pkName -> stateFind.condition(pkName, mergedParameters[pkName]) }
+                        def currentEntityValue
+                        try {
+                            currentEntityValue = stateFind.one()
+                        } catch (org.moqui.context.ArtifactAuthorizationException aae) {
+                            success = false
+                            needsMoreContext = true
+                            errors.add("Accesso negato per confronto stato su ${stateComparisonEntity}: ${aae.message}")
+                            serviceResult = [
+                                    success : false,
+                                    operation : 'state_comparison_denied',
+                                    resolutionPolicy : resolutionPolicy,
+                                    requiresValueComparison: true,
+                                    stateComparisonEntity : stateComparisonEntity,
+                                    stateComparisonPkFields: stateComparisonPkFields,
+                                    denied : true
+                            ]
+                            return
+                        }
+                        if (!currentEntityValue) {
+                            success = false
+                            needsMoreContext = true
+                            errors.add("Record non trovato per confronto stato su ${stateComparisonEntity}")
+                            serviceResult = [
+                                    success : false,
+                                    operation : 'state_comparison_record_missing',
+                                    resolutionPolicy : resolutionPolicy,
+                                    requiresValueComparison: true,
+                                    stateComparisonEntity : stateComparisonEntity
+                            ]
+                            return
+                        }
+                        stateComparisonAvailable = true
+                        currentStateMap = currentEntityValue.getMap()
+                        explicitMutationParameters.each { String fieldName, Object requestedValue ->
+                            Object currentValue = currentEntityValue.get(fieldName)
+                            boolean different = (currentValue == null && requestedValue != null) ||
+                                    (currentValue != null && requestedValue == null) ||
+                                    (currentValue != requestedValue)
+                            if (different) {
+                                changedFields[fieldName] = [old: currentValue, new: requestedValue]
+                            }
+                        }
+                    }
+
+                    if (navigateThenMaybeUpdate && !hasExplicitMutationRequest) {
+                        success = true
+                        executedArtifact = [
+                                artifactTypeEnumId: 'AT_XML_SCREEN',
+                                artifactName : document.sourceScreenPath ?: document.screenName ?: documentId,
+                                authzActionEnumId : 'AUTHZA_VIEW',
+                                executionChannel : 'navigation'
+                        ]
+                        serviceResult = [
+                                success : true,
+                                operation : 'navigation_only',
+                                resolutionPolicy : resolutionPolicy,
+                                executionChannel : 'navigation',
+                                navigationTarget : document.sourceScreenPath ?: document.screenName,
+                                sourceScreenPath : document.sourceScreenPath,
+                                screenName : document.screenName,
+                                executedArtifact : executedArtifact,
+                                requiresValueComparison: requiresValueComparison,
+                                inferredContextDefaults: inferredContextDefaults,
+                                message : "Opened edit screen. No field changes requested."
+                        ]
+                        messages.add(serviceResult.message)
+                    } else if (requiresValueComparison && hasExplicitMutationRequest && changedFields.isEmpty()) {
+                        success = true
+                        executedArtifact = [
+                                artifactTypeEnumId: 'AT_XML_SCREEN',
+                                artifactName : document.sourceScreenPath ?: document.screenName ?: documentId,
+                                authzActionEnumId : 'AUTHZA_VIEW',
+                                executionChannel : 'navigation'
+                        ]
+                        serviceResult = [
+                                success : true,
+                                operation : 'no_update_needed',
+                                resolutionPolicy : resolutionPolicy,
+                                executionChannel : 'navigation',
+                                navigationTarget : document.sourceScreenPath ?: document.screenName,
+                                sourceScreenPath : document.sourceScreenPath,
+                                screenName : document.screenName,
+                                executedArtifact : executedArtifact,
+                                requiresValueComparison: requiresValueComparison,
+                                stateComparisonEntity : stateComparisonEntity,
+                                changedFields : changedFields,
+                                requestedFields : explicitMutationParameters,
+                                currentStateSubset : explicitMutationParameters.collectEntries { String k, Object v -> [(k): currentStateMap[k]] },
+                                inferredContextDefaults: inferredContextDefaults,
+                                message : "Record already has the requested values."
+                        ]
+                        messages.add(serviceResult.message)
+                    } else {
+                        executedArtifact = AgentToolSupport.resolveExecutableArtifact(document)
+                        if (requiresValueComparison && document.updateServiceName) {
+                            executedArtifact = [
+                                    artifactTypeEnumId: 'AT_SERVICE',
+                                    artifactName : document.updateServiceName,
+                                    authzActionEnumId : executedArtifact?.authzActionEnumId ?: 'AUTHZA_UPDATE',
+                                    executionChannel : 'service'
+                            ]
+                        }
+                    }
+
+                    if (!executedArtifact?.artifactName) {
+                        success = false
+                        errors.add("Nessun artifact eseguibile supportato per ${documentId}")
+                        return
+                    }
+                    String executionChannel = (executedArtifact.executionChannel ?: document.executionChannel ?: 'service') as String
+                    if (success == null && executionChannel == 'service') {
+                        riskLevelEnumId = AgentToolSupport.determineRiskLevel(executedArtifact.artifactName as String, document.operationEffect as String, document)
+                        if (riskLevelEnumId == 'high' && !Boolean.TRUE.equals(confirmed)) {
+                            success = false
+                            confirmationRequired = true
+                            messages.add("Conferma richiesta per ${executedArtifact.artifactName}")
+                            serviceResult = [
+                                    success : false,
+                                    confirmationRequired: true,
+                                    riskLevel : riskLevelEnumId,
+                                    executedArtifact : executedArtifact
+                            ]
+                            return
+                        }
+
+                        if (Boolean.TRUE.equals(dryRun)) {
+                            success = true
+                            serviceResult = [
+                                    success : true,
+                                    operation : requiresValueComparison ? 'update_after_navigation' : (navigateThenMaybeUpdate ? 'create_after_navigation' : 'execute_direct'),
+                                    dryRun : true,
+                                    executedArtifact: executedArtifact,
+                                    parameters : mergedParameters,
+                                    changedFields : changedFields,
+                                    inferredContextDefaults: inferredContextDefaults,
+                                    stateComparison : stateComparisonAvailable ? [
+                                            entityName: stateComparisonEntity,
+                                            pkFields : stateComparisonPkFields
+                                    ] : null
+                            ]
+                        } else {
+                            try {
+                                Map callResult = ec.service.sync().name('org.moqui.agent.AgentRuntimeServices.call#ServiceGuarded').parameters([
+                                    serviceName : executedArtifact.artifactName,
+                                    parameters : mergedParameters,
+                                    confirmed : confirmed,
+                                    toolName : 'moqui_execute_agent_prompt',
+                                    documentId : documentId,
+                                    sessionId : sessionId ?: ec.user.visitId,
+                                    directToolCall : false
+                                ]).call()
+                                serviceResult = callResult?.serviceResult
+                                if (navigateThenMaybeUpdate) {
+                                    serviceResult = (serviceResult ?: [:]) + [
+                                            operation : requiresValueComparison ? 'update_after_navigation' : 'create_after_navigation',
+                                            resolutionPolicy : resolutionPolicy,
+                                            requiresValueComparison: requiresValueComparison,
+                                            changedFields : changedFields,
+                                            inferredContextDefaults: inferredContextDefaults,
+                                            stateComparisonEntity : requiresValueComparison ? stateComparisonEntity : null,
+                                            stateComparisonPkFields: requiresValueComparison ? stateComparisonPkFields : []
+                                    ]
+                                }
+                                confirmationRequired = callResult?.confirmationRequired
+                                if (confirmationRequired) {
+                                    success = false
+                                    messages.add("Conferma richiesta per ${executedArtifact.artifactName}")
+                                    return
+                                }
+                                success = true
+                            } catch (Throwable serviceFailure) {
+                                success = false
+                                String failureMessage = serviceFailure.message ?: serviceFailure.toString()
+                                errors.add(failureMessage)
+                                validationHints = buildValidationHints(executedArtifact?.artifactName as String, serviceFailure, document)
+                                serviceResult = [
+                                        success : false,
+                                        operation : requiresValueComparison ? 'update_after_navigation_failed' : (navigateThenMaybeUpdate ? 'create_after_navigation_failed' : 'execute_direct_failed'),
+                                        resolutionPolicy : navigateThenMaybeUpdate ? resolutionPolicy : null,
+                                        executionChannel : 'service',
+                                        requiresValueComparison: requiresValueComparison,
+                                        changedFields : navigateThenMaybeUpdate ? changedFields : null,
+                                        stateComparisonEntity : requiresValueComparison ? stateComparisonEntity : null,
+                                        stateComparisonPkFields: requiresValueComparison ? stateComparisonPkFields : null,
+                                        executedArtifact : executedArtifact,
+                                        errorType : serviceFailure.getClass().getName(),
+                                        errorMessage : failureMessage,
+                                        validationHints : validationHints
+                                ]
+                                return
+                            }
+                        }
+                    } else if (success == null && executionChannel in ['navigation', 'screen_render', 'screen_url']) {
+                        success = true
+                        serviceResult = [
+                                success : true,
+                                executionChannel : executionChannel,
+                                navigationTarget : executedArtifact.artifactName,
+                                sourceScreenPath : document.sourceScreenPath,
+                                executedArtifact : executedArtifact,
+                                messages : ["Open target ${executedArtifact.artifactName}"]
+                        ]
+                    } else if (success == null && executionChannel in ['print', 'print_export', 'download']) {
+                        success = true
+                        serviceResult = [
+                                success : true,
+                                executionChannel : executionChannel,
+                                deliveryTarget : executedArtifact.artifactName,
+                                sourceScreenPath : document.sourceScreenPath,
+                                executedArtifact : executedArtifact,
+                                messages : ["Retrieve output from ${executedArtifact.artifactName}"]
+                        ]
+                    } else if (success == null && executionChannel == 'screen_transition') {
+                        boolean screenAllowed = AgentToolSupport.isScreenArtifactPermitted(ec, executedArtifact)
+                        if (!screenAllowed) {
+                            success = false
+                            serviceResult = [
+                                    success : false,
+                                    executionChannel : executionChannel,
+                                    operation : 'screen_transition_denied',
+                                    sourceScreenPath : document.sourceScreenPath,
+                                    transitionName : executedArtifact.transitionName,
+                                    executedArtifact : executedArtifact
+                            ]
+                            errors.add("Accesso negato allo screen ${executedArtifact.artifactName ?: document.sourceScreenPath}")
+                            return
+                        }
+
+                        String transitionServiceName = (executedArtifact.preferredService ?: document.preferredService) as String
+                        boolean directServiceAllowed = transitionServiceName ?
+                                AgentToolSupport.checkArtifactAccess(ec, 'AT_SERVICE',
+                                        AgentToolSupport.getServiceAuthzActionEnumId(transitionServiceName), transitionServiceName) : false
+
+                        if (Boolean.TRUE.equals(dryRun)) {
+                            success = true
+                            serviceResult = [
+                                    success : true,
+                                    operation : 'screen_transition_ready',
+                                    executionChannel : executionChannel,
+                                    sourceScreenPath : document.sourceScreenPath,
+                                    screenName : document.screenName,
+                                    transitionName : executedArtifact.transitionName,
+                                    directServiceAllowed : directServiceAllowed,
+                                    preferredService : transitionServiceName,
+                                    inferredContextDefaults: inferredContextDefaults,
+                                    executedArtifact : executedArtifact,
+                                    parameters : mergedParameters
+                            ]
+                        } else if (transitionServiceName && directServiceAllowed) {
+                            try {
+                                Map callResult = ec.service.sync().name('org.moqui.agent.AgentRuntimeServices.call#ServiceGuarded').parameters([
+                                    serviceName : transitionServiceName,
+                                    parameters : mergedParameters,
+                                    confirmed : confirmed,
+                                    toolName : 'moqui_execute_agent_prompt',
+                                    documentId : documentId,
+                                    sessionId : sessionId ?: ec.user.visitId,
+                                    directToolCall : false
+                                ]).call()
+                                serviceResult = (callResult?.serviceResult ?: [:]) + [
+                                        operation : 'execute_screen_transition',
+                                        executionChannel : 'screen_transition',
+                                        sourceScreenPath : document.sourceScreenPath,
+                                        screenName : document.screenName,
+                                        transitionName : executedArtifact.transitionName,
+                                        inferredContextDefaults: inferredContextDefaults,
+                                        preferredService : transitionServiceName
+                                ]
+                                confirmationRequired = callResult?.confirmationRequired
+                                if (confirmationRequired) {
+                                    success = false
+                                    messages.add("Conferma richiesta per ${transitionServiceName}")
+                                    return
+                                }
+                                executedArtifact = [
+                                        artifactTypeEnumId: 'AT_SERVICE',
+                                        artifactName : transitionServiceName,
+                                        authzActionEnumId : AgentToolSupport.getServiceAuthzActionEnumId(transitionServiceName),
+                                        executionChannel : 'service'
+                                ]
+                                success = true
+                            } catch (Throwable transitionFailure) {
+                                success = false
+                                String failureMessage = transitionFailure.message ?: transitionFailure.toString()
+                                errors.add(failureMessage)
+                                validationHints = buildValidationHints(transitionServiceName, transitionFailure, document)
+                                serviceResult = [
+                                        success : false,
+                                        operation : 'screen_transition_failed',
+                                        executionChannel : executionChannel,
+                                        sourceScreenPath : document.sourceScreenPath,
+                                        screenName : document.screenName,
+                                        transitionName : executedArtifact.transitionName,
+                                        preferredService : transitionServiceName,
+                                        executedArtifact : executedArtifact,
+                                        errorType : transitionFailure.getClass().getName(),
+                                        errorMessage : failureMessage,
+                                        validationHints : validationHints
+                                ]
+                                return
+                            }
+                        } else {
+                            success = true
+                            serviceResult = [
+                                    success : true,
+                                    operation : 'navigation_only',
+                                    executionChannel : 'navigation',
+                                    sourceScreenPath : document.sourceScreenPath,
+                                    navigationTarget : document.sourceScreenPath ?: document.screenName,
+                                    screenName : document.screenName,
+                                    transitionName : executedArtifact.transitionName,
+                                    preferredService : transitionServiceName,
+                                    directServiceAllowed : directServiceAllowed,
+                                    inferredContextDefaults: inferredContextDefaults,
+                                    executedArtifact : executedArtifact,
+                                    message : transitionServiceName ?
+                                            "Open screen and complete the action there. Direct service execution is not authorized." :
+                                            "Open screen and complete the action there."
+                            ]
+                            messages.add(serviceResult.message)
+                        }
+                    } else if (success == null && (executionChannel == 'read_query' || document.operationEffect == 'read_query')) {
+                        success = false
+                        needsMoreContext = true
+                        serviceResult = [
+                                success : false,
+                                needsResolver : true,
+                                executionChannel : executionChannel,
+                                executedArtifact : executedArtifact
+                        ]
+                        errors.add("Il prompt richiede un resolver query dedicato")
+                        return
+                    } else if (success == null) {
+                        success = false
+                        serviceResult = [
+                                success : false,
+                                unsupportedChannel: true,
+                                executionChannel : executionChannel,
+                                executedArtifact : executedArtifact
+                        ]
+                        errors.add("Execution channel non supportato: ${executionChannel}")
+                        return
+                    }
+
+                    Map updateMap = [
+                            sessionId : sessionId ?: ec.user.visitId,
+                            currentArea : document.area,
+                            currentSubArea : document.subArea,
+                            currentScreen : document.sourceScreenPath,
+                            loadedDocuments : [documentId],
+                            lastRetrievedDocuments: [documentId],
+                            lastExecutedArtifact : executedArtifact,
+                            lastResult : serviceResult
+                    ]
+                    if (mergedParameters) updateMap.currentBusinessObjects = mergedParameters
+                    try {
+                        Map updateResult = ec.service.sync().name('org.moqui.agent.AgentRuntimeServices.update#AgentSessionContext')
+                                .parameters(updateMap).call()
+                        updatedSessionContext = updateResult?.agentSessionContext
+                    } catch (Throwable sessionContextFailure) {
+                        messages.add("Session context update skipped: ${sessionContextFailure.message ?: sessionContextFailure.toString()}")
+                    }
+
+                    if (inferredContextDefaults) {
+                        messages.add("Contesto inferito: " + inferredContextDefaults.collect { k, v -> "${k}=${v}" }.join(', '))
+                    }
+                    messages.add("Eseguito ${executedArtifact.artifactName}")
+                } catch (Throwable t) {
+                    success = false
+                    String failureMessage = t.message ?: t.toString()
+                    errors.add(failureMessage)
+                    if (!serviceResult) {
+                        serviceResult = [
+                                success : false,
+                                operation : 'agent_prompt_execution_failed',
+                                errorType : t.getClass().getName(),
+                                errorMessage : failureMessage,
+                                executedArtifact: executedArtifact
+                        ]
+                    }
+                } finally {
+                    ec.service.sync().name('org.moqui.agent.AgentExecutionServices.log#ToolExecution').parameters([
+                        visitId : sessionId ?: ec.user.visitId,
+                        toolName : 'moqui_execute_agent_prompt',
+                        documentId : documentId,
+                        artifactTypeEnumId : executedArtifact?.artifactTypeEnumId,
+                        artifactName : executedArtifact?.artifactName,
+                        authzActionEnumId : executedArtifact?.authzActionEnumId,
+                        parameters : mergedParameters,
+                        result : serviceResult ?: [messages: messages, errors: errors],
+                        success : success,
+                        errorMessage : errors ? errors.join('; ') : null,
+                        confirmed : confirmed,
+                        riskLevelEnumId : riskLevelEnumId,
+                        startDate : startTs,
+                        endDate : ec.user.nowTimestamp
+                    ]).call()
+                }
+            ]]></script>
+        </actions>
+    </service>
+
+</services>

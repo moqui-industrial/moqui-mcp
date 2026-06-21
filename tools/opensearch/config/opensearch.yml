@@ -1,0 +1,14 @@
+# Template configuration for Moqui-integrated OpenSearch deployment.
+# This file can be copied into runtime/opensearch/config by the moqui-mcp Gradle task.
+
+cluster.name: moqui-opensearch
+node.name: moqui-search-node-1
+
+discovery.type: single-node
+network.host: 0.0.0.0
+http.port: 9200
+transport.port: 9300
+
+# Optional: keep this aligned with moqui-mcp vector search expectations.
+# index.knn: true
+# index.knn.algo_param.ef_search: 100

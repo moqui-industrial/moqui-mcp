@@ -1,0 +1,614 @@
+/*
+ * This software is in the public domain under CC0 1.0 Universal plus a
+ * Grant of Patent License.
+ */
+
+apply plugin: 'groovy'
+
+def componentNode = parseComponent(project)
+version = componentNode.'@version'
+def jarBaseName = componentNode.'@name'
+def moquiDir = projectDir.parentFile.parentFile.parentFile
+def frameworkDir = file(moquiDir.absolutePath + '/framework')
+
+repositories {
+    flatDir name: 'localLib', dirs: frameworkDir.absolutePath + '/lib'
+    mavenCentral()
+}
+
+tasks.withType(JavaCompile) { options.compilerArgs << "-proc:none" }
+tasks.withType(GroovyCompile) { options.compilerArgs << "-proc:none" }
+
+dependencies {
+    implementation project(':framework')
+    runtimeOnly 'jakarta.servlet:jakarta.servlet-api:6.0.0'
+}
+
+// by default the Java plugin runs test on build, change to not do that (only run test if explicit task)
+// no longer works as of gradle 4.8 or possibly earlier, use clear() instead: check.dependsOn.remove(test)
+check.dependsOn.clear()
+
+task cleanLib(type: Delete) { delete fileTree(dir: projectDir.absolutePath + '/lib', include: '*') }
+clean.dependsOn cleanLib
+
+jar {
+    destinationDirectory = file(projectDir.absolutePath + '/lib')
+    archiveBaseName = jarBaseName
+}
+
+tasks.register('copyDependencies', Copy) {
+    dependsOn cleanLib
+    from (configurations.runtimeClasspath -
+          project(':framework').configurations.runtimeClasspath -
+          project(':framework').tasks.named('jar').get().archiveFile.get().asFile)
+    into file(projectDir.absolutePath + '/lib')
+}
+
+jar.dependsOn copyDependencies
+
+def pythonExecutable = providers.gradleProperty('pythonExecutable').orElse('python3')
+def agentIndexerDir = layout.projectDirectory.dir('tools/agent-indexer')
+def toolsDir = layout.projectDirectory.dir('tools')
+def defaultOutputDir = agentIndexerDir.dir('output')
+def defaultMoquiRoot = providers.gradleProperty('moquiRoot').orElse(moquiDir.absolutePath)
+def defaultMcpEndpoint = providers.gradleProperty('mcpEndpoint').orElse('http://localhost:8080/mcp/message')
+def defaultRpcEndpoint = providers.gradleProperty('rpcEndpoint').orElse('http://localhost:8080/rpc/json')
+def defaultIndexName = providers.gradleProperty('indexName').orElse('moqui_agent_prompts_v1')
+def defaultSessionId = providers.gradleProperty('sessionId').orElse('gradle-session')
+def defaultAuthHeader = providers.gradleProperty('authHeader').orNull
+// scan-root for knowledge collection; defaults to moqui runtime/component to cover all components
+def defaultScanRoot = providers.gradleProperty('scanRoot').orElse(moquiDir.absolutePath + '/runtime/component')
+def openSearchRuntimeDir = file(moquiDir.absolutePath + '/runtime/opensearch')
+def openSearchConfigSourceDir = layout.projectDirectory.dir('tools/opensearch/config')
+def openSearchScriptsSourceDir = layout.projectDirectory.dir('tools/opensearch')
+
+tasks.register('generateAgentDocs', Exec) {
+    group = 'moqui-mcp'
+    description = 'Generate per-area agent document and evaluation files from SimpleScreens.'
+    workingDir = agentIndexerDir.asFile
+    commandLine pythonExecutable.get(),
+            'generate_full_simplescreens_extension.py',
+            '--moqui-root', defaultMoquiRoot.get(),
+            '--output-dir', defaultOutputDir.asFile.absolutePath
+}
+
+tasks.register('aggregateAgentDocs') {
+    group = 'moqui-mcp'
+    description = 'Aggregate per-area JSONL outputs into global agent document and evaluation files.'
+    inputs.dir(defaultOutputDir)
+    outputs.files(
+            defaultOutputDir.file('global-screen-prompt-documents.jsonl'),
+            defaultOutputDir.file('global-eval-queries.jsonl')
+    )
+    doLast {
+        File outputDir = defaultOutputDir.asFile
+        outputDir.mkdirs()
+        List<File> promptFiles = fileTree(outputDir) {
+            include '**/screen-prompt-documents.jsonl'
+            exclude 'global-screen-prompt-documents.jsonl'
+        }.files.sort { it.absolutePath }
+        List<File> queryFiles = fileTree(outputDir) {
+            include '**/screen-prompt-eval-queries.jsonl'
+            exclude 'global-eval-queries.jsonl'
+        }.files.sort { it.absolutePath }
+
+        File globalDocs = new File(outputDir, 'global-screen-prompt-documents.jsonl')
+        File globalQueries = new File(outputDir, 'global-eval-queries.jsonl')
+        globalDocs.text = ''
+        promptFiles.each { file -> globalDocs << file.getText('UTF-8'); if (!globalDocs.text.endsWith('\n')) globalDocs << '\n' }
+        globalQueries.text = ''
+        queryFiles.each { file -> globalQueries << file.getText('UTF-8'); if (!globalQueries.text.endsWith('\n')) globalQueries << '\n' }
+        println "Wrote ${globalDocs}"
+        println "Wrote ${globalQueries}"
+    }
+}
+
+tasks.register('prepareAgentDocs') {
+    group = 'moqui-mcp'
+    description = 'Generate and aggregate agent documents for indexing and evaluation.'
+    dependsOn 'generateAgentDocs', 'aggregateAgentDocs'
+}
+
+tasks.register('indexAgentDocs') {
+    group = 'moqui-mcp'
+    description = 'Call the Moqui JSON-RPC service to index global agent documents. Embeddings are generated by the service if configured.'
+    dependsOn 'prepareAgentDocs'
+    doLast {
+        if (!defaultAuthHeader) {
+            throw new GradleException("Missing -PauthHeader for indexAgentDocs")
+        }
+        File docsFile = new File(defaultOutputDir.asFile, 'global-screen-prompt-documents.jsonl')
+        if (!docsFile.exists()) throw new GradleException("Missing ${docsFile}; run prepareAgentDocs first")
+
+        def payload = groovy.json.JsonOutput.toJson([
+                jsonrpc: '2.0',
+                id     : 1,
+                method : 'org.moqui.agent.AgentDocumentServices.index#AgentDocuments',
+                params : [
+                        filePath    : docsFile.absolutePath,
+                        indexName   : defaultIndexName.get(),
+                        forceReindex: true
+                ]
+        ])
+        def connection = new URL(defaultRpcEndpoint.get()).openConnection()
+        connection.setRequestMethod('POST')
+        connection.setDoOutput(true)
+        connection.setRequestProperty('Content-Type', 'application/json')
+        connection.setRequestProperty('Authorization', defaultAuthHeader)
+        connection.outputStream.withWriter('UTF-8') { it << payload }
+        int code = connection.responseCode
+        String body = (code >= 200 && code < 300 ? connection.inputStream : connection.errorStream)?.getText('UTF-8')
+        println body
+        if (code < 200 || code >= 300) throw new GradleException("indexAgentDocs failed with HTTP ${code}")
+    }
+}
+
+tasks.register('loadMcpData', JavaExec) {
+    group = 'moqui-mcp'
+    description = 'Load moqui-mcp component data (seed, seed-initial, install). Run after deploying new data files to update ArtifactGroupMember and other seed records in the DB.'
+    workingDir = moquiDir
+    mainClass = '-jar'
+    jvmArgs = ['-server']
+    systemProperties = ['moqui.conf': 'conf/MoquiDevConf.xml', 'moqui.runtime': 'runtime']
+    args = ['moqui.war', 'load', 'types=seed,seed-initial,install', 'components=moqui-mcp']
+}
+
+tasks.register('loadArtifactGraphChunkedInternal', JavaExec) {
+    group = 'moqui-mcp'
+    description = 'Load the artifact graph from JSONL directly inside Moqui, avoiding web-request transaction limits.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'org.moqui.agent.tools.ArtifactGraphLoadRunner'
+    workingDir = moquiDir
+    def absoluteH2Url = 'jdbc:h2:' + new File(moquiDir, 'runtime/db/h2/moqui').absolutePath + ';lock_timeout=30000'
+    systemProperties = [
+            'moqui.conf'                    : 'conf/MoquiDevConf.xml',
+            'moqui.runtime'                 : 'runtime',
+            'entity_ds_url'                 : absoluteH2Url,
+            'bitronix.tm.journal.disk.logPart1Filename': moquiDir.absolutePath + '/runtime/txlog/batch-btm1.tlog',
+            'bitronix.tm.journal.disk.logPart2Filename': moquiDir.absolutePath + '/runtime/txlog/batch-btm2.tlog',
+            'bitronix.tm.serverId'          : 'moqui-mcp-batch',
+            'artifactGraph.verticesFilePath': providers.gradleProperty('verticesFilePath').orNull,
+            'artifactGraph.edgesFilePath'   : providers.gradleProperty('edgesFilePath').orNull,
+            'artifactGraph.summaryFilePath' : providers.gradleProperty('summaryFilePath').orNull,
+            'artifactGraph.graphId'         : providers.gradleProperty('graphId').orElse('AgentArtifactGraph').get(),
+            'artifactGraph.graphName'       : providers.gradleProperty('graphName').orElse('Agent Artifact Graph').get(),
+            'artifactGraph.graphDescription': providers.gradleProperty('graphDescription').orElse('Materialized structural graph for offline-generated Moqui agent artifacts.').get(),
+            'artifactGraph.mathModelId'     : providers.gradleProperty('mathModelId').orElse('AgentMoquiRagModel_v1').get(),
+            'artifactGraph.clearExisting'   : providers.gradleProperty('clearExisting').orElse('true').get(),
+            'artifactGraph.vertexChunkSize' : providers.gradleProperty('vertexChunkSize').orElse('1000').get(),
+            'artifactGraph.edgeChunkSize'   : providers.gradleProperty('edgeChunkSize').orElse('1000').get(),
+            'artifactGraph.graphTypeEnumId' : providers.gradleProperty('graphTypeEnumId').orNull
+    ].findAll { it.value != null }
+    doFirst {
+        new File(moquiDir, 'runtime/txlog').mkdirs()
+        if (!providers.gradleProperty('verticesFilePath').present) {
+            throw new GradleException("Missing -PverticesFilePath for loadArtifactGraphChunkedInternal")
+        }
+        if (!providers.gradleProperty('edgesFilePath').present) {
+            throw new GradleException("Missing -PedgesFilePath for loadArtifactGraphChunkedInternal")
+        }
+    }
+}
+
+tasks.register('configureRuntimeOpenSearch') {
+    group = 'moqui-mcp'
+    description = 'Copy moqui-mcp OpenSearch runtime configuration helpers onto an existing runtime/opensearch installation.'
+    doLast {
+        if (!openSearchRuntimeDir.exists()) throw new GradleException("Missing runtime/opensearch; run downloadOpenSearch first")
+        File targetConfigDir = new File(openSearchRuntimeDir, 'config')
+        File targetToolsDir = new File(openSearchRuntimeDir, 'tools/moqui-mcp')
+        targetConfigDir.mkdirs()
+        targetToolsDir.mkdirs()
+        copy {
+            from openSearchConfigSourceDir
+            into targetConfigDir
+        }
+        copy {
+            from(openSearchScriptsSourceDir) {
+                include 'install-opensearch-plugins.sh'
+                include 'plugins-report.sh'
+            }
+            into targetToolsDir
+        }
+        fileTree(targetToolsDir).matching { include '*.sh' }.files.each { it.setExecutable(true) }
+        println "Copied moqui-mcp OpenSearch config to ${targetConfigDir}"
+        println "Copied moqui-mcp OpenSearch helper scripts to ${targetToolsDir}"
+    }
+}
+
+tasks.register('prepareRuntimeOpenSearch') {
+    group = 'moqui-mcp'
+    description = 'Download standard OpenSearch and then copy moqui-mcp runtime configuration helpers.'
+    if (rootProject.tasks.findByName('downloadOpenSearch') != null) dependsOn rootProject.tasks.named('downloadOpenSearch')
+    dependsOn 'configureRuntimeOpenSearch'
+}
+
+tasks.register('extractMoquiXsdArtifactRelations', Exec) {
+    group = 'moqui-mcp'
+    description = 'Extract relation-bearing tags and attributes from Moqui XSD files.'
+    workingDir = agentIndexerDir.asFile
+    commandLine pythonExecutable.get(),
+            'moqui_xsd_artifact_relations.py',
+            '--xsd-dir', frameworkDir.absolutePath + '/xsd',
+            '--output', new File(defaultOutputDir.asFile, 'moqui-xsd-artifact-relations.json').absolutePath
+}
+
+tasks.register('generateArtifactGraphFromMoqui', Exec) {
+    group = 'moqui-mcp'
+    description = 'Generate artifact graph JSONL directly from Moqui entity/service/screen XML plus framework XSDs.'
+    dependsOn 'prepareScreenAgentDocs'
+    workingDir = agentIndexerDir.asFile
+    commandLine pythonExecutable.get(),
+            'generate_artifact_graph_from_moqui.py',
+            '--scan-root', defaultScanRoot.get(),
+            '--xsd-dir', frameworkDir.absolutePath + '/xsd',
+            '--graph-id', 'AgentArtifactGraph',
+            '--screen-docs', new File(defaultOutputDir.asFile, 'global-screen-prompt-documents.jsonl').absolutePath,
+            '--service-action-statements', new File(defaultOutputDir.asFile, 'service-actions-global/global-service-action-statements.jsonl').absolutePath,
+            '--service-action-documents', new File(defaultOutputDir.asFile, 'service-actions-global/global-service-action-documents.jsonl').absolutePath,
+            '--knowledge-docs', new File(defaultOutputDir.asFile, 'global-agent-knowledge-documents.jsonl').absolutePath,
+            '--output-dir', defaultOutputDir.asFile.absolutePath
+}
+
+tasks.register('exportArtifactGraphSeedXml', Exec) {
+    group = 'moqui-mcp'
+    description = 'Export generated artifact graph JSONL as Moqui entity-facade-xml seed data.'
+    dependsOn 'generateArtifactGraphFromMoqui'
+    workingDir = agentIndexerDir.asFile
+    commandLine pythonExecutable.get(),
+            'graph_jsonl_to_moqui_seed.py',
+            '--vertices', new File(defaultOutputDir.asFile, 'global-artifact-graph-vertices.jsonl').absolutePath,
+            '--edges', new File(defaultOutputDir.asFile, 'global-artifact-graph-edges.jsonl').absolutePath,
+            '--graph-id', 'AgentArtifactGraph',
+            '--output', new File(defaultOutputDir.asFile, 'AgentArtifactGraphGeneratedSeed.xml').absolutePath
+}
+
+tasks.register('smokeTestMcp', Exec) {
+    group = 'moqui-mcp'
+    description = 'Run MCP smoke test with runtime user profile (debug tools must be hidden). Use -PauthHeader=<value>.'
+    workingDir = toolsDir.asFile
+    doFirst {
+        if (!defaultAuthHeader) throw new GradleException("Missing -PauthHeader for smokeTestMcp")
+    }
+    commandLine pythonExecutable.get(),
+            'mcp_smoke_test.py',
+            '--endpoint', defaultMcpEndpoint.get(),
+            '--auth-header', defaultAuthHeader ?: '',
+            '--session-id', defaultSessionId.get(),
+            '--profile', 'runtime',
+            '--out-json', new File(toolsDir.asFile, 'output/mcp-smoke-test-report.json').absolutePath,
+            '--out-md', new File(toolsDir.asFile, 'output/mcp-smoke-test-report.md').absolutePath
+}
+
+tasks.register('smokeTestMcpDebug', Exec) {
+    group = 'moqui-mcp'
+    description = 'Run MCP smoke test with debug user profile (debug tools must be visible). Use -PauthHeader=<value>.'
+    workingDir = toolsDir.asFile
+    doFirst {
+        if (!defaultAuthHeader) throw new GradleException("Missing -PauthHeader for smokeTestMcpDebug")
+    }
+    commandLine pythonExecutable.get(),
+            'mcp_smoke_test.py',
+            '--endpoint', defaultMcpEndpoint.get(),
+            '--auth-header', defaultAuthHeader ?: '',
+            '--session-id', (defaultSessionId.get() + '-debug'),
+            '--profile', 'debug',
+            '--out-json', new File(toolsDir.asFile, 'output/mcp-smoke-test-debug-report.json').absolutePath,
+            '--out-md', new File(toolsDir.asFile, 'output/mcp-smoke-test-debug-report.md').absolutePath
+}
+
+// ─── Screen docs pipeline (existing, aliased for clarity) ────────────────────
+
+tasks.register('prepareScreenAgentDocs') {
+    group = 'moqui-mcp'
+    description = 'Alias for prepareAgentDocs: generate and aggregate screen-first prompt documents.'
+    dependsOn 'prepareAgentDocs'
+}
+
+// ─── Knowledge docs pipeline ──────────────────────────────────────────────────
+
+tasks.register('collectKnowledgeSources', Exec) {
+    group = 'moqui-mcp'
+    description = 'Scan moqui components for seed/demo/test knowledge sources and write inventory.'
+    workingDir = agentIndexerDir.asFile
+    commandLine pythonExecutable.get(),
+            'collect_seed_test_sources.py',
+            '--scan-root', defaultScanRoot.get(),
+            '--output-dir', defaultOutputDir.asFile.absolutePath
+}
+
+tasks.register('generateSeedScenarioDocs', Exec) {
+    group = 'moqui-mcp'
+    description = 'Extract seed scenario documents from inventory.'
+    dependsOn 'collectKnowledgeSources'
+    workingDir = agentIndexerDir.asFile
+    commandLine pythonExecutable.get(),
+            'extract_seed_scenarios.py',
+            '--inventory', new File(defaultOutputDir.asFile, 'source-knowledge-inventory.json').absolutePath,
+            '--output-dir', defaultOutputDir.asFile.absolutePath
+}
+
+tasks.register('generateTestWorkflowDocs', Exec) {
+    group = 'moqui-mcp'
+    description = 'Extract test workflow documents from inventory.'
+    dependsOn 'collectKnowledgeSources'
+    workingDir = agentIndexerDir.asFile
+    commandLine pythonExecutable.get(),
+            'extract_test_workflows.py',
+            '--inventory', new File(defaultOutputDir.asFile, 'source-knowledge-inventory.json').absolutePath,
+            '--output-dir', defaultOutputDir.asFile.absolutePath
+}
+
+tasks.register('generateSeedTestKnowledge', Exec) {
+    group = 'moqui-mcp'
+    description = 'Generate enriched seed/test knowledge documents.'
+    dependsOn 'generateSeedScenarioDocs', 'generateTestWorkflowDocs', 'aggregateAgentDocs'
+    workingDir = agentIndexerDir.asFile
+    commandLine pythonExecutable.get(),
+            'generate_seed_test_knowledge.py',
+            '--inventory', new File(defaultOutputDir.asFile, 'source-knowledge-inventory.json').absolutePath,
+            '--screen-docs', new File(defaultOutputDir.asFile, 'global-screen-prompt-documents.jsonl').absolutePath,
+            '--output-dir', defaultOutputDir.asFile.absolutePath
+}
+
+tasks.register('generateBusinessPatterns', Exec) {
+    group = 'moqui-mcp'
+    description = 'Generate generic business pattern documents from seed and test knowledge.'
+    dependsOn 'generateSeedScenarioDocs', 'generateTestWorkflowDocs'
+    workingDir = agentIndexerDir.asFile
+    commandLine pythonExecutable.get(),
+            'generate_business_patterns.py',
+            '--seed-docs', new File(defaultOutputDir.asFile, 'global-seed-scenario-documents.jsonl').absolutePath,
+            '--test-docs', new File(defaultOutputDir.asFile, 'global-test-workflow-documents.jsonl').absolutePath,
+            '--output-dir', defaultOutputDir.asFile.absolutePath
+}
+
+tasks.register('generateKnowledgeEvalQueries', Exec) {
+    group = 'moqui-mcp'
+    description = 'Generate evaluation queries for knowledge documents.'
+    dependsOn 'generateSeedTestKnowledge', 'generateBusinessPatterns'
+    workingDir = agentIndexerDir.asFile
+    commandLine pythonExecutable.get(),
+            'generate_knowledge_eval_queries.py',
+            '--docs', new File(defaultOutputDir.asFile, 'global-agent-knowledge-documents.jsonl').absolutePath,
+            '--output', new File(defaultOutputDir.asFile, 'global-knowledge-eval-queries.jsonl').absolutePath
+}
+
+tasks.register('prepareKnowledgeAgentDocs') {
+    group = 'moqui-mcp'
+    description = 'Full knowledge pipeline: collect, extract scenarios/workflows, generate knowledge docs, patterns, eval queries.'
+    dependsOn 'generateKnowledgeEvalQueries'
+}
+
+// ─── Combined (screen + knowledge) ───────────────────────────────────────────
+
+tasks.register('prepareAllAgentDocs') {
+    group = 'moqui-mcp'
+    description = 'Generate all agent docs (screen + knowledge) and merge into global-agent-all-documents.jsonl.'
+    dependsOn 'prepareScreenAgentDocs', 'prepareKnowledgeAgentDocs'
+    inputs.dir(defaultOutputDir)
+    outputs.file(defaultOutputDir.file('global-agent-all-documents.jsonl'))
+    doLast {
+        File outputDir = defaultOutputDir.asFile
+        List<File> parts = [
+            new File(outputDir, 'global-screen-prompt-documents.jsonl'),
+            new File(outputDir, 'global-agent-knowledge-documents.jsonl'),
+            new File(outputDir, 'global-business-pattern-documents.jsonl')
+        ].findAll { it.exists() }
+        File all = new File(outputDir, 'global-agent-all-documents.jsonl')
+        all.text = ''
+        parts.each { f -> all << f.getText('UTF-8'); if (!all.text.endsWith('\n')) all << '\n' }
+        println "Wrote ${all} (${parts.size()} sources merged)"
+    }
+}
+
+tasks.register('indexAllAgentDocs') {
+    group = 'moqui-mcp'
+    description = 'Index all agent documents (screen + knowledge) into OpenSearch via Moqui JSON-RPC.'
+    dependsOn 'prepareAllAgentDocs'
+    doLast {
+        if (!defaultAuthHeader) throw new GradleException("Missing -PauthHeader for indexAllAgentDocs")
+        File docsFile = new File(defaultOutputDir.asFile, 'global-agent-all-documents.jsonl')
+        if (!docsFile.exists()) throw new GradleException("Missing ${docsFile}; run prepareAllAgentDocs first")
+
+        def payload = groovy.json.JsonOutput.toJson([
+                jsonrpc: '2.0', id: 1,
+                method : 'org.moqui.agent.AgentDocumentServices.index#AgentDocuments',
+                params  : [filePath: docsFile.absolutePath, indexName: defaultIndexName.get(), forceReindex: true]
+        ])
+        def connection = new URL(defaultRpcEndpoint.get()).openConnection()
+        connection.setRequestMethod('POST')
+        connection.setDoOutput(true)
+        connection.setRequestProperty('Content-Type', 'application/json')
+        connection.setRequestProperty('Authorization', defaultAuthHeader)
+        connection.outputStream.withWriter('UTF-8') { it << payload }
+        int code = connection.responseCode
+        String body = (code >= 200 && code < 300 ? connection.inputStream : connection.errorStream)?.getText('UTF-8')
+        println body
+        if (code < 200 || code >= 300) throw new GradleException("indexAllAgentDocs failed with HTTP ${code}")
+    }
+}
+
+// ─── Evaluation tasks ─────────────────────────────────────────────────────────
+
+tasks.register('evaluateMcp', Exec) {
+    group = 'moqui-mcp'
+    description = '[legacy] Evaluate screen-first retrieval across bm25/vector/hybrid/hybrid_rerank. Use evaluateScreenMcp instead.'
+    dependsOn 'prepareAgentDocs'
+    workingDir = agentIndexerDir.asFile
+    doFirst {
+        if (!defaultAuthHeader) throw new GradleException("Missing -PauthHeader for evaluateMcp")
+    }
+    commandLine pythonExecutable.get(),
+            'evaluate_opensearch_modes.py',
+            '--docs', new File(defaultOutputDir.asFile, 'global-screen-prompt-documents.jsonl').absolutePath,
+            '--queries', new File(defaultOutputDir.asFile, 'global-eval-queries.jsonl').absolutePath,
+            '--mcp-endpoint', defaultMcpEndpoint.get(),
+            '--auth-header', defaultAuthHeader ?: '',
+            '--session-id', defaultSessionId.get(),
+            '--output-dir', defaultOutputDir.asFile.absolutePath
+}
+
+tasks.register('evaluateScreenMcp', Exec) {
+    group = 'moqui-mcp'
+    description = 'Evaluate screen-first retrieval across bm25/vector/hybrid/hybrid_rerank modes.'
+    dependsOn 'prepareScreenAgentDocs'
+    workingDir = agentIndexerDir.asFile
+    doFirst {
+        if (!defaultAuthHeader) throw new GradleException("Missing -PauthHeader for evaluateScreenMcp")
+    }
+    commandLine pythonExecutable.get(),
+            'evaluate_opensearch_modes.py',
+            '--docs', new File(defaultOutputDir.asFile, 'global-screen-prompt-documents.jsonl').absolutePath,
+            '--queries', new File(defaultOutputDir.asFile, 'global-eval-queries.jsonl').absolutePath,
+            '--mcp-endpoint', defaultMcpEndpoint.get(),
+            '--auth-header', defaultAuthHeader ?: '',
+            '--session-id', defaultSessionId.get(),
+            '--output-dir', defaultOutputDir.asFile.absolutePath
+}
+
+tasks.register('evaluateKnowledgeMcp', Exec) {
+    group = 'moqui-mcp'
+    description = 'Evaluate knowledge retrieval (seed scenarios, test workflows, business patterns) and anti-regression vs screen-only.'
+    dependsOn 'prepareAllAgentDocs'
+    workingDir = agentIndexerDir.asFile
+    doFirst {
+        if (!defaultAuthHeader) throw new GradleException("Missing -PauthHeader for evaluateKnowledgeMcp")
+    }
+    commandLine pythonExecutable.get(),
+            'evaluate_seed_test_knowledge.py',
+            '--screen-docs', new File(defaultOutputDir.asFile, 'global-screen-prompt-documents.jsonl').absolutePath,
+            '--knowledge-docs', new File(defaultOutputDir.asFile, 'global-agent-knowledge-documents.jsonl').absolutePath,
+            '--screen-queries', new File(defaultOutputDir.asFile, 'global-eval-queries.jsonl').absolutePath,
+            '--knowledge-queries', new File(defaultOutputDir.asFile, 'global-knowledge-eval-queries.jsonl').absolutePath,
+            '--output-dir', defaultOutputDir.asFile.absolutePath
+}
+
+tasks.register('evaluateLlmRerankMcp', Exec) {
+    group = 'moqui-mcp'
+    description = 'Evaluate hybrid_llm_rerank mode. Requires -PauthHeader and a configured reranker provider.'
+    dependsOn 'prepareAllAgentDocs'
+    workingDir = agentIndexerDir.asFile
+    doFirst {
+        if (!defaultAuthHeader) throw new GradleException("Missing -PauthHeader for evaluateLlmRerankMcp")
+    }
+    commandLine pythonExecutable.get(),
+            'evaluate_opensearch_modes.py',
+            '--docs', new File(defaultOutputDir.asFile, 'global-agent-all-documents.jsonl').absolutePath,
+            '--queries', new File(defaultOutputDir.asFile, 'global-knowledge-eval-queries.jsonl').absolutePath,
+            '--mcp-endpoint', defaultMcpEndpoint.get(),
+            '--auth-header', defaultAuthHeader ?: '',
+            '--session-id', defaultSessionId.get(),
+            '--output-dir', defaultOutputDir.asFile.absolutePath,
+            '--modes', 'hybrid_rerank,hybrid_llm_rerank',
+            '--sample-size', '80'
+}
+
+tasks.register('loadAgentMathModelSeed', JavaExec) {
+    group = 'moqui-mcp'
+    description = 'Load moqui-mcp math model seed data.'
+    workingDir = moquiDir
+    mainClass = '-jar'
+    jvmArgs = ['-server']
+    systemProperties = ['moqui.conf': 'conf/MoquiDevConf.xml', 'moqui.runtime': 'runtime']
+    args = ['moqui.war', 'load', 'types=seed-initial', 'components=moqui-mcp']
+}
+
+tasks.register('loadAgentArtifactGraph') {
+    group = 'moqui-mcp'
+    description = 'Load artifact graph JSONL export into MathEntities. Requires -PauthHeader, -PverticesFile, and -PedgesFile.'
+    doLast {
+        if (!defaultAuthHeader) throw new GradleException("Missing -PauthHeader for loadAgentArtifactGraph")
+        def verticesFile = providers.gradleProperty('verticesFile').orNull
+        def edgesFile = providers.gradleProperty('edgesFile').orNull
+        def summaryFile = providers.gradleProperty('summaryFile').orNull
+        if (!verticesFile || !edgesFile) throw new GradleException("Missing -PverticesFile or -PedgesFile for loadAgentArtifactGraph")
+
+        def payload = groovy.json.JsonOutput.toJson([
+                jsonrpc: '2.0',
+                id     : 1,
+                method : 'org.moqui.agent.AgentDocumentServices.load#ArtifactGraph',
+                params : [
+                        verticesFilePath  : verticesFile,
+                        edgesFilePath     : edgesFile,
+                        summaryFilePath   : summaryFile,
+                        createMathModelRun: true,
+                        graphId           : 'AgentArtifactGraph',
+                        mathModelId       : 'AgentMoquiRagModel_v1'
+                ]
+        ])
+        def connection = new URL(defaultRpcEndpoint.get()).openConnection()
+        connection.setRequestMethod('POST')
+        connection.setDoOutput(true)
+        connection.setRequestProperty('Content-Type', 'application/json')
+        connection.setRequestProperty('Authorization', defaultAuthHeader)
+        connection.outputStream.withWriter('UTF-8') { it << payload }
+        int code = connection.responseCode
+        String body = (code >= 200 && code < 300 ? connection.inputStream : connection.errorStream)?.getText('UTF-8')
+        println body
+        if (code < 200 || code >= 300) throw new GradleException("loadAgentArtifactGraph failed with HTTP ${code}")
+    }
+}
+
+tasks.register('registerAgentEmbeddingTensor') {
+    group = 'moqui-mcp'
+    description = 'Register embedding tensor metadata. Requires -PauthHeader and tensor/index settings.'
+    doLast {
+        if (!defaultAuthHeader) throw new GradleException("Missing -PauthHeader for registerAgentEmbeddingTensor")
+        def embeddingModel = providers.gradleProperty('embeddingModel').orElse('text-embedding-3-small').get()
+        def embeddingDimensions = providers.gradleProperty('embeddingDimensions').orElse('1536').get() as Integer
+        def documentCount = providers.gradleProperty('documentCount').orElse('0').get() as Integer
+        def tensorId = providers.gradleProperty('tensorId').orNull
+
+        def payload = groovy.json.JsonOutput.toJson([
+                jsonrpc: '2.0',
+                id     : 1,
+                method : 'org.moqui.agent.AgentMathModelServices.register#AgentEmbeddingTensor',
+                params : [
+                        tensorId            : tensorId,
+                        mathModelId         : 'AgentMoquiRagModel_v1',
+                        indexName           : defaultIndexName.get(),
+                        embeddingProvider   : 'openai',
+                        embeddingModel      : embeddingModel,
+                        embeddingDimensions : embeddingDimensions,
+                        documentCount       : documentCount,
+                        contentLocation     : "opensearch://${defaultIndexName.get()}/embedding",
+                        contentFormat       : 'opensearch-knn'
+                ]
+        ])
+        def connection = new URL(defaultRpcEndpoint.get()).openConnection()
+        connection.setRequestMethod('POST')
+        connection.setDoOutput(true)
+        connection.setRequestProperty('Content-Type', 'application/json')
+        connection.setRequestProperty('Authorization', defaultAuthHeader)
+        connection.outputStream.withWriter('UTF-8') { it << payload }
+        int code = connection.responseCode
+        String body = (code >= 200 && code < 300 ? connection.inputStream : connection.errorStream)?.getText('UTF-8')
+        println body
+        if (code < 200 || code >= 300) throw new GradleException("registerAgentEmbeddingTensor failed with HTTP ${code}")
+    }
+}
+
+tasks.register('summarizeAgentToolExecutions') {
+    group = 'moqui-mcp'
+    description = 'Summarize AgentToolExecutionElasticLog into a MathModelRun. Requires -PauthHeader.'
+    doLast {
+        if (!defaultAuthHeader) throw new GradleException("Missing -PauthHeader for summarizeAgentToolExecutions")
+        def payload = groovy.json.JsonOutput.toJson([
+                jsonrpc: '2.0',
+                id     : 1,
+                method : 'org.moqui.agent.AgentMathModelServices.summarize#AgentToolExecutionLogsToMathModelRun',
+                params : [mathModelId: 'AgentMoquiRagModel_v1']
+        ])
+        def connection = new URL(defaultRpcEndpoint.get()).openConnection()
+        connection.setRequestMethod('POST')
+        connection.setDoOutput(true)
+        connection.setRequestProperty('Content-Type', 'application/json')
+        connection.setRequestProperty('Authorization', defaultAuthHeader)
+        connection.outputStream.withWriter('UTF-8') { it << payload }
+        int code = connection.responseCode
+        String body = (code >= 200 && code < 300 ? connection.inputStream : connection.errorStream)?.getText('UTF-8')
+        println body
+        if (code < 200 || code >= 300) throw new GradleException("summarizeAgentToolExecutions failed with HTTP ${code}")
+    }
+}

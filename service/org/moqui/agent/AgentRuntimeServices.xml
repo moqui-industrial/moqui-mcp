@@ -1,0 +1,821 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- This software is in the public domain under CC0 1.0 Universal plus a 
+     Grant of Patent License.
+
+     To the extent possible under law, the author(s) have dedicated all
+     copyright and related and neighboring rights to this software to the
+     public domain worldwide. This software is distributed without any warranty.
+
+     You should have received a copy of the CC0 Public Domain Dedication
+     along with this software (see the LICENSE.md file). If not, see
+     <https://creativecommons.org/publicdomain/zero/1.0/>. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="get" noun="RuntimeContext" authenticate="true">
+        <out-parameters>
+            <parameter name="runtimeContext" type="Map"/>
+            <parameter name="userId"/>
+            <parameter name="username"/>
+            <parameter name="tenantId"/>
+            <parameter name="activeOrgId"/>
+            <parameter name="userOrgIds" type="List"/>
+            <parameter name="locale"/>
+            <parameter name="timezone"/>
+            <parameter name="permissionIdSet" type="Set"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.context.AgentContextUtil
+
+                def ctx = new AgentContextUtil().buildContext(ec)
+                runtimeContext = ctx
+                userId = ctx.userId
+                username = ctx.username
+                tenantId = ctx.tenantId
+                activeOrgId = ctx.activeOrgId
+                userOrgIds = ctx.userOrgIds
+                locale = ctx.locale
+                timezone = ctx.timezone
+                permissionIdSet = ctx.permissionIdSet
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="find" noun="RecordsGuarded" authenticate="true">
+        <in-parameters>
+            <parameter name="entityName" required="true"/>
+            <parameter name="conditions" type="Map"/>
+            <parameter name="orderBy" type="List"/>
+            <parameter name="limit" type="Integer"/>
+            <parameter name="fieldList" type="List"/>
+            <parameter name="queryPurpose"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="recordList" type="List"/>
+            <parameter name="limitUsed" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.AgentConfigUtil
+                def ef = ec.entity
+                if (!ef.isEntityDefined(entityName)) {
+                    ec.message.addError("Entity non definita: ${entityName}")
+                    return
+                }
+                Set<String> debugGroups = ['MCP_DEBUG', 'ADMIN'] as Set
+                Set<String> userGroups = (ec.user.userGroupIdSet ?: []) as Set<String>
+                boolean isPrivileged = !userGroups.intersect(debugGroups).isEmpty()
+                Set<String> sensitiveEntityNames = [
+                        'moqui.security.UserAccount',
+                        'mantle.party.Party',
+                        'mantle.account.invoice.Invoice',
+                        'mantle.order.OrderHeader',
+                        'mantle.account.payment.Payment',
+                        'mantle.account.financial.FinancialAccount'
+                ] as Set<String>
+                Map<String, List<String>> safeFieldListByEntity = [
+                        'moqui.security.UserAccount' : ['userId', 'username', 'userFullName', 'disabled'],
+                        'mantle.party.Party' : ['partyId', 'partyTypeEnumId', 'statusId', 'description'],
+                        'mantle.account.invoice.Invoice' : ['invoiceId', 'invoiceTypeEnumId', 'partyId', 'fromPartyId', 'toPartyId', 'invoiceDate', 'statusId'],
+                        'mantle.order.OrderHeader' : ['orderId', 'orderTypeEnumId', 'orderDate', 'entryDate', 'statusId', 'partyId', 'customerPartyId'],
+                        'mantle.account.payment.Payment' : ['paymentId', 'paymentTypeEnumId', 'partyId', 'amount', 'statusId', 'effectiveDate'],
+                        'mantle.account.financial.FinancialAccount' : ['financialAccountId', 'financialAccountTypeEnumId', 'ownerPartyId', 'statusId']
+                ]
+                if ((conditions == null || conditions.isEmpty()) && sensitiveEntityNames.contains(entityName) && !isPrivileged) {
+                    ec.message.addError("Query senza condizioni non consentita per entity sensibile: ${entityName}")
+                    return
+                }
+                def find = ef.find(entityName)
+
+                (conditions ?: [:]).each { k, v -> find.condition(k as String, v) }
+                if (orderBy) find.orderBy(orderBy as List<String>)
+                int maxLimit = AgentConfigUtil.getInt('moqui.agent.find.maxLimit', 100, 1)
+                limitUsed = Math.min((limit ?: 50) as Integer, maxLimit)
+                find.limit(limitUsed)
+
+                def rows = find.list()
+                List effectiveFieldList = (fieldList instanceof List && !fieldList.isEmpty()) ? (fieldList as List) : null
+                if (!effectiveFieldList && sensitiveEntityNames.contains(entityName) && !isPrivileged) {
+                    effectiveFieldList = safeFieldListByEntity[entityName]
+                }
+                if (effectiveFieldList) {
+                    recordList = rows.collect { ev ->
+                        def row = [:]
+                        effectiveFieldList.each { f -> row[f] = ev.get(f as String) }
+                        row
+                    }
+                } else {
+                    recordList = rows.collect { it.getMap() }
+                }
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="find" noun="Records" authenticate="true">
+        <implements service="org.moqui.agent.AgentRuntimeServices.find#RecordsGuarded"/>
+        <actions>
+            <service-call name="org.moqui.agent.AgentRuntimeServices.find#RecordsGuarded" in-map="context" out-map="context"/>
+        </actions>
+    </service>
+
+    <service verb="check" noun="RuntimeConfiguration" authenticate="true">
+        <in-parameters>
+            <parameter name="requireEmbedding" type="Boolean"/>
+            <parameter name="requireReranker" type="Boolean"/>
+            <parameter name="checkIndexes" type="Boolean"/>
+            <parameter name="failOnError" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="status"/>
+            <parameter name="errors" type="List"/>
+            <parameter name="warnings" type="List"/>
+            <parameter name="details" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.AgentConfigUtil
+
+                Map validation = AgentConfigUtil.validateRuntimeConfiguration(ec, [
+                    requireEmbedding : requireEmbedding,
+                    requireReranker : requireReranker,
+                    checkIndexes : checkIndexes
+                ])
+                status = validation.status
+                errors = (validation.errors ?: []) as List
+                warnings = (validation.warnings ?: []) as List
+                details = (validation.details ?: [:]) as Map
+
+                if (Boolean.TRUE.equals(failOnError) && errors) {
+                    throw new IllegalStateException(errors.join('; '))
+                }
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="get" noun="AgentSessionContext" authenticate="true">
+        <in-parameters>
+            <parameter name="sessionId"/>
+            <parameter name="visitId"/>
+            <parameter name="createIfMissing" type="Boolean" default="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agentSessionContext" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.AgentToolSupport
+
+                Closure findSessionContext = { String lookupVisitId, String lookupSessionId ->
+                    def find = ec.entity.find('moqui.agent.AgentSessionContext')
+                            .condition('userId', ec.user.userId)
+                    if (lookupVisitId) {
+                        return find.condition('visitId', lookupVisitId).one()
+                    } else if (lookupSessionId) {
+                        return find.condition('sessionId', lookupSessionId).one()
+                    } else {
+                        return null
+                    }
+                }
+
+                String effectiveVisitId = visitId ?: sessionId ?: ec.user.visitId
+                String effectiveSessionId = sessionId ?: effectiveVisitId
+                def nowTs = ec.user.nowTimestamp
+                def asCtx = findSessionContext(effectiveVisitId, effectiveSessionId)
+
+                if (!asCtx && Boolean.TRUE.equals(createIfMissing) && effectiveVisitId) {
+                    def userAccount = ec.entity.find('moqui.security.UserAccount').condition('userId', ec.user.userId).useCache(true).one()
+                    asCtx = ec.entity.makeValue('moqui.agent.AgentSessionContext')
+                    asCtx.setSequencedIdPrimary()
+                    asCtx.setAll([
+                            visitId : effectiveVisitId,
+                            userId : ec.user.userId,
+                            partyId : userAccount?.partyId,
+                            sessionId : effectiveSessionId,
+                            contextStorageModeEnumId : 'AgCtxExternalOnly',
+                            statusId : 'AgSessOpen',
+                            createdDate : nowTs,
+                            lastUpdatedDate : nowTs,
+                            lastActivityDate : nowTs
+                    ])
+                    try {
+                        asCtx.create()
+                    } catch (Throwable createFailure) {
+                        // Concurrent MCP requests can race on the unique visit/session indexes.
+                        // If another request created the row first, recover it and clear the transient entity errors.
+                        ec.message.clearErrors()
+                        for (int retry = 0; retry < 3 && !asCtx; retry++) {
+                            if (retry > 0) Thread.sleep(50L * retry)
+                            asCtx = findSessionContext(effectiveVisitId, effectiveSessionId)
+                        }
+                        if (!asCtx) throw createFailure
+                        asCtx.lastActivityDate = nowTs
+                        asCtx.lastUpdatedDate = nowTs
+                        asCtx.update()
+                    }
+                } else if (asCtx) {
+                    asCtx.lastActivityDate = nowTs
+                    if (effectiveSessionId && !asCtx.sessionId) asCtx.sessionId = effectiveSessionId
+                    asCtx.update()
+                }
+
+                if (asCtx) {
+                    agentSessionContext = asCtx.getMap()
+                    ['currentBusinessObjectsJson', 'loadedDocumentsJson', 'lastRetrievedDocumentsJson',
+                     'lastExecutedArtifactJson', 'lastResultJson'].each { String fieldName ->
+                        agentSessionContext[fieldName - 'Json'] = AgentToolSupport.fromJson(asCtx.getString(fieldName))
+                    }
+                }
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="update" noun="AgentSessionContext" authenticate="true">
+        <in-parameters>
+            <parameter name="sessionId"/>
+            <parameter name="visitId"/>
+            <parameter name="currentArea"/>
+            <parameter name="currentSubArea"/>
+            <parameter name="currentScreen"/>
+            <parameter name="currentBusinessObjects" type="Map"/>
+            <parameter name="loadedDocuments" type="List"/>
+            <parameter name="lastRetrievedDocuments" type="List"/>
+            <parameter name="lastExecutedArtifact" type="Map"/>
+            <parameter name="lastResult" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agentSessionContext" type="Map"/>
+        </out-parameters>
+        <actions>
+            <service-call name="org.moqui.agent.AgentRuntimeServices.get#AgentSessionContext"
+                          in-map="[sessionId:sessionId, visitId:visitId, createIfMissing:true]"
+                          out-map="getSessionResult"/>
+            <script><![CDATA[
+                import org.moqui.agent.AgentToolSupport
+
+                def asCtxMap = getSessionResult.agentSessionContext
+                if (!asCtxMap) throw new IllegalStateException('Impossibile inizializzare AgentSessionContext')
+                def asCtx = ec.entity.find('moqui.agent.AgentSessionContext')
+                        .condition('agentSessionContextId', asCtxMap.agentSessionContextId)
+                        .one()
+
+                if (currentArea != null) asCtx.currentArea = currentArea
+                if (currentSubArea != null) asCtx.currentSubArea = currentSubArea
+                if (currentScreen != null) asCtx.currentScreen = currentScreen
+                if (currentBusinessObjects != null) asCtx.currentBusinessObjectsJson = AgentToolSupport.toJson(currentBusinessObjects)
+                if (loadedDocuments != null) asCtx.loadedDocumentsJson = AgentToolSupport.toJson(loadedDocuments)
+                if (lastRetrievedDocuments != null) asCtx.lastRetrievedDocumentsJson = AgentToolSupport.toJson(lastRetrievedDocuments)
+                if (lastExecutedArtifact != null) asCtx.lastExecutedArtifactJson = AgentToolSupport.toJson(lastExecutedArtifact)
+                if (lastResult != null) asCtx.lastResultJson = AgentToolSupport.toJson(lastResult)
+                asCtx.lastUpdatedDate = ec.user.nowTimestamp
+                asCtx.lastActivityDate = ec.user.nowTimestamp
+                asCtx.update()
+
+                agentSessionContext = asCtx.getMap()
+                ['currentBusinessObjectsJson', 'loadedDocumentsJson', 'lastRetrievedDocumentsJson',
+                 'lastExecutedArtifactJson', 'lastResultJson'].each { String fieldName ->
+                    agentSessionContext[fieldName - 'Json'] = AgentToolSupport.fromJson(asCtx.getString(fieldName))
+                }
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="clear" noun="AgentSessionContext" authenticate="true">
+        <in-parameters>
+            <parameter name="sessionId"/>
+            <parameter name="visitId"/>
+        </in-parameters>
+        <actions>
+            <script><![CDATA[
+                String effectiveVisitId = visitId ?: sessionId ?: ec.user.visitId
+                if (!effectiveVisitId) return
+                ec.entity.find('moqui.agent.AgentSessionContext')
+                        .condition('visitId', effectiveVisitId)
+                        .condition('userId', ec.user.userId)
+                        .deleteAll()
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="check" noun="ArtifactAccess" authenticate="true">
+        <in-parameters>
+            <parameter name="artifactTypeEnumId" required="true"/>
+            <parameter name="artifactName" required="true"/>
+            <parameter name="authzActionEnumId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="allowed" type="Boolean"/>
+            <parameter name="resourceAccess"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.AgentToolSupport
+
+                String actionEnumId = authzActionEnumId ?: 'AUTHZA_VIEW'
+                resourceAccess = "${artifactTypeEnumId}:${actionEnumId}:${artifactName}"
+                allowed = AgentToolSupport.checkArtifactAccess(ec, artifactTypeEnumId, actionEnumId, artifactName)
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="call" noun="ServiceGuarded" authenticate="true">
+        <in-parameters>
+            <parameter name="serviceName" required="true"/>
+            <parameter name="parameters" type="Map"/>
+            <parameter name="confirmed" type="Boolean"/>
+            <parameter name="toolName"/>
+            <parameter name="documentId"/>
+            <parameter name="sessionId"/>
+            <parameter name="directToolCall" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="serviceResult" type="Map"/>
+            <parameter name="authzActionEnumId"/>
+            <parameter name="riskLevelEnumId"/>
+            <parameter name="confirmationRequired" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.AgentToolSupport
+
+                if (!ec.service.isServiceDefined(serviceName)) {
+                    throw new IllegalArgumentException("Service non definito: ${serviceName}")
+                }
+
+                authzActionEnumId = AgentToolSupport.getServiceAuthzActionEnumId(serviceName)
+                boolean allowed = AgentToolSupport.checkArtifactAccess(ec, 'AT_SERVICE', authzActionEnumId, serviceName)
+                if (!allowed) {
+                    throw new org.moqui.context.ArtifactAuthorizationException("Accesso negato al servizio ${serviceName}")
+                }
+
+                riskLevelEnumId = AgentToolSupport.determineRiskLevel(serviceName, null, null)
+                boolean shouldLogDirectly = Boolean.TRUE.equals(directToolCall) || (toolName == 'moqui_call_service_guarded')
+
+                if (riskLevelEnumId == 'high' && !Boolean.TRUE.equals(confirmed)) {
+                    confirmationRequired = true
+                    serviceResult = [
+                            success : false,
+                            confirmationRequired: true,
+                            riskLevel : riskLevelEnumId,
+                            serviceName : serviceName,
+                            authzActionEnumId : authzActionEnumId
+                    ]
+                    if (shouldLogDirectly) {
+                        ec.service.sync().name('org.moqui.agent.AgentExecutionServices.log#ToolExecution').parameters([
+                            visitId : sessionId ?: ec.user.visitId,
+                            toolName : toolName ?: 'moqui_call_service_guarded',
+                            documentId : documentId,
+                            artifactTypeEnumId : 'AT_SERVICE',
+                            artifactName : serviceName,
+                            authzActionEnumId : authzActionEnumId,
+                            parameters : parameters ?: [:],
+                            result : serviceResult,
+                            success : false,
+                            confirmed : confirmed,
+                            riskLevelEnumId : riskLevelEnumId
+                        ]).call()
+                    }
+                    return
+                }
+
+                boolean hadErrorsBeforeCall = ec.message.hasError()
+                String errorsBeforeCall = hadErrorsBeforeCall ? ec.message.getErrorsString() : null
+                serviceResult = ec.service.sync().name(serviceName).parameters(parameters ?: [:]).call()
+                boolean hasErrorsAfterCall = ec.message.hasError()
+                String errorsAfterCall = hasErrorsAfterCall ? ec.message.getErrorsString() : null
+                if ((!hadErrorsBeforeCall && hasErrorsAfterCall) ||
+                        (hadErrorsBeforeCall && errorsAfterCall && errorsAfterCall != errorsBeforeCall)) {
+                    throw new IllegalStateException("Service ${serviceName} returned errors: ${errorsAfterCall}")
+                }
+
+                if (shouldLogDirectly) {
+                    ec.service.sync().name('org.moqui.agent.AgentExecutionServices.log#ToolExecution').parameters([
+                        visitId : sessionId ?: ec.user.visitId,
+                        toolName : toolName ?: 'moqui_call_service_guarded',
+                        documentId : documentId,
+                        artifactTypeEnumId : 'AT_SERVICE',
+                        artifactName : serviceName,
+                        authzActionEnumId : authzActionEnumId,
+                        parameters : parameters ?: [:],
+                        result : serviceResult,
+                        success : true,
+                        confirmed : confirmed,
+                        riskLevelEnumId : riskLevelEnumId
+                    ]).call()
+                }
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="call" noun="Service" authenticate="true">
+        <implements service="org.moqui.agent.AgentRuntimeServices.call#ServiceGuarded"/>
+        <actions>
+            <service-call name="org.moqui.agent.AgentRuntimeServices.call#ServiceGuarded" in-map="context" out-map="context"/>
+        </actions>
+    </service>
+
+    <service verb="plan" noun="PromptExecution" authenticate="true">
+        <in-parameters>
+            <parameter name="queryText" required="true"/>
+            <parameter name="parameters" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="success" type="Boolean"/>
+            <parameter name="executionPlan" type="Map"/>
+            <parameter name="messages" type="List"/>
+            <parameter name="errors" type="List"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                messages = []
+                errors = []
+                executionPlan = org.moqui.agent.AgentToolSupport.inferStructuredPromptPlan(
+                        ec, queryText, (parameters instanceof Map ? (parameters as Map) : [:]))
+                success = Boolean.TRUE.equals(executionPlan?.planType)
+                if (!success) {
+                    errors.add("No structured execution plan inferred for query: ${queryText}")
+                } else if (executionPlan?.planningSource) {
+                    messages.add("Planning source: ${executionPlan.planningSource}")
+                }
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="resolve" noun="AndExecuteAgentPrompt" authenticate="true" transaction-timeout="120">
+        <description>Composite tool: searches agent prompts, picks the top executable document, and executes it — all in one round-trip. Reduces LLM latency by eliminating the separate search → get → execute cycle.</description>
+        <in-parameters>
+            <parameter name="queryText" required="true"/>
+            <parameter name="parameters" type="Map"/>
+            <parameter name="confirmed" type="Boolean"/>
+            <parameter name="dryRun" type="Boolean"/>
+            <parameter name="area"/>
+            <parameter name="subArea"/>
+            <parameter name="domainObject"/>
+            <parameter name="actionKind"/>
+            <parameter name="operationEffect"/>
+            <parameter name="currentScreen"/>
+            <parameter name="sessionId"/>
+            <parameter name="limit" type="Integer" default="5"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="success" type="Boolean"/>
+            <parameter name="resolvedDocumentId"/>
+            <parameter name="resolvedDocument" type="Map"/>
+            <parameter name="candidateCount" type="Integer"/>
+            <parameter name="executionResult" type="Map"/>
+            <parameter name="messages" type="List"/>
+            <parameter name="errors" type="List"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                messages = []
+                errors = []
+
+                Map directAssetCompositeResult = org.moqui.agent.AgentToolSupport.executeStructuredPromptPlan(
+                        ec, queryText, (parameters instanceof Map ? (parameters as Map) : [:]), confirmed, dryRun, sessionId ?: ec.user.visitId)
+                if (directAssetCompositeResult?.compositeExecution) {
+                    resolvedDocumentId = 'agent-prompt://asset/assetdetail/updateasset'
+                    success = Boolean.TRUE.equals(directAssetCompositeResult.success)
+                    executionResult = directAssetCompositeResult.executionResult as Map
+                    if (directAssetCompositeResult.messages) messages.addAll(directAssetCompositeResult.messages as List)
+                    if (directAssetCompositeResult.errors) errors.addAll(directAssetCompositeResult.errors as List)
+                    return
+                }
+
+                // Step 1: search for matching executable documents
+                Map searchResult = ec.service.sync()
+                    .name('org.moqui.agent.AgentPromptServices.search#AgentPrompts')
+                    .parameters([
+                        queryText  : queryText,
+                        area       : area,
+                        subArea    : subArea,
+                        domainObject: domainObject,
+                        actionKind : actionKind,
+                        operationEffect: operationEffect,
+                        currentScreen: currentScreen,
+                        limit      : Math.min(limit ?: 5, 10),
+                        includeNonExecutable: false
+                    ]).call()
+
+                List candidates = (searchResult?.resultList ?: []) as List
+                candidateCount = candidates.size() as Integer
+
+                // Step 2: pick the top runtimeExecutable document
+                Map topDoc = candidates.find { Map d -> Boolean.TRUE.equals(d.runtimeExecutable) } as Map
+                if (!topDoc && candidates) topDoc = candidates.first() as Map
+
+                Map preferredAggregateRootDoc = org.moqui.agent.AgentToolSupport.selectPreferredAggregateRootDocument(queryText, candidates)
+                if (preferredAggregateRootDoc) topDoc = preferredAggregateRootDoc
+                if (!preferredAggregateRootDoc && org.moqui.agent.AgentToolSupport.looksLikeProjectAggregatePrompt(queryText)) {
+                    Map fallbackProjectRootDoc = ec.service.sync()
+                            .name('org.moqui.agent.AgentPromptServices.get#AgentDocument')
+                            .parameters([documentId : 'agent-prompt://project/findproject/createproject'])
+                            .call()?.document as Map
+                    if (Boolean.TRUE.equals(fallbackProjectRootDoc?.runtimeExecutable)) topDoc = fallbackProjectRootDoc
+                }
+                if (!preferredAggregateRootDoc && org.moqui.agent.AgentToolSupport.inferStructuredPromptPlan(
+                        ec, queryText, (parameters instanceof Map ? (parameters as Map) : [:]))?.planType) {
+                    Map fallbackAssetDoc = ec.service.sync()
+                            .name('org.moqui.agent.AgentPromptServices.get#AgentDocument')
+                            .parameters([documentId : 'agent-prompt://asset/assetdetail/updateasset'])
+                            .call()?.document as Map
+                    if (Boolean.TRUE.equals(fallbackAssetDoc?.runtimeExecutable)) topDoc = fallbackAssetDoc
+                }
+
+                if (!topDoc) {
+                    success = false
+                    errors.add("No agent document found for query: ${queryText}")
+                    return
+                }
+
+                resolvedDocumentId = topDoc.documentId as String
+                resolvedDocument = topDoc
+
+                if (!Boolean.TRUE.equals(topDoc.runtimeExecutable)) {
+                    success = false
+                    errors.add("Top document ${resolvedDocumentId} is not executable. Inspect it with moqui_get_agent_document.")
+                    return
+                }
+
+                Map inferredParameters = org.moqui.agent.AgentToolSupport.inferPromptParameters(queryText, topDoc)
+                Map mergedParameters = [:]
+                if (inferredParameters) mergedParameters.putAll(inferredParameters)
+                if (parameters instanceof Map) mergedParameters.putAll(parameters as Map)
+
+                Map aggregateResult = org.moqui.agent.AgentToolSupport.executeProjectAggregatePlan(
+                        ec, queryText, topDoc, mergedParameters, confirmed, dryRun, sessionId ?: ec.user.visitId)
+                if (aggregateResult?.compositeExecution) {
+                    success = Boolean.TRUE.equals(aggregateResult.success)
+                    executionResult = aggregateResult.executionResult as Map
+                    if (aggregateResult.messages) messages.addAll(aggregateResult.messages as List)
+                    if (aggregateResult.errors) errors.addAll(aggregateResult.errors as List)
+                    return
+                }
+
+                // Step 3: execute
+                Map execResult = ec.service.sync()
+                    .name('org.moqui.agent.AgentExecutionServices.execute#AgentPrompt')
+                    .parameters([
+                        documentId       : resolvedDocumentId,
+                        parameters       : mergedParameters,
+                        confirmed        : confirmed,
+                        dryRun           : dryRun,
+                        useSessionContext : true,
+                        sessionId        : sessionId ?: ec.user.visitId
+                    ]).call()
+
+                success = Boolean.TRUE.equals(execResult?.success)
+                executionResult = execResult
+                if (execResult?.messages) messages.addAll(execResult.messages as List)
+                if (execResult?.errors) errors.addAll(execResult.errors as List)
+            ]]></script>
+        </actions>
+    </service>
+
+    <!-- Scheduled via ServiceJob or cron; call with retainDays=30 to keep last 30 days of session contexts -->
+    <service verb="purge" noun="OldAgentSessionContexts" authenticate="anonymous-all" transaction="use-or-begin">
+        <in-parameters>
+            <parameter name="retainDays" type="Integer" default="30"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="deletedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import java.sql.Timestamp
+
+                int days = Math.max(1, retainDays ?: 30)
+                long cutoffMs = System.currentTimeMillis() - (days * 86400000L)
+                Timestamp cutoff = new Timestamp(cutoffMs)
+
+                def toDelete = ec.entity.find('moqui.agent.AgentSessionContext')
+                    .condition('lastUpdatedDate', org.moqui.entity.EntityCondition.ComparisonOperator.LESS_THAN, cutoff)
+                    .list()
+
+                deletedCount = toDelete.size()
+                if (deletedCount > 0) {
+                    toDelete*.delete()
+                    ec.logger.info("purge#OldAgentSessionContexts: deleted ${deletedCount} contexts older than ${days} days (cutoff ${cutoff})")
+                }
+            ]]></script>
+        </actions>
+    </service>
+
+
+    <service verb="clear" noun="AgentRerankCache" authenticate="true">
+        <out-parameters>
+            <parameter name="cacheName"/>
+            <parameter name="cleared" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                cacheName = org.moqui.agent.AgentConfigUtil.getString(
+                        "moqui.agent.reranker.cache.name", "moqui.agent.reranker.result")
+                ec.cache.getCache(cacheName).clear()
+                cleared = true
+            ]]></script>
+        </actions>
+    </service>
+
+    <!-- External session registry services (for LibreChat, OpenCode, ChatGPT, etc.) -->
+
+    <service verb="create" noun="AgentSessionContext" authenticate="true">
+        <description>Register an external AI/chat session. Stores only external context identifiers, never chat transcript.</description>
+        <in-parameters>
+            <parameter name="clientTypeEnumId"/>
+            <parameter name="clientBaseUrl"/>
+            <parameter name="clientSessionId"/>
+            <parameter name="clientContextId"/>
+            <parameter name="clientConversationId"/>
+            <parameter name="clientUrl"/>
+            <parameter name="providerEnumId"/>
+            <parameter name="providerSessionId"/>
+            <parameter name="providerConversationId"/>
+            <parameter name="providerThreadId"/>
+            <parameter name="providerLastResponseId"/>
+            <parameter name="modelName"/>
+            <parameter name="contextStorageModeEnumId" default-value="AgCtxExternalOnly"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agentSessionContextId"/>
+            <parameter name="agentSessionId"/>
+            <parameter name="agentSessionContext" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                String userId = ec.user.userId
+                def nowTs = ec.user.nowTimestamp
+                def userAccount = ec.entity.find('moqui.security.UserAccount').condition('userId', userId).useCache(true).one()
+
+                // Update existing session if clientTypeEnumId + clientSessionId + userId already present
+                def existing = (clientTypeEnumId && clientSessionId) ? ec.entity.find('moqui.agent.AgentSessionContext')
+                    .condition('clientTypeEnumId', clientTypeEnumId)
+                    .condition('clientSessionId', clientSessionId)
+                    .condition('userId', userId)
+                    .one() : null
+
+                if (existing) {
+                    existing.setAll([
+                        clientBaseUrl            : clientBaseUrl,
+                        clientContextId          : clientContextId,
+                        clientConversationId     : clientConversationId,
+                        clientUrl                : clientUrl,
+                        providerEnumId           : providerEnumId,
+                        providerSessionId        : providerSessionId,
+                        providerConversationId   : providerConversationId,
+                        providerThreadId         : providerThreadId,
+                        providerLastResponseId   : providerLastResponseId,
+                        modelName                : modelName,
+                        contextStorageModeEnumId : contextStorageModeEnumId ?: 'AgCtxExternalOnly',
+                        statusId                 : 'AgSessOpen',
+                        lastUpdatedDate          : nowTs,
+                        lastActivityDate         : nowTs,
+                        partyId                  : existing.partyId ?: userAccount?.partyId
+                    ])
+                    existing.update()
+                    agentSessionContextId = existing.agentSessionContextId
+                    agentSessionId = existing.agentSessionContextId
+                    agentSessionContext = existing.getMap()
+                    return
+                }
+
+                def sess = ec.entity.makeValue('moqui.agent.AgentSessionContext')
+                sess.setSequencedIdPrimary()
+                sess.setAll([
+                    userId                   : userId,
+                    partyId                  : userAccount?.partyId,
+                    clientTypeEnumId         : clientTypeEnumId,
+                    clientBaseUrl            : clientBaseUrl,
+                    clientSessionId          : clientSessionId,
+                    clientContextId          : clientContextId,
+                    clientConversationId     : clientConversationId,
+                    clientUrl                : clientUrl,
+                    providerEnumId           : providerEnumId,
+                    providerSessionId        : providerSessionId,
+                    providerConversationId   : providerConversationId,
+                    providerThreadId         : providerThreadId,
+                    providerLastResponseId   : providerLastResponseId,
+                    modelName                : modelName,
+                    contextStorageModeEnumId : contextStorageModeEnumId ?: 'AgCtxExternalOnly',
+                    statusId                 : 'AgSessOpen',
+                    createdDate              : nowTs,
+                    lastUpdatedDate          : nowTs,
+                    lastActivityDate         : nowTs
+                ])
+                sess.create()
+                agentSessionContextId = sess.agentSessionContextId
+                agentSessionId = sess.agentSessionContextId
+                agentSessionContext = sess.getMap()
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="update" noun="AgentSessionExternalContext" authenticate="true">
+        <description>Update external context fields of an existing agent session. Only updates the caller's own session unless ADMIN/MCP_DEBUG.</description>
+        <in-parameters>
+            <parameter name="agentSessionContextId"/>
+            <parameter name="sessionId"/>
+            <parameter name="clientSessionId"/>
+            <parameter name="clientContextId"/>
+            <parameter name="clientConversationId"/>
+            <parameter name="clientUrl"/>
+            <parameter name="providerSessionId"/>
+            <parameter name="providerConversationId"/>
+            <parameter name="providerThreadId"/>
+            <parameter name="providerLastResponseId"/>
+            <parameter name="modelName"/>
+            <parameter name="statusId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agentSessionContext" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                String userId = ec.user.userId
+                Set userGroups = (ec.user.userGroupIdSet ?: []) as Set
+                boolean isPrivileged = userGroups.contains('ADMIN') || userGroups.contains('MCP_DEBUG')
+
+                def sess = agentSessionContextId
+                    ? ec.entity.find('moqui.agent.AgentSessionContext').condition('agentSessionContextId', agentSessionContextId).one()
+                    : (sessionId ? ec.entity.find('moqui.agent.AgentSessionContext').condition('sessionId', sessionId).condition('userId', userId).one() : null)
+                if (!sess) throw new IllegalArgumentException('AgentSessionContext not found')
+                if (!isPrivileged && sess.userId != userId) throw new IllegalArgumentException('Not authorized to update this session')
+
+                Map updates = [lastUpdatedDate: ec.user.nowTimestamp]
+                if (clientSessionId != null) updates.clientSessionId = clientSessionId
+                if (clientContextId != null) updates.clientContextId = clientContextId
+                if (clientConversationId != null) updates.clientConversationId = clientConversationId
+                if (clientUrl != null) updates.clientUrl = clientUrl
+                if (providerSessionId != null) updates.providerSessionId = providerSessionId
+                if (providerConversationId != null) updates.providerConversationId = providerConversationId
+                if (providerThreadId != null) updates.providerThreadId = providerThreadId
+                if (providerLastResponseId != null) updates.providerLastResponseId = providerLastResponseId
+                if (modelName != null) updates.modelName = modelName
+                if (statusId != null) updates.statusId = statusId
+                updates.lastActivityDate = ec.user.nowTimestamp
+                sess.setAll(updates)
+                sess.update()
+                agentSessionContext = sess.getMap()
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="find" noun="AgentSessionsForUser" authenticate="true">
+        <description>List agent sessions for the current user. ADMIN/MCP_DEBUG can see all sessions.</description>
+        <in-parameters>
+            <parameter name="statusId"/>
+            <parameter name="clientTypeEnumId"/>
+            <parameter name="limit" type="Integer" default="20"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agentSessionList" type="List"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.AgentConfigUtil
+                String userId = ec.user.userId
+                Set userGroups = (ec.user.userGroupIdSet ?: []) as Set
+                boolean isPrivileged = userGroups.contains('ADMIN') || userGroups.contains('MCP_DEBUG')
+
+                def find = ec.entity.find('moqui.agent.AgentSessionContext')
+                if (!isPrivileged) find.condition('userId', userId)
+                if (statusId) find.condition('statusId', statusId)
+                if (clientTypeEnumId) find.condition('clientTypeEnumId', clientTypeEnumId)
+                int maxLimit = AgentConfigUtil.getInt('moqui.agent.find.maxLimit', 100, 1)
+                find.limit(Math.min(limit ?: 20, maxLimit))
+                find.orderBy(['-lastActivityDate', '-lastUpdatedDate'])
+                agentSessionList = find.list().collect { it.getMap() }
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="close" noun="AgentSessionContext" authenticate="true">
+        <description>Close an agent session. Only closes the caller's own session unless ADMIN/MCP_DEBUG.</description>
+        <in-parameters>
+            <parameter name="agentSessionContextId"/>
+            <parameter name="sessionId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agentSessionContext" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                String userId = ec.user.userId
+                Set userGroups = (ec.user.userGroupIdSet ?: []) as Set
+                boolean isPrivileged = userGroups.contains('ADMIN') || userGroups.contains('MCP_DEBUG')
+
+                def sess = agentSessionContextId
+                    ? ec.entity.find('moqui.agent.AgentSessionContext').condition('agentSessionContextId', agentSessionContextId).one()
+                    : (sessionId ? ec.entity.find('moqui.agent.AgentSessionContext').condition('sessionId', sessionId).condition('userId', userId).one() : null)
+                if (!sess) throw new IllegalArgumentException('AgentSessionContext not found')
+                if (!isPrivileged && sess.userId != userId) throw new IllegalArgumentException('Not authorized to close this session')
+
+                sess.setAll([statusId: 'AgSessClosed', lastUpdatedDate: ec.user.nowTimestamp])
+                sess.lastActivityDate = ec.user.nowTimestamp
+                sess.update()
+                agentSessionContext = sess.getMap()
+            ]]></script>
+        </actions>
+    </service>
+
+</services>

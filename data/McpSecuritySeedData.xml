@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- This software is in the public domain under CC0 1.0 Universal plus a 
+     Grant of Patent License.
+
+     To the extent possible under law, the author(s) have dedicated all
+     copyright and related and neighboring rights to this software to the
+     public domain worldwide. This software is distributed without any warranty.
+
+     You should have received a copy of the CC0 Public Domain Dedication
+     along with this software (see the LICENSE.md file). If not, see
+     <https://creativecommons.org/publicdomain/zero/1.0/>. -->
+
+<entity-facade-xml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-facade-3.xsd" type="seed-initial">
+
+    <moqui.security.UserGroup userGroupId="MCP_RUNTIME" description="MCP Runtime Users"/>
+    <moqui.security.UserGroup userGroupId="MCP_INDEX_ADMIN" description="MCP Index Administration"/>
+    <moqui.security.UserGroup userGroupId="MCP_DEBUG" description="MCP Debug and developer tools"/>
+
+    <moqui.security.ArtifactGroup artifactGroupId="McpRuntimeServices" description="MCP runtime JSON-RPC services"/>
+    <moqui.security.ArtifactGroup artifactGroupId="McpIndexingServices" description="MCP indexing and ingestion services"/>
+    <moqui.security.ArtifactGroup artifactGroupId="McpDebugServices" description="MCP debug and developer services"/>
+    <moqui.security.ArtifactGroup artifactGroupId="McpDebugFinancialAccountValidation" description="MCP debug access for FinancialAccount state comparison and update validation"/>
+    <moqui.security.ArtifactGroup artifactGroupId="McpDebugFullArtifactAccess" description="MCP debug full artifact access for end-to-end validation"/>
+    <moqui.security.ArtifactGroup artifactGroupId="McpRuntimeEntities" description="MCP runtime internal entities"/>
+    <moqui.security.ArtifactGroup artifactGroupId="McpRestPaths" description="MCP REST API Paths"/>
+
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.mcp.McpServices.mcp#Initialize" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.mcp.McpServices.list#Tools" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.mcp.McpServices.mcp#ToolsCall" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.mcp.McpServices.mcp#Ping" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.get#RuntimeContext" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.check#RuntimeConfiguration" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.get#AgentSessionContext" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.update#AgentSessionContext" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.clear#AgentSessionContext" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.check#ArtifactAccess" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.find#RecordsGuarded" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentPromptServices.search#AgentPrompts" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentPromptServices.get#AgentDocument" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentExecutionServices.execute#AgentPrompt" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentExecutionServices.log#ToolExecution" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.create#AgentSessionContext" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.update#AgentSessionExternalContext" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.find#AgentSessionsForUser" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.close#AgentSessionContext" artifactTypeEnumId="AT_SERVICE"/>
+
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpIndexingServices" artifactName="org.moqui.agent.AgentDocumentServices.add#AgentPromptManualDocumentData" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentDocumentServices.get#QueryEmbedding" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpIndexingServices" artifactName="org.moqui.agent.AgentDocumentServices.transform#AgentPromptDocumentMapping" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpIndexingServices" artifactName="org.moqui.agent.AgentDocumentServices.index#AgentDocuments" artifactTypeEnumId="AT_SERVICE"/>
+
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpDebugServices" artifactName="org.moqui.agent.AgentRuntimeServices.call#ServiceGuarded" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpDebugServices" artifactName="org.moqui.agent.RagServices.search#Artifacts" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpDebugServices" artifactName="org.moqui.agent.RagServices.get#Artifact" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpDebugServices" artifactName="org\\.moqui\\.agent\\.RagServices\\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpDebugServices" artifactName="org.moqui.impl.BasicServices.echo#Data" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpDebugFinancialAccountValidation" artifactName="mantle.account.financial..*" artifactTypeEnumId="AT_ENTITY" nameIsPattern="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpDebugFinancialAccountValidation" artifactName="mantle.account.FinancialAccountServices..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpDebugFullArtifactAccess" artifactName=".*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpDebugFullArtifactAccess" artifactName=".*" artifactTypeEnumId="AT_ENTITY" nameIsPattern="Y" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpDebugFullArtifactAccess" artifactName=".*" artifactTypeEnumId="AT_XML_SCREEN" nameIsPattern="Y" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpDebugFullArtifactAccess" artifactName=".*" artifactTypeEnumId="AT_XML_SCREEN_TRANS" nameIsPattern="Y" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpDebugFullArtifactAccess" artifactName=".*" artifactTypeEnumId="AT_REST_PATH" nameIsPattern="Y" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeEntities" artifactName="moqui.agent.AgentSessionContext" artifactTypeEnumId="AT_ENTITY"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeEntities" artifactName="moqui.agent.AgentToolExecutionLog" artifactTypeEnumId="AT_ENTITY"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeEntities" artifactName="moqui.agent.AgentDocumentIndexRun" artifactTypeEnumId="AT_ENTITY"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeEntities" artifactName="moqui.rag.ArtifactQueryEmbeddingCache" artifactTypeEnumId="AT_ENTITY"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRestPaths" artifactName="/mcp" artifactTypeEnumId="AT_REST_PATH"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRestPaths" artifactName="/mcp/.*" artifactTypeEnumId="AT_REST_PATH" nameIsPattern="Y"/>
+
+    <moqui.security.ArtifactAuthz userGroupId="MCP_RUNTIME" artifactGroupId="McpRuntimeServices" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthz userGroupId="MCP_RUNTIME" artifactGroupId="McpRuntimeEntities" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthz userGroupId="MCP_RUNTIME" artifactGroupId="McpRestPaths" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthz userGroupId="MCP_INDEX_ADMIN" artifactGroupId="McpIndexingServices" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthz userGroupId="MCP_INDEX_ADMIN" artifactGroupId="McpRuntimeEntities" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthz userGroupId="MCP_DEBUG" artifactGroupId="McpDebugServices" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthz userGroupId="MCP_DEBUG" artifactGroupId="McpDebugFinancialAccountValidation" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthz userGroupId="MCP_DEBUG" artifactGroupId="McpDebugFullArtifactAccess" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthz userGroupId="MCP_DEBUG" artifactGroupId="McpRuntimeEntities" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthz userGroupId="ADMIN" artifactGroupId="McpRuntimeServices" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthz userGroupId="ADMIN" artifactGroupId="McpIndexingServices" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthz userGroupId="ADMIN" artifactGroupId="McpDebugServices" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthz userGroupId="ADMIN" artifactGroupId="McpRuntimeEntities" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+
+    <moqui.entity.document.DataDocumentUserGroup dataDocumentId="AgentPromptDocument" userGroupId="MCP_RUNTIME"/>
+
+    <!-- LibreChat proxy access permission, same pattern as KibanaRemote/ElasticRemote in MoquiSetupData.xml -->
+    <moqui.security.UserPermission userPermissionId="LibreChatRemote" description="LibreChat Proxy Access"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="LibreChatRemote" fromDate="2026-01-01 00:00:00"/>
+</entity-facade-xml>

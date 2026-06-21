@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- This software is in the public domain under CC0 1.0 Universal plus a
+     Grant of Patent License.
+
+     To the extent possible under law, the author(s) have dedicated all
+     copyright and related and neighboring rights to this software to the
+     public domain worldwide. This software is distributed without any warranty.
+
+     You should have received a copy of the CC0 Public Domain Dedication
+     along with this software (see the LICENSE.md file). If not, see
+     <https://creativecommons.org/publicdomain/zero/1.0/>. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="search" noun="Artifacts" authenticate="true">
+        <in-parameters>
+            <parameter name="queryText"/>
+            <parameter name="artifactTypeList" type="List"/>
+            <parameter name="componentNameList" type="List"/>
+            <parameter name="limit" type="Integer"/>
+            <parameter name="filters" type="Map"/>
+            <parameter name="indexName"/>
+            <!-- override search mode: bm25 | knn | hybrid (default: system property moqui.agent.search.mode or bm25) -->
+            <parameter name="searchMode"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="resultList" type="List"/>
+            <parameter name="searchModeUsed" type="String"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.AgentConfigUtil
+                import org.moqui.agent.search.AgentArtifactSearchFacadeImpl
+
+                def size = (limit ?: 20) as Integer
+                ec.service.sync().name('org.moqui.agent.AgentRuntimeServices.check#RuntimeConfiguration').parameters([
+                    requireEmbedding : false,
+                    requireReranker : false,
+                    checkIndexes : false,
+                    failOnError : true
+                ]).call()
+
+                String mode = (searchMode ?: AgentConfigUtil.getString('moqui.agent.search.mode', 'bm25')).toString().toLowerCase()
+
+                def filterList = []
+                if (artifactTypeList) filterList.add([terms:[artifact_type: artifactTypeList]])
+                if (componentNameList) filterList.add([terms:[component: componentNameList]])
+                (filters ?: [:]).each { k, v -> filterList.add([term:[(k):v]]) }
+
+                def facade = new AgentArtifactSearchFacadeImpl(ec)
+                def querySpec
+
+                if (!facade.indexExists(indexName)) {
+                    resultList = []
+                    searchModeUsed = 'unavailable'
+                    return
+                }
+
+                // bm25 base query (always built; used directly or as should clause in hybrid)
+                def bm25Must = []
+                if (queryText) bm25Must.add([multi_match:[query:queryText, fields:['title^4','artifact_name^3','summary^2','content']]])
+                def bm25Query = [bool: [must: bm25Must ?: [[match_all:[:]]], filter: filterList]]
+
+                if (mode in ['knn', 'hybrid']) {
+                    List queryVector = null
+                    try {
+                        def embResult = ec.service.sync()
+                            .name('org.moqui.agent.AgentDocumentServices.get#QueryEmbedding')
+                            .parameters([queryText: queryText])
+                            .call()
+                        queryVector = embResult?.embedding as List
+                    } catch (Exception embEx) {
+                        ec.logger.warn("search#Artifacts: embedding failed (${embEx.message}), falling back to bm25")
+                    }
+
+                    if (queryVector && queryVector.size() > 0) {
+                        if (mode == 'knn') {
+                            querySpec = [
+                                size: size,
+                                query: [knn: [embedding: [vector: queryVector, k: size]]]
+                            ]
+                            if (filterList) querySpec.post_filter = [bool: [filter: filterList]]
+                        } else { // hybrid
+                            Map hybridLexicalClause = bm25Must ? (bm25Must[0] as Map).collectEntries { entry ->
+                                if (entry.key == 'multi_match' && entry.value instanceof Map) {
+                                    return [(entry.key): ((entry.value as Map) + [boost: 0.4f])]
+                                }
+                                return [(entry.key): entry.value]
+                            } : [match_all:[boost: 0.4f]]
+                            querySpec = [
+                                size: size,
+                                query: [bool: [
+                                    should: [
+                                        hybridLexicalClause,
+                                        [knn: [embedding: [vector: queryVector, k: size, boost: 0.6f]]]
+                                    ],
+                                    filter: filterList
+                                ]]
+                            ]
+                        }
+                    } else {
+                        mode = 'bm25_fallback'
+                        querySpec = [size: size, query: bm25Query]
+                    }
+                } else {
+                    querySpec = [size: size, query: bm25Query]
+                }
+
+                def searchResult
+                try {
+                    searchResult = facade.searchArtifactDocuments(querySpec, indexName)
+                } catch (Exception knnEx) {
+                    // kNN query failed (index may not have knn_vector mapping) — fall back to bm25
+                    if (mode in ['knn', 'hybrid']) {
+                        ec.logger.warn("search#Artifacts: kNN query failed (${knnEx.message}), falling back to bm25. Ensure moqui_artifacts_v1 was created with knn_vector mapping.")
+                        mode = 'bm25_fallback'
+                        querySpec = [size: size, query: bm25Query]
+                        searchResult = facade.searchArtifactDocuments(querySpec, indexName)
+                    } else {
+                        throw knnEx
+                    }
+                }
+                resultList = (((searchResult?.hits ?: [:]).hits ?: []) as List)
+                searchModeUsed = mode
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Artifact" authenticate="true">
+        <in-parameters>
+            <parameter name="artifactType"/>
+            <parameter name="artifactName"/>
+            <parameter name="indexName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="artifactDocument" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.search.AgentArtifactSearchFacadeImpl
+
+                def facade = new AgentArtifactSearchFacadeImpl(ec)
+                String normalizedArtifactName = artifactName
+                if (artifactType == 'service' && artifactName?.contains('.') && artifactName?.contains('#')) {
+                    normalizedArtifactName = artifactName.tokenize('.').last()
+                }
+
+                List querySpecs = [
+                    [
+                        size: 1,
+                        query: [
+                            ids: [
+                                values: ["moqui-mcp:${artifactType}:${normalizedArtifactName}".toString()]
+                            ]
+                        ]
+                    ],
+                    [
+                        size: 1,
+                        query: [
+                            bool: [
+                                filter: [
+                                    [term:[artifact_type: artifactType]]
+                                ],
+                                must: [
+                                    [match:[artifact_name:[query: normalizedArtifactName, operator:'and']]]
+                                ]
+                            ]
+                        ]
+                    ],
+                    [
+                        size: 1,
+                        query: [
+                            bool: [
+                                filter: [
+                                    [term:[artifact_type: artifactType]]
+                                ],
+                                should: [
+                                    [match:[artifact_name:[query: normalizedArtifactName, boost: 3.0d]]],
+                                    [match:[title:[query: normalizedArtifactName, boost: 2.0d]]],
+                                    [match:[summary:[query: normalizedArtifactName]]]
+                                ],
+                                minimum_should_match: 1
+                            ]
+                        ]
+                    ]
+                ]
+
+                artifactDocument = [:]
+                for (Map querySpec in querySpecs) {
+                    def res = facade.searchArtifactDocuments(querySpec, indexName)
+                    artifactDocument = (((res?.hits ?: [:]).hits ?: []) as List).findResult { it?._source as Map } ?: [:]
+                    if (artifactDocument) break
+                }
+            ]]></script>
+        </actions>
+    </service>
+
+</services>

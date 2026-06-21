@@ -1,0 +1,254 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- This software is in the public domain under CC0 1.0 Universal plus a 
+     Grant of Patent License.
+
+     To the extent possible under law, the author(s) have dedicated all
+     copyright and related and neighboring rights to this software to the
+     public domain worldwide. This software is distributed without any warranty.
+
+     You should have received a copy of the CC0 Public Domain Dedication
+     along with this software (see the LICENSE.md file). If not, see
+     <https://creativecommons.org/publicdomain/zero/1.0/>. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="search" noun="AgentPrompts" authenticate="true">
+        <in-parameters>
+            <parameter name="queryText"/>
+            <parameter name="area"/>
+            <parameter name="subArea"/>
+            <parameter name="domainObject"/>
+            <parameter name="actionKind"/>
+            <parameter name="operationEffect"/>
+            <parameter name="limit" type="Integer"/>
+            <parameter name="mode"/>
+            <parameter name="includeNonExecutable" type="Boolean"/>
+            <parameter name="currentScreen"/>
+            <parameter name="currentBusinessObjects" type="Map"/>
+            <parameter name="indexName"/>
+            <parameter name="includeEmbedding" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="resultList" type="List"/>
+            <parameter name="topDocument" type="Map"/>
+            <parameter name="searchDebug" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.AgentConfigUtil
+                import org.moqui.agent.AgentToolSupport
+                import org.moqui.agent.search.AgentPromptSearchFacade
+
+                def startTs = ec.user.nowTimestamp
+                String effectiveIndex = indexName ?: AgentConfigUtil.getString('moqui.agent.prompt.indexName', 'moqui_agent_prompts_v1')
+                String requestedMode = (mode ?: AgentConfigUtil.getNormalizedString('moqui.agent.search.mode', 'hybrid')).toString().toLowerCase()
+
+                Map searchResult = new AgentPromptSearchFacade(ec).search(context)
+                resultList = (searchResult.resultList ?: []) as List
+                topDocument = searchResult.topDocument as Map
+                searchDebug = searchResult.searchDebug as Map
+
+                boolean elasticTelemetryEnabled = AgentConfigUtil.getBoolean('moqui.agent.elasticTelemetry.enabled', false)
+                if (elasticTelemetryEnabled) {
+                    int maxSummaryLength = AgentConfigUtil.getInt('moqui.agent.elasticTelemetry.maxSummaryLength', 2000, 1)
+                    boolean includeParameters = AgentConfigUtil.getBoolean('moqui.agent.elasticTelemetry.includeParameters', false)
+                    boolean includeResults = AgentConfigUtil.getBoolean('moqui.agent.elasticTelemetry.includeResults', false)
+                    String parameterSummary = includeParameters ?
+                        AgentToolSupport.toJson([
+                            queryText : queryText,
+                            area : area,
+                            subArea : subArea,
+                            domainObject : domainObject,
+                            actionKind : actionKind,
+                            operationEffect : operationEffect,
+                            currentScreen : currentScreen,
+                            currentBusinessObjects : currentBusinessObjects,
+                            limit : limit,
+                            mode : mode
+                        ]) :
+                        "queryTextLength=${queryText?.size() ?: 0}; area=${area ?: ''}; subArea=${subArea ?: ''}; domainObject=${domainObject ?: ''}; actionKind=${actionKind ?: ''}; mode=${requestedMode}"
+                    String resultSummary = includeResults ?
+                        AgentToolSupport.toJson([
+                            found : resultList?.size() ?: 0,
+                            topDocument : topDocument,
+                            searchDebug : searchDebug
+                        ]) :
+                        "found=${resultList?.size() ?: 0}; topDocumentId=${topDocument?.documentId ?: ''}; topScore=${topDocument?.score ?: ''}; modeUsed=${searchDebug?.modeUsed ?: requestedMode}"
+                    if (parameterSummary?.length() > maxSummaryLength) parameterSummary = parameterSummary.substring(0, maxSummaryLength)
+                    if (resultSummary?.length() > maxSummaryLength) resultSummary = resultSummary.substring(0, maxSummaryLength)
+                    try {
+                        // searchDebug has flattened reranker fields (rerankerProvider, rerankerModel, etc.)
+                        boolean rrApplied = Boolean.TRUE.equals(searchDebug?.rerankerApplied)
+                        boolean rrFallback = Boolean.TRUE.equals(searchDebug?.rerankerFallbackUsed)
+                        ec.service.sync().name('org.moqui.agent.AgentTelemetryServices.create#AgentToolExecutionElasticLog')
+                            .disableAuthz()
+                            .parameters([
+                                logDate : ec.user.nowTimestamp,
+                                userId : ec.user.userId,
+                                visitId : ec.user.visitId,
+                                mcpSessionId : ec.user.visitId,
+                                toolName : 'moqui_search_agent_prompts',
+                                documentId : topDocument?.documentId,
+                                documentKind : topDocument?.documentKind,
+                                area : topDocument?.area ?: area,
+                                subArea : topDocument?.subArea ?: subArea,
+                                domainObject : topDocument?.domainObject ?: domainObject,
+                                actionKind : topDocument?.actionKind ?: actionKind,
+                                operationEffect : topDocument?.operationEffect ?: operationEffect,
+                                executionChannel : topDocument?.executionChannel,
+                                success : true,
+                                runningTimeMillis : Math.max(0L, ec.user.nowTimestamp.time - startTs.time) as BigDecimal,
+                                resultStatus : 'ok',
+                                parameterSummary : parameterSummary,
+                                resultSummary : resultSummary,
+                                searchMode : (searchDebug?.modeUsed ?: requestedMode),
+                                resultCount : (resultList?.size() ?: 0) as Integer,
+                                topDocumentId : topDocument?.documentId,
+                                topScore : topDocument?.score != null ? (topDocument.score as BigDecimal) : null,
+                                indexName : (searchDebug?.indexName ?: effectiveIndex),
+                                // LLM reranker telemetry (populated when hybrid_llm_rerank ran)
+                                rerankerProvider : searchDebug?.rerankerProvider?.toString(),
+                                rerankerModel : searchDebug?.rerankerModel?.toString(),
+                                rerankerMode : rrApplied ? 'llm' : (rrFallback ? 'fallback' : null),
+                                rerankerCandidateCount : searchDebug?.rerankerCandidateCount as Integer,
+                                rerankerSelectedDocumentId : searchDebug?.rerankerSelectedDocumentId?.toString(),
+                                rerankerReasonCode : searchDebug?.rerankerReasonCode?.toString(),
+                                rerankerConfidence : searchDebug?.rerankerConfidence != null ? (searchDebug.rerankerConfidence as BigDecimal) : null,
+                                rerankerLatencyMillis : searchDebug?.rerankerLatencyMillis != null ? (searchDebug.rerankerLatencyMillis as BigDecimal) : null,
+                                rerankerFallbackUsed : rrFallback ? 'Y' : 'N'
+                            ]).call()
+                    } catch (Throwable t) {
+                        ec.logger.warn("Unable to write AgentToolExecutionElasticLog telemetry for moqui_search_agent_prompts: ${t.message}")
+                    }
+                }
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="search" noun="AllDocuments" authenticate="true">
+        <description>Unified search across moqui_agent_prompts_v1 (screen-first + knowledge) and moqui_artifacts_v1 (raw artifacts). Merges results using Reciprocal Rank Fusion (RRF). Returns merged results with a sourceIndex and rrfScore field per hit.</description>
+        <in-parameters>
+            <parameter name="queryText" required="true"/>
+            <parameter name="limit" type="Integer" default="5"/>
+            <parameter name="searchMode"/>
+            <parameter name="promptIndexName"/>
+            <parameter name="artifactIndexName"/>
+            <parameter name="rrfK" type="Integer" default="60"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="resultList" type="List"/>
+            <parameter name="promptCount" type="Integer"/>
+            <parameter name="artifactCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.AgentConfigUtil
+
+                int effectiveLimit = Math.min(limit ?: 5, 20)
+                // Fetch more candidates from each index so RRF has good signal
+                int fetchLimit = Math.min(effectiveLimit * 3, 30)
+                int k = rrfK ?: 60
+
+                // Search prompt index (screen-first + knowledge docs)
+                List promptResults = []
+                try {
+                    def promptRes = ec.service.sync()
+                        .name('org.moqui.agent.AgentPromptServices.search#AgentPrompts')
+                        .parameters([
+                            queryText : queryText,
+                            limit     : fetchLimit,
+                            mode      : searchMode,
+                            indexName : promptIndexName
+                        ]).call()
+                    promptResults = (promptRes?.resultList ?: []) as List
+                    promptResults = promptResults.collect { Map doc ->
+                        def result = new LinkedHashMap(doc)
+                        result.sourceIndex = 'moqui_agent_prompts_v1'
+                        result
+                    }
+                } catch (Exception e) {
+                    ec.logger.warn("search#AllDocuments: prompt index search failed: ${e.message}")
+                }
+
+                // Search artifact index (services, entities, screens, XSD)
+                List artifactResults = []
+                try {
+                    def artifactRes = ec.service.sync()
+                        .name('org.moqui.agent.RagServices.search#Artifacts')
+                        .parameters([
+                            queryText : queryText,
+                            limit     : fetchLimit,
+                            searchMode: searchMode,
+                            indexName : artifactIndexName
+                        ]).call()
+                    def rawHits = (artifactRes?.resultList ?: []) as List
+                    artifactResults = rawHits.collect { Map hit ->
+                        def src = (hit._source ?: hit) as Map
+                        def result = new LinkedHashMap(src)
+                        result.sourceIndex = 'moqui_artifacts_v1'
+                        if (hit._score != null) result.score = hit._score
+                        result
+                    }
+                } catch (Exception e) {
+                    ec.logger.warn("search#AllDocuments: artifact index search failed: ${e.message}")
+                }
+
+                promptCount = promptResults.size() as Integer
+                artifactCount = artifactResults.size() as Integer
+
+                // Reciprocal Rank Fusion: rrfScore(d) = sum_over_lists( 1 / (k + rank_in_list) )
+                // rank is 1-based position in the score-sorted list from each index
+                Map<String, Double> rrfScores = new LinkedHashMap<>()
+                Map<String, Map> docById = new LinkedHashMap<>()
+
+                Closure applyList = { List results, String idField ->
+                    results.sort { a, b -> (b.score ?: 0) <=> (a.score ?: 0) }
+                    results.eachWithIndex { Map doc, int idx ->
+                        String docId = (doc[idField] ?: doc.documentId ?: doc.artifactName ?: "${doc.sourceIndex}:${idx}")?.toString()
+                        if (!docId) return
+                        rrfScores[docId] = (rrfScores[docId] ?: 0.0d) + (1.0d / (k + idx + 1))
+                        if (!docById.containsKey(docId)) docById[docId] = doc
+                    }
+                }
+
+                applyList(promptResults, 'documentId')
+                applyList(artifactResults, 'artifactName')
+
+                resultList = rrfScores.entrySet()
+                    .sort { a, b -> b.value <=> a.value }
+                    .take(effectiveLimit)
+                    .collect { entry ->
+                        Map doc = new LinkedHashMap(docById[entry.key] ?: [:])
+                        doc.rrfScore = entry.value
+                        doc
+                    }
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="get" noun="AgentDocument" authenticate="true">
+        <in-parameters>
+            <parameter name="documentId" required="true"/>
+            <parameter name="indexName"/>
+            <parameter name="includeEmbedding" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="document" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.AgentConfigUtil
+                import org.moqui.agent.AgentToolSupport
+                import org.moqui.agent.search.ElasticBackendAdapter
+
+                String effectiveIndex = indexName ?: AgentConfigUtil.getString('moqui.agent.prompt.indexName', 'moqui_agent_prompts_v1')
+                def adapter = new ElasticBackendAdapter(ec)
+                if (!adapter.indexExists(effectiveIndex)) return
+                document = adapter.getDocument(effectiveIndex, documentId)
+                if (document && !document.documentId) document.documentId = documentId
+                if (document && !Boolean.TRUE.equals(includeEmbedding)) document = AgentToolSupport.stripEmbedding(document)
+            ]]></script>
+        </actions>
+    </service>
+
+</services>

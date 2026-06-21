@@ -1,0 +1,591 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- This software is in the public domain under CC0 1.0 Universal plus a 
+     Grant of Patent License.
+
+     To the extent possible under law, the author(s) have dedicated all
+     copyright and related and neighboring rights to this software to the
+     public domain worldwide. This software is distributed without any warranty.
+
+     You should have received a copy of the CC0 Public Domain Dedication
+     along with this software (see the LICENSE.md file). If not, see
+     <https://creativecommons.org/publicdomain/zero/1.0/>. -->
+
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- MCP Services using Moqui's built-in JSON-RPC support -->
+
+    <service verb="mcp" noun="Initialize" authenticate="true" allow-remote="true" transaction-timeout="30">
+        <description>Handle MCP initialize request using Moqui authentication</description>
+        <in-parameters>
+            <parameter name="sessionId" required="false"/>
+            <parameter name="protocolVersion" required="true"/>
+            <parameter name="capabilities" type="Map"/>
+            <parameter name="clientInfo" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.AgentConfigUtil
+                import org.moqui.context.ExecutionContext
+                import org.moqui.impl.context.UserFacadeImpl.UserInfo
+                
+                ExecutionContext ec = context.ec
+                
+                // Permissions are handled by Moqui's artifact authorization system
+                // Users must be in appropriate MCP_* groups with access to the MCP artifact groups
+                
+                ec.logger.info("MCP Initialize for session ${sessionId}, user ${ec.user.userId}")
+                
+                // Validate protocol version - support common MCP versions with version negotiation
+                def supportedVersions = ["2025-11-25", "2025-06-18", "2024-11-05", "2024-10-07", "2023-06-05"]
+                if (!supportedVersions.contains(protocolVersion)) {
+                    throw new Exception("Unsupported protocol version: ${protocolVersion}. Supported versions: ${supportedVersions.join(', ')}")
+                }
+
+                // Get current user context (if authenticated)
+                def userId = ec.user.userId
+                def userAccountId = userId ? userId : null
+
+                // Try to load root instructions from wiki
+                def instructions = null
+                try {
+                    def wikiPage = ec.entity.find("moqui.resource.wiki.WikiPage")
+                        .condition("wikiSpaceId", "MCP_SCREEN_DOCS")
+                        .condition("pagePath", "root")
+                        .useCache(true)
+                        .one()
+
+                    if (wikiPage) {
+                        def wikiSpace = ec.entity.find("moqui.resource.wiki.WikiSpace")
+                            .condition("wikiSpaceId", wikiPage.wikiSpaceId)
+                            .one()
+
+                        if (wikiSpace) {
+                            def pageLocation = wikiSpace.rootPageLocation
+                            if (!pageLocation.endsWith('/')) pageLocation += '/'
+                            pageLocation += wikiPage.pagePath + '.md'
+
+                            def pageRef = ec.resource.getLocationReference(pageLocation)
+                            def wikiText = pageRef?.getText()
+                            if (wikiText) {
+                                instructions = wikiText
+                                ec.logger.info("MCP Initialize: Loaded root instructions from wiki")
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    ec.logger.debug("Could not load root instructions from wiki: ${e.message}")
+                }
+
+                // Fallback to hardcoded instructions if wiki not available
+                if (!instructions) {
+                    instructions = "This server provides access to Moqui ERP through MCP. For create, update, assign, close, confirm, submit, delete, or other state-changing user requests, do not answer from general knowledge and do not only describe what you would do. You must call a Moqui tool. For natural-language user intents, especially multi-entity requests like project plus milestones plus tasks, use moqui_resolve_and_execute first. Use moqui_search_agent_prompts → moqui_get_agent_document → moqui_execute_agent_prompt only when you already know the exact document to run. If you execute a root create document directly for a composite request, include queryText so Moqui can decompose the aggregate. Use moqui_get_runtime_context and moqui_get_session_context to ground follow-up prompts. Do not bypass Moqui artifact authorization. Use moqui_check_artifact_access to verify access before mutating operations."
+                }
+                
+                // Build server capabilities - don't fetch actual tools/resources during init
+                // Tools and resources will be discovered via separate list requests per MCP spec
+                def serverCapabilities = [
+                    tools: [listChanged: true],
+                    resources: [subscribe: true, listChanged: true],
+                    logging: [:]
+                ]
+                
+                // Build server info with useful metadata
+                def moquiVersion = ec.factory.moquiVersion ?: "Unknown"
+                def runtimePath = ec.factory.runtimePath ?: "Unknown"
+                
+                Set userGroupIdSet = (ec.user.userGroupIdSet ?: []) as Set
+                boolean isPrivileged = userGroupIdSet.contains('ADMIN') || userGroupIdSet.contains('MCP_DEBUG')
+
+                def serverInfo = [
+                    name: "Moqui MCP Server",
+                    version: "2.0.2",
+                    moquiVersion: moquiVersion,
+                    currentUser: ec.user?.username,
+                    currentUserId: ec.user?.userId
+                ]
+                if (isPrivileged) {
+                    serverInfo.hostname = System.getenv("HOSTNAME") ?: System.getProperty("hostname", "Unknown")
+                    serverInfo.javaVersion = System.getProperty("java.version") ?: "Unknown"
+                    serverInfo.javaVendor = System.getProperty("java.vendor") ?: "Unknown"
+                    serverInfo.runtimePath = runtimePath
+                    try {
+                        serverInfo.serverStartTime = java.lang.management.ManagementFactory.getRuntimeMXBean().getStartTime()
+                    } catch (Exception ignored) {}
+                }
+
+                Map runtimeConfig = AgentConfigUtil.validateRuntimeConfiguration(ec, [checkIndexes: false])
+                
+                result = [
+                    protocolVersion: protocolVersion,
+                    capabilities: serverCapabilities,
+                    serverInfo: serverInfo,
+                    sessionId: sessionId,
+                    instructions: instructions,
+                    runtimeConfiguration: [
+                        status: runtimeConfig.status,
+                        warnings: runtimeConfig.warnings,
+                        details: runtimeConfig.details
+                    ]
+                ]
+                
+                ec.logger.info("MCP Initialize for user ${userId} (session ${sessionId}): capabilities negotiated")
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="mcp" noun="ToolsCall" authenticate="true" allow-remote="true" transaction-timeout="300">
+        <description>Handle MCP tools/call — dispatches to agent-oriented MCP tools</description>
+        <in-parameters>
+            <parameter name="sessionId" required="false"/>
+            <parameter name="name" required="true"/>
+            <parameter name="arguments" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import groovy.json.JsonBuilder
+                Set userGroupIdSet = (ec.user.userGroupIdSet ?: []) as Set
+                boolean isDebugUser = userGroupIdSet.contains('MCP_DEBUG') || userGroupIdSet.contains('ADMIN')
+                def toolMappings = [
+                    "moqui_get_runtime_context" : "org.moqui.agent.AgentRuntimeServices.get#RuntimeContext",
+                    "moqui_check_runtime_configuration": "org.moqui.agent.AgentRuntimeServices.check#RuntimeConfiguration",
+                    "moqui_search_agent_prompts": "org.moqui.agent.AgentPromptServices.search#AgentPrompts",
+                    "moqui_get_agent_document" : "org.moqui.agent.AgentPromptServices.get#AgentDocument",
+                    "moqui_get_session_context" : "org.moqui.agent.AgentRuntimeServices.get#AgentSessionContext",
+                    "moqui_update_session_context": "org.moqui.agent.AgentRuntimeServices.update#AgentSessionContext",
+                    "moqui_execute_agent_prompt": "org.moqui.agent.AgentExecutionServices.execute#AgentPrompt",
+                    "moqui_check_artifact_access": "org.moqui.agent.AgentRuntimeServices.check#ArtifactAccess",
+                    "moqui_find_records_guarded": "org.moqui.agent.AgentRuntimeServices.find#RecordsGuarded",
+                    "moqui_search_artifacts" : "org.moqui.agent.RagServices.search#Artifacts",
+                    "moqui_get_artifact" : "org.moqui.agent.RagServices.get#Artifact",
+                    "moqui_search_all"   : "org.moqui.agent.AgentPromptServices.search#AllDocuments",
+                    "moqui_call_service_guarded": "org.moqui.agent.AgentRuntimeServices.call#ServiceGuarded",
+                    "moqui_resolve_and_execute"  : "org.moqui.agent.AgentRuntimeServices.resolve#AndExecuteAgentPrompt",
+                    "moqui_discover_artifacts"   : "org.moqui.agent.AgentDiscoveryServices.discover#AndIndexArtifacts",
+                    "moqui_discovery_status"     : "org.moqui.agent.AgentDiscoveryServices.get#DiscoveryStatus",
+                    "moqui_create_agent_session" : "org.moqui.agent.AgentRuntimeServices.create#AgentSessionContext",
+                    "moqui_update_agent_session_external_context": "org.moqui.agent.AgentRuntimeServices.update#AgentSessionExternalContext",
+                    "moqui_find_agent_sessions"  : "org.moqui.agent.AgentRuntimeServices.find#AgentSessionsForUser",
+                    "moqui_close_agent_session"  : "org.moqui.agent.AgentRuntimeServices.close#AgentSessionContext"
+                ]
+                Set debugToolNames = ['moqui_search_artifacts', 'moqui_get_artifact', 'moqui_search_all', 'moqui_call_service_guarded',
+                                      'moqui_discover_artifacts', 'moqui_discovery_status'] as Set
+                try {
+                    def svc = toolMappings[name]
+                    if (!svc) throw new Exception("Unknown tool: ${name}. Available: ${toolMappings.keySet().join(', ')}")
+                    if (debugToolNames.contains(name) && !isDebugUser) {
+                        result = [content: [[type: "text", text: "Tool not available for current user: ${name}"]], isError: true]
+                        return
+                    }
+                    def toolParameters = [:]
+                    if (arguments instanceof Map) toolParameters.putAll(arguments)
+                    if (sessionId && !toolParameters.sessionId) toolParameters.sessionId = sessionId
+                    if (name == 'moqui_call_service_guarded') {
+                        if (!toolParameters.toolName) toolParameters.toolName = name
+                        if (!toolParameters.containsKey('directToolCall')) toolParameters.directToolCall = true
+                    }
+                    def res = ec.service.sync().name(svc).parameters(toolParameters).call()
+                    if (ec.message.hasError()) {
+                        String errText = ec.message.errorsString
+                        ec.message.clearErrors()
+                        result = [content: [[type: "text", text: "Error: ${errText}"]], isError: true]
+                        return
+                    }
+                    def actual = res?.result ?: res
+                    result = (actual instanceof Map && actual.content instanceof List) ? actual :
+                        [content: [[type: "text", text: new JsonBuilder(actual).toString()]], isError: false]
+                } catch (Exception e) {
+                    result = [content: [[type: "text", text: "Error: ${e.message}"]], isError: true]
+                    ec.logger.error("MCP tool error", e)
+                }
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="mcp" noun="Ping" authenticate="true" allow-remote="true" transaction-timeout="30">
+        <description>Handle MCP ping request — returns server health and session info</description>
+        <in-parameters>
+            <parameter name="sessionId" required="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                // Get current user information
+                def currentUser = ec.user.username
+                def currentUserId = ec.user.userId
+
+                // Try to get visit information if sessionId is provided
+                def visitInfo = null
+                if (sessionId) {
+                    try {
+                        def visit = ec.entity.find("moqui.server.Visit")
+                            .condition("visitId", sessionId)
+                            .one()
+
+                        if (visit) {
+                            visitInfo = [
+                                visitId: visit.visitId,
+                                userId: visit.userId,
+                                fromDate: visit.fromDate,
+                                lastUpdatedStamp: visit.lastUpdatedStamp
+                            ]
+                        }
+                    } catch (Exception e) {
+                        ec.logger.warn("Error getting visit info for sessionId ${sessionId}: ${e.message}")
+                    }
+                }
+
+                result = [
+                    timestamp: ec.user.getNowTimestamp(),
+                    status: "healthy",
+                    version: "2.0.2",
+                    sessionId: sessionId,
+                    currentUser: currentUser,
+                    currentUserId: currentUserId,
+                    visitInfo: visitInfo,
+                    architecture: "Visit-based sessions"
+                ]
+                def runtimeConfig = ec.service.sync().name('org.moqui.agent.AgentRuntimeServices.check#RuntimeConfiguration').parameters([
+                    checkIndexes: true
+                ]).call()
+                result.runtimeConfiguration = [
+                    status: runtimeConfig.status,
+                    errors: runtimeConfig.errors,
+                    warnings: runtimeConfig.warnings,
+                    details: runtimeConfig.details
+                ]
+                if (runtimeConfig.status == 'error') result.status = 'degraded'
+                else if (runtimeConfig.status == 'warn') result.status = 'healthy_with_warnings'
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="list" noun="Tools" authenticate="true" allow-remote="true" transaction-timeout="60">
+        <description>Return the list of available MCP tools</description>
+        <in-parameters>
+            <parameter name="sessionId" required="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                Set userGroupIdSet = (ec.user.userGroupIdSet ?: []) as Set
+                boolean isDebugUser = userGroupIdSet.contains('MCP_DEBUG') || userGroupIdSet.contains('ADMIN')
+
+                List runtimeTools = [
+                    [
+                        name: "moqui_get_runtime_context",
+                        title: "Get Runtime Context",
+                        description: "Get current user, locale, timezone and permission set.",
+                        inputSchema: [type: "object", properties: [:]]
+                    ],
+                    [
+                        name: "moqui_check_runtime_configuration",
+                        title: "Check Runtime Configuration",
+                        description: "Validate active moqui-mcp runtime configuration, provider wiring, and optional index presence.",
+                        inputSchema: [
+                            type: "object",
+                            properties: [
+                                requireEmbedding: [type: "boolean"],
+                                requireReranker: [type: "boolean"],
+                                checkIndexes: [type: "boolean"],
+                                failOnError: [type: "boolean"]
+                            ]
+                        ]
+                    ],
+                    [
+                        name: "moqui_search_agent_prompts",
+                        title: "Search Agent Prompts",
+                        description: "Search screen-first agent documents indexed in OpenSearch. Prefer this over raw artifact discovery.",
+                        inputSchema: [
+                            type: "object",
+                            properties: [
+                                queryText: [type: "string", description: "Natural language user intent"],
+                                area: [type: "string", description: "Functional area such as Accounting or Order"],
+                                subArea: [type: "string"],
+                                domainObject: [type: "string"],
+                                actionKind: [type: "string"],
+                                operationEffect: [type: "string"],
+                                currentScreen: [type: "string"],
+                                includeNonExecutable: [type: "boolean"],
+                                limit: [type: "integer", description: "Max results, default 8"]
+                            ],
+                            required: ["queryText"]
+                        ]
+                    ],
+                    [
+                        name: "moqui_get_agent_document",
+                        title: "Get Agent Document",
+                        description: "Get the full agent prompt document selected from retrieval results.",
+                        inputSchema: [
+                            type: "object",
+                            properties: [
+                                documentId: [type: "string", description: "Agent document id returned by moqui_search_agent_prompts"]
+                            ],
+                            required: ["documentId"]
+                        ]
+                    ],
+                    [
+                        name: "moqui_get_session_context",
+                        title: "Get Session Context",
+                        description: "Get the MCP working context tied to the current Visit/session.",
+                        inputSchema: [type: "object", properties: [:]]
+                    ],
+                    [
+                        name: "moqui_update_session_context",
+                        title: "Update Session Context",
+                        description: "Persist current area, screen, business objects and recent retrieval/execution state for follow-up prompts.",
+                        inputSchema: [
+                            type: "object",
+                            properties: [
+                                currentArea: [type: "string"],
+                                currentSubArea: [type: "string"],
+                                currentScreen: [type: "string"],
+                                currentBusinessObjects: [type: "object"],
+                                loadedDocuments: [type: "array", items: [type: "string"]],
+                                lastRetrievedDocuments: [type: "array", items: [type: "string"]],
+                                lastExecutedArtifact: [type: "object"],
+                                lastResult: [type: "object"]
+                            ]
+                        ]
+                    ],
+                    [
+                        name: "moqui_execute_agent_prompt",
+                        title: "Execute Agent Prompt",
+                        description: "Execute the artifact bound to an agent prompt document with Moqui authz active and confirmation gates for risky actions. Do not use this as the first tool for a natural-language user request. Prefer this only after moqui_search_agent_prompts or moqui_get_agent_document when you already know the exact document. For direct execution of a composite root request such as project plus milestones plus tasks, include queryText.",
+                        inputSchema: [
+                            type: "object",
+                            properties: [
+                                documentId: [type: "string"],
+                                queryText: [type: "string", description: "Original natural-language request. Include this when the chosen document is the root of a multi-entity aggregate request."],
+                                parameters: [type: "object"],
+                                confirmed: [type: "boolean"],
+                                dryRun: [type: "boolean"],
+                                useSessionContext: [type: "boolean"]
+                            ],
+                            required: ["documentId"]
+                        ]
+                    ],
+                    [
+                        name: "moqui_check_artifact_access",
+                        title: "Check Artifact Access",
+                        description: "Check if the current user can access an artifact with a specific Moqui authz action.",
+                        inputSchema: [
+                            type: "object",
+                            properties: [
+                                artifactTypeEnumId: [type: "string"],
+                                artifactName: [type: "string"],
+                                authzActionEnumId: [type: "string"]
+                            ],
+                            required: ["artifactTypeEnumId", "artifactName"]
+                        ]
+                    ],
+                    [
+                        name: "moqui_find_records_guarded",
+                        title: "Find Records Guarded",
+                        description: "Read-only entity query that preserves Moqui entity authorization and applies a safe result cap.",
+                        inputSchema: [
+                            type: "object",
+                            properties: [
+                                entityName: [type: "string", description: "Entity name (e.g. 'mantle.account.invoice.Invoice')"],
+                                conditions: [type: "object", description: "Exact-match conditions"],
+                                orderBy: [type: "array", items: [type: "string"], description: "Order by fields (prefix - for DESC)"],
+                                limit: [type: "integer", description: "Max records, capped to 100"],
+                                fieldList: [type: "array", items: [type: "string"], description: "Fields to return (omit for all)"]
+                            ],
+                            required: ["entityName"]
+                        ]
+                    ],
+                    [
+                        name: "moqui_resolve_and_execute",
+                        title: "Resolve and Execute",
+                        description: "Composite tool: searches agent prompts, picks the best executable document, and runs it — all in one round-trip. This is the preferred first tool for natural-language user intents and should be used for create, update, assign, close, submit, and other state-changing requests unless you already know the exact executable document. Especially use it for composite requests spanning a root entity and children such as project, milestones, and tasks. Falls back to reporting the resolved document when execution would require confirmation.",
+                        inputSchema: [
+                            type: "object",
+                            properties: [
+                                queryText: [type: "string", description: "Natural language user intent to resolve"],
+                                parameters: [type: "object", description: "Parameters to pass to the resolved service"],
+                                area: [type: "string", description: "Functional area (e.g. Accounting, Order)"],
+                                subArea: [type: "string"],
+                                domainObject: [type: "string"],
+                                actionKind: [type: "string"],
+                                operationEffect: [type: "string"],
+                                confirmed: [type: "boolean", description: "Explicit confirmation for high-risk actions"],
+                                dryRun: [type: "boolean", description: "Validate without executing"],
+                                limit: [type: "integer", description: "Max candidates to consider (default 5)"]
+                            ],
+                            required: ["queryText"]
+                        ]
+                    ],
+                    [
+                        name: "moqui_create_agent_session",
+                        title: "Create Agent Session",
+                        description: "Register an external AI/chat session (LibreChat, OpenCode, ChatGPT, MCP client). Stores only external context/session identifiers — no chat transcript is stored in Moqui.",
+                        inputSchema: [
+                            type: "object",
+                            properties: [
+                                clientTypeEnumId: [type: "string", description: "Client type: AgClientLibreChat, AgClientOpenCodeWeb, AgClientOpenCodeDesktop, AgClientHermesAgent, AgClientChatGPT, AgClientMcp, AgClientApi"],
+                                clientBaseUrl: [type: "string", description: "Base URL of the external client"],
+                                clientSessionId: [type: "string", description: "Session identifier in the external client"],
+                                clientContextId: [type: "string", description: "Client-specific context identifier when distinct from the conversation id"],
+                                clientConversationId: [type: "string", description: "Conversation identifier in the external client"],
+                                clientUrl: [type: "string", description: "Current URL or route in the external client"],
+                                providerEnumId: [type: "string", description: "LLM provider: AgProviderOpenAI, AgProviderOpenAICompat, AgProviderExternalClient"],
+                                providerSessionId: [type: "string", description: "Provider-managed session identifier when distinct from thread or conversation"],
+                                providerConversationId: [type: "string", description: "Conversation ID at the provider (e.g. OpenAI thread_id)"],
+                                providerThreadId: [type: "string", description: "Provider thread identifier when available"],
+                                providerLastResponseId: [type: "string", description: "Provider last response or message identifier"],
+                                modelName: [type: "string", description: "Model name used in this session"],
+                                contextStorageModeEnumId: [type: "string", description: "Context storage mode: AgCtxExternalOnly (default), AgCtxHybrid, AgCtxMoquiFull"]
+                            ]
+                        ]
+                    ],
+                    [
+                        name: "moqui_update_agent_session_external_context",
+                        title: "Update Agent Session External Context",
+                        description: "Update external context identifiers for an existing agent session (e.g. after a new conversation starts or provider thread changes).",
+                        inputSchema: [
+                            type: "object",
+                            properties: [
+                                agentSessionContextId: [type: "string", description: "Session ID returned by moqui_create_agent_session"],
+                                clientContextId: [type: "string"],
+                                clientConversationId: [type: "string"],
+                                clientUrl: [type: "string"],
+                                providerSessionId: [type: "string"],
+                                providerConversationId: [type: "string"],
+                                providerThreadId: [type: "string"],
+                                providerLastResponseId: [type: "string"],
+                                modelName: [type: "string"],
+                                statusId: [type: "string", description: "Session status: AgSessOpen, AgSessActive, AgSessClosed, AgSessError"]
+                            ]
+                        ]
+                    ],
+                    [
+                        name: "moqui_find_agent_sessions",
+                        title: "Find Agent Sessions",
+                        description: "List agent sessions registered for the current user.",
+                        inputSchema: [
+                            type: "object",
+                            properties: [
+                                statusId: [type: "string", description: "Filter by status: AgSessOpen, AgSessActive, AgSessClosed, AgSessError"],
+                                clientTypeEnumId: [type: "string", description: "Filter by client type"],
+                                limit: [type: "integer", description: "Max results (default 20, capped at 100)"]
+                            ]
+                        ]
+                    ],
+                    [
+                        name: "moqui_close_agent_session",
+                        title: "Close Agent Session",
+                        description: "Mark an agent session as closed.",
+                        inputSchema: [
+                            type: "object",
+                            properties: [
+                                agentSessionContextId: [type: "string", description: "Session ID returned by moqui_create_agent_session"]
+                            ]
+                        ]
+                    ]
+                ]
+
+                List debugTools = [
+                    [
+                        name: "moqui_search_artifacts",
+                        title: "Search Artifacts",
+                        description: "Privileged artifact search across indexed services, entities, screens, XSD schemas and docs in moqui_artifacts_v1. Use for direct artifact discovery when no screen-first document covers the use case.",
+                        inputSchema: [
+                            type: "object",
+                            properties: [
+                                queryText: [type: "string", description: "Natural language query (e.g. 'create invoice for customer')"],
+                                artifactTypeList: [type: "array", items: [type: "string"], description: "Filter by type: service, entity, screen, xsd, doc"],
+                                componentNameList: [type: "array", items: [type: "string"], description: "Filter by component name"],
+                                searchMode: [type: "string", description: "Search mode: bm25, knn, hybrid (default: system property)"],
+                                limit: [type: "integer", description: "Max results (default 20)"]
+                            ],
+                            required: ["queryText"]
+                        ]
+                    ],
+                    [
+                        name: "moqui_get_artifact",
+                        title: "Get Artifact",
+                        description: "Privileged artifact inspection by type and name. Returns full artifact document from moqui_artifacts_v1 including XSD schema definitions, service parameters, and entity fields.",
+                        inputSchema: [
+                            type: "object",
+                            properties: [
+                                artifactType: [type: "string", description: "Artifact type: service, entity, screen, xsd, doc"],
+                                artifactName: [type: "string", description: "Canonical artifact name from moqui_search_artifacts results"]
+                            ],
+                            required: ["artifactType", "artifactName"]
+                        ]
+                    ],
+                    [
+                        name: "moqui_search_all",
+                        title: "Search All Documents",
+                        description: "Unified search across both moqui_agent_prompts_v1 (screen-first and knowledge documents) and moqui_artifacts_v1 (raw artifacts). Use when you need a comprehensive view of what is available for a given query.",
+                        inputSchema: [
+                            type: "object",
+                            properties: [
+                                queryText: [type: "string", description: "Natural language query"],
+                                limit: [type: "integer", description: "Max results per index (default 5)"],
+                                searchMode: [type: "string", description: "Search mode: bm25, knn, hybrid"]
+                            ],
+                            required: ["queryText"]
+                        ]
+                    ],
+                    [
+                        name: "moqui_call_service_guarded",
+                        title: "Call Service Guarded",
+                        description: "Privileged direct service execution with Moqui authz checks and confirmation for high-risk operations.",
+                        inputSchema: [
+                            type: "object",
+                            properties: [
+                                serviceName: [type: "string", description: "Service name in verb#noun format (e.g. 'mantle.account.InvoiceServices.create#Invoice')"],
+                                parameters: [type: "object", description: "Service input parameters"],
+                                confirmed: [type: "boolean", description: "Explicit confirmation required for high-risk operations"]
+                            ],
+                            required: ["serviceName"]
+                        ]
+                    ],
+                    [
+                        name: "moqui_discover_artifacts",
+                        title: "Discover and Index Artifacts",
+                        description: "Privileged runtime auto-discovery: scans component directories (service, entity, screen, XSD), extracts artifact metadata, and bulk-indexes into moqui_artifacts_v1. Requires ADMIN or MCP_INDEX_ADMIN.",
+                        inputSchema: [
+                            type: "object",
+                            properties: [
+                                componentNameList: [type: "array", items: [type: "string"], description: "Component names to scan (omit for all)"],
+                                artifactTypeList: [type: "array", items: [type: "string"], description: "Artifact types: service, entity, screen, xsd"],
+                                forceReindex: [type: "boolean", description: "Delete and recreate the index before indexing"],
+                                generateEmbeddings: [type: "boolean", description: "Generate embeddings via configured provider"],
+                                batchSize: [type: "integer", description: "Indexing batch size (default 100)"]
+                            ]
+                        ]
+                    ],
+                    [
+                        name: "moqui_discovery_status",
+                        title: "Discovery Index Status",
+                        description: "Returns document counts by artifact type and index health for moqui_artifacts_v1.",
+                        inputSchema: [
+                            type: "object",
+                            properties: [
+                                indexName: [type: "string", description: "Index name (default: moqui_artifacts_v1)"]
+                            ]
+                        ]
+                    ]
+                ]
+
+                List toolList = []
+                toolList.addAll(runtimeTools)
+                if (isDebugUser) toolList.addAll(debugTools)
+                result = [tools: toolList]
+            ]]></script>
+        </actions>
+    </service>
+</services>
