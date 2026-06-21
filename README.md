@@ -80,6 +80,34 @@ Build the component from the Moqui framework root:
 
 Some development tasks also exist in [build.gradle](build.gradle) for indexing, evaluation, and validation workflows.
 
+## Deployment Notes
+
+The `moqui-mcp` component contains the Moqui-side integration:
+
+- MCP servlet and tool services
+- Moqui screens for Agent Chat / LibreChat
+- Moqui reverse proxy configuration for `/librechat/*`
+- agent retrieval, execution, and graph knowledge logic
+
+Docker deployment assets for the AI stack are intentionally maintained outside this component in the `moqui-deploy` repository, under the `ai/` profile. That profile is the current home for:
+
+- LibreChat Docker Compose
+- LibreChat MCP client configuration
+- dedicated OpenSearch and OpenSearch Dashboards Docker files
+- plugin bootstrap scripts and related local deploy assets
+
+This keeps `moqui-mcp` focused on component logic while `moqui-deploy` owns containerized deployment concerns.
+
+## Runtime Configuration Notes
+
+Some settings belong to the runtime environment instead of the component itself. In particular, local OpenSearch connection properties such as:
+
+- `elasticsearch_url`
+- `elasticsearch_user`
+- `elasticsearch_password`
+
+should normally be configured in runtime environment files such as `runtime/conf/MoquiDevConf.xml`, environment variables, or deployment-specific configuration, not hard-coded as component defaults in `MoquiConf.xml`.
+
 ## Development Notes
 
 - this repository is intentionally kept aligned with the runtime copy used during local Moqui development
