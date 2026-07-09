@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- This software is in the public domain under CC0 1.0 Universal plus a 
+     Grant of Patent License.
+
+     To the extent possible under law, the author(s) have dedicated all
+     copyright and related and neighboring rights to this software to the
+     public domain worldwide. This software is distributed without any warranty.
+
+     You should have received a copy of the CC0 Public Domain Dedication
+     along with this software (see the LICENSE.md file). If not, see
+     <https://creativecommons.org/publicdomain/zero/1.0/>. -->
+<entity-facade-xml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-facade-3.xsd" type="demo">
+
+    <!-- Use the standard demo user john.doe/moqui for all MCP validation flows. -->
+    <moqui.security.UserGroupMember userGroupId="ADMIN" userId="EX_JOHN_DOE" fromDate="1265184000000"/>
+    <moqui.security.UserGroupMember userGroupId="ADMIN_ADV" userId="EX_JOHN_DOE" fromDate="1265184000000"/>
+    <moqui.security.UserGroupMember userGroupId="MCP_RUNTIME" userId="EX_JOHN_DOE" fromDate="2025-01-01 00:00:00.000"/>
+    <moqui.security.UserGroupMember userGroupId="MCP_INDEX_ADMIN" userId="EX_JOHN_DOE" fromDate="2025-01-01 00:00:00.000"/>
+    <moqui.security.UserGroupMember userGroupId="MCP_DEBUG" userId="EX_JOHN_DOE" fromDate="2025-01-01 00:00:00.000"/>
+    <moqui.security.UserGroupMember userGroupId="PopcAdminSales" userId="EX_JOHN_DOE" fromDate="2025-01-01 00:00:00.000"/>
+    <mantle.party.Party partyId="EX_JOHN_DOE" ownerPartyId="ORG_ZIZI_RETAIL"/>
+</entity-facade-xml>

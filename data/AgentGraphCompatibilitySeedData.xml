@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<https://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!--
+        Compatibility seed for Graph/GraphEdge enumerations expected by moqui.math.
+        In some local runtimes these seed-data blocks may not have been loaded yet,
+        which makes GraphEdge inserts fail on GetDirected/GetUndirected foreign keys.
+    -->
+    <moqui.basic.EnumerationType enumTypeId="GraphType" description="Graph Type"/>
+    <moqui.basic.Enumeration enumId="GtDirected" enumTypeId="GraphType" description="Directed"/>
+    <moqui.basic.Enumeration enumId="GtDirectedMulti" enumTypeId="GraphType" parentEnumId="GtDirected" description="Directed Multigraph"/>
+
+    <moqui.basic.EnumerationType enumTypeId="GraphEdgeType" description="Graph Edge Type"/>
+    <moqui.basic.Enumeration enumId="GetUndirected" enumTypeId="GraphEdgeType" description="Undirected Edge"/>
+    <moqui.basic.Enumeration enumId="GetDirected" enumTypeId="GraphEdgeType" description="Directed Edge"/>
+</entity-facade-xml>

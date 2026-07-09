@@ -1,0 +1,325 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+
+    <entity entity-name="AgentSessionContext" package="moqui.agent" use="transactional" cache="never">
+        <field name="agentSessionContextId" type="id" is-pk="true"/>
+        <!-- MCP working context fields (existing) -->
+        <field name="visitId" type="id"/>
+        <field name="userId" type="id"/>
+        <field name="sessionId" type="text-medium"/>
+        <field name="currentArea" type="text-short"/>
+        <field name="currentSubArea" type="text-short"/>
+        <field name="currentScreen" type="text-medium"/>
+        <field name="currentBusinessObjectsJson" type="text-very-long"/>
+        <field name="loadedDocumentsJson" type="text-very-long"/>
+        <field name="lastRetrievedDocumentsJson" type="text-very-long"/>
+        <field name="lastExecutedArtifactJson" type="text-very-long"/>
+        <field name="lastResultJson" type="text-very-long"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="lastUpdatedDate" type="date-time"/>
+        <!-- External client registry fields -->
+        <field name="partyId" type="id"/>
+        <field name="clientTypeEnumId" type="id"/>
+        <field name="clientBaseUrl" type="text-medium"/>
+        <field name="clientSessionId" type="text-medium"/>
+        <field name="clientContextId" type="text-medium"/>
+        <field name="clientConversationId" type="text-medium"/>
+        <field name="clientUrl" type="text-medium"/>
+        <!-- Provider context fields -->
+        <field name="providerEnumId" type="id"/>
+        <field name="providerSessionId" type="text-medium"/>
+        <field name="providerConversationId" type="text-medium"/>
+        <field name="providerThreadId" type="text-medium"/>
+        <field name="providerLastResponseId" type="text-medium"/>
+        <field name="modelName" type="text-medium"/>
+        <!-- Session management -->
+        <field name="contextStorageModeEnumId" type="id"/>
+        <field name="statusId" type="id"/>
+        <field name="lastActivityDate" type="date-time"/>
+        <!-- Existing indexes -->
+        <index name="MCPASCTX_VISIT">
+            <index-field name="visitId"/>
+        </index>
+        <index name="MCPASCTX_SESSION">
+            <index-field name="sessionId"/>
+        </index>
+        <index name="MCPASCTX_VISIT_USER" unique="true">
+            <index-field name="visitId"/>
+            <index-field name="userId"/>
+        </index>
+        <index name="MCPASCTX_SESSION_USER" unique="true">
+            <index-field name="sessionId"/>
+            <index-field name="userId"/>
+        </index>
+        <!-- New indexes for external session lookup -->
+        <index name="MCPASCTX_CLIENT_SESSION">
+            <index-field name="clientTypeEnumId"/>
+            <index-field name="clientSessionId"/>
+        </index>
+        <index name="MCPASCTX_PROVIDER_CTX">
+            <index-field name="providerEnumId"/>
+            <index-field name="providerConversationId"/>
+        </index>
+        <index name="MCPASCTX_PARTY">
+            <index-field name="partyId"/>
+        </index>
+        <index name="MCPASCTX_STATUS">
+            <index-field name="statusId"/>
+        </index>
+        <!-- Relationships -->
+        <relationship type="one-nofk" related="moqui.security.UserAccount" short-alias="user">
+            <key-map field-name="userId"/>
+        </relationship>
+        <relationship type="one-nofk" related="mantle.party.Party" short-alias="party">
+            <key-map field-name="partyId"/>
+        </relationship>
+        <relationship type="one-nofk" title="AgentClientType" related="moqui.basic.Enumeration">
+            <key-map field-name="clientTypeEnumId"/>
+        </relationship>
+        <relationship type="one-nofk" title="AgentProvider" related="moqui.basic.Enumeration">
+            <key-map field-name="providerEnumId"/>
+        </relationship>
+        <relationship type="one-nofk" title="AgentContextStorageMode" related="moqui.basic.Enumeration">
+            <key-map field-name="contextStorageModeEnumId"/>
+        </relationship>
+        <relationship type="one-nofk" title="AgentSession" related="moqui.basic.StatusItem" short-alias="status">
+            <key-map field-name="statusId"/>
+        </relationship>
+    </entity>
+
+    <!--
+        Authoritative OLTP/audit row for a tool execution.
+        Keep this entity close to the raw runtime event and avoid analytics-specific
+        denormalization here.
+    -->
+    <entity entity-name="AgentToolExecutionLog" package="moqui.agent" use="transactional">
+        <field name="agentToolExecutionLogId" type="id" is-pk="true"/>
+        <field name="visitId" type="id"/>
+        <field name="userId" type="id"/>
+        <field name="toolName" type="text-medium"/>
+        <field name="documentId" type="text-medium"/>
+        <field name="artifactTypeEnumId" type="id"/>
+        <field name="artifactName" type="text-medium"/>
+        <field name="authzActionEnumId" type="id"/>
+        <field name="parametersJson" type="text-very-long"/>
+        <field name="resultJson" type="text-very-long"/>
+        <field name="success" type="text-indicator"/>
+        <field name="errorMessage" type="text-long"/>
+        <field name="startDate" type="date-time"/>
+        <field name="endDate" type="date-time"/>
+        <field name="runningTimeMillis" type="number-integer"/>
+        <field name="confirmed" type="text-indicator"/>
+        <field name="riskLevelEnumId" type="text-short"/>
+        <index name="MCPTLOG_VISIT">
+            <index-field name="visitId"/>
+        </index>
+        <index name="MCPTLOG_USER">
+            <index-field name="userId"/>
+        </index>
+    </entity>
+
+    <!--
+        Denormalized telemetry/search projection derived from execution/search events.
+        This is intentionally separate from AgentToolExecutionLog so summary jobs,
+        OpenSearch indexing, and reranker/search analytics do not depend on raw JSON
+        payload fields in the transactional log table.
+    -->
+    <entity entity-name="AgentToolExecutionElasticLog" package="moqui.agent" use="logging" group="logging" cache="never" create-only="true">
+        <field name="agentToolExecutionElasticLogId" type="id" is-pk="true"/>
+        <field name="agentToolExecutionLogId" type="id"/>
+        <field name="logDate" type="date-time"/>
+
+        <field name="userId" type="id"/>
+        <field name="visitId" type="id"/>
+        <field name="mcpSessionId" type="text-medium"/>
+        <field name="moquiTxId" type="text-medium"/>
+
+        <field name="toolName" type="text-medium"/>
+        <field name="documentId" type="text-medium"/>
+        <field name="documentKind" type="text-short"/>
+        <field name="area" type="text-short"/>
+        <field name="subArea" type="text-medium"/>
+        <field name="domainObject" type="text-medium"/>
+        <field name="actionKind" type="text-short"/>
+        <field name="operationEffect" type="text-short"/>
+        <field name="executionChannel" type="text-short"/>
+
+        <field name="artifactTypeEnumId" type="id"/>
+        <field name="artifactName" type="text-medium"/>
+        <field name="serviceName" type="text-medium"/>
+
+        <field name="riskLevelEnumId" type="id"/>
+        <field name="confirmed" type="text-indicator"/>
+        <field name="success" type="text-indicator"/>
+        <field name="errorType" type="text-short"/>
+        <field name="errorMessage" type="text-long"/>
+
+        <field name="runningTimeMillis" type="number-decimal"/>
+        <field name="resultStatus" type="text-short"/>
+
+        <field name="parameterSummary" type="text-long"/>
+        <field name="resultSummary" type="text-long"/>
+
+        <field name="searchMode" type="text-short"/>
+        <field name="resultCount" type="number-integer"/>
+        <field name="topDocumentId" type="text-medium"/>
+        <field name="topScore" type="number-decimal"/>
+
+        <field name="indexName" type="text-medium"/>
+        <field name="indexRunId" type="id"/>
+
+        <!-- LLM reranker telemetry (populated when hybrid_llm_rerank is active) -->
+        <field name="rerankerProvider" type="text-short"/>
+        <field name="rerankerModel" type="text-medium"/>
+        <field name="rerankerMode" type="text-short"/>
+        <field name="rerankerCandidateCount" type="number-integer"/>
+        <field name="rerankerSelectedDocumentId" type="text-medium"/>
+        <field name="rerankerReasonCode" type="text-medium"/>
+        <field name="rerankerConfidence" type="number-decimal"/>
+        <field name="rerankerLatencyMillis" type="number-decimal"/>
+        <field name="rerankerFallbackUsed" type="text-indicator"/>
+
+        <!-- future MathEntities hooks; metadata only, nullable, no runtime dependency -->
+        <field name="llmMathModelId" type="id"/>
+        <field name="embeddingMathModelId" type="id"/>
+        <field name="rerankerMathModelId" type="id"/>
+        <field name="mathModelRunId" type="id"/>
+
+        <index name="MCPTELOG_DATE">
+            <index-field name="logDate"/>
+        </index>
+        <index name="MCPTELOG_TOOL">
+            <index-field name="toolName"/>
+        </index>
+        <index name="MCPTELOG_DOC">
+            <index-field name="documentId"/>
+        </index>
+        <index name="MCPTELOG_VISIT">
+            <index-field name="visitId"/>
+        </index>
+        <index name="MCPTELOG_USER">
+            <index-field name="userId"/>
+        </index>
+        <relationship type="one-nofk" related="moqui.agent.AgentToolExecutionLog" short-alias="execLog">
+            <key-map field-name="agentToolExecutionLogId"/>
+        </relationship>
+    </entity>
+
+    <!--
+        Time-binned execution summary, modeled after moqui.server.ArtifactHitBin.
+        This is the aggregated operational summary entity; it is not an event-level
+        projection and should stay compact enough for fast summary/report queries.
+    -->
+    <entity entity-name="AgentToolExecutionBin" package="moqui.agent" use="nontransactional" cache="never" sequence-bank-size="100">
+        <field name="agentToolExecutionBinId" type="id" is-pk="true"/>
+        <field name="binKey" type="text-medium"/>
+        <field name="binStartDateTime" type="date-time"/>
+        <field name="binEndDateTime" type="date-time"/>
+
+        <field name="toolName" type="text-medium"/>
+        <field name="documentKind" type="text-short"/>
+        <field name="area" type="text-short"/>
+        <field name="subArea" type="text-medium"/>
+        <field name="domainObject" type="text-medium"/>
+        <field name="actionKind" type="text-short"/>
+        <field name="operationEffect" type="text-short"/>
+        <field name="executionChannel" type="text-short"/>
+        <field name="serviceName" type="text-medium"/>
+        <field name="searchMode" type="text-short"/>
+        <field name="indexName" type="text-medium"/>
+
+        <field name="executionCount" type="number-integer"/>
+        <field name="successCount" type="number-integer"/>
+        <field name="errorCount" type="number-integer"/>
+        <field name="deniedCount" type="number-integer"/>
+        <field name="confirmationRequiredCount" type="number-integer"/>
+        <field name="hybridLlmRerankCount" type="number-integer"/>
+        <field name="rerankerFallbackCount" type="number-integer"/>
+
+        <field name="totalTimeMillis" type="number-decimal"/>
+        <field name="totalSquaredTime" type="number-decimal"/>
+        <field name="minTimeMillis" type="number-decimal"/>
+        <field name="maxTimeMillis" type="number-decimal"/>
+        <field name="lastLogDate" type="date-time"/>
+
+        <index name="MCPTBIN_START_KEY" unique="true">
+            <index-field name="binStartDateTime"/>
+            <index-field name="binKey"/>
+        </index>
+        <index name="MCPTBIN_TOOL">
+            <index-field name="toolName"/>
+        </index>
+        <index name="MCPTBIN_AREA">
+            <index-field name="area"/>
+        </index>
+        <index name="MCPTBIN_MODE">
+            <index-field name="searchMode"/>
+        </index>
+    </entity>
+
+    <view-entity entity-name="AgentToolExecutionBinReport" package="moqui.agent" cache="never">
+        <member-entity entity-alias="ATEB" entity-name="moqui.agent.AgentToolExecutionBin"/>
+        <alias entity-alias="ATEB" name="toolName"/>
+        <alias entity-alias="ATEB" name="documentKind"/>
+        <alias entity-alias="ATEB" name="area"/>
+        <alias entity-alias="ATEB" name="subArea"/>
+        <alias entity-alias="ATEB" name="domainObject"/>
+        <alias entity-alias="ATEB" name="actionKind"/>
+        <alias entity-alias="ATEB" name="operationEffect"/>
+        <alias entity-alias="ATEB" name="executionChannel"/>
+        <alias entity-alias="ATEB" name="serviceName"/>
+        <alias entity-alias="ATEB" name="searchMode"/>
+        <alias entity-alias="ATEB" name="indexName"/>
+        <alias entity-alias="ATEB" name="executionCount" function="sum"/>
+        <alias entity-alias="ATEB" name="successCount" function="sum"/>
+        <alias entity-alias="ATEB" name="errorCount" function="sum"/>
+        <alias entity-alias="ATEB" name="deniedCount" function="sum"/>
+        <alias entity-alias="ATEB" name="confirmationRequiredCount" function="sum"/>
+        <alias entity-alias="ATEB" name="hybridLlmRerankCount" function="sum"/>
+        <alias entity-alias="ATEB" name="rerankerFallbackCount" function="sum"/>
+        <alias entity-alias="ATEB" name="totalTimeMillis" function="sum"/>
+        <alias entity-alias="ATEB" name="totalSquaredTime" function="sum"/>
+        <alias entity-alias="ATEB" name="minTimeMillis" function="min"/>
+        <alias entity-alias="ATEB" name="maxTimeMillis" function="max"/>
+        <alias entity-alias="ATEB" name="firstBinStartDateTime" field="binStartDateTime" function="min"/>
+        <alias entity-alias="ATEB" name="lastBinEndDateTime" field="binEndDateTime" function="max"/>
+        <alias entity-alias="ATEB" name="binStartDateTime"/><!-- filter only, don't select -->
+        <alias entity-alias="ATEB" name="binEndDateTime"/><!-- filter only, don't select -->
+    </view-entity>
+
+    <entity entity-name="AgentDocumentIndexRun" package="moqui.agent" use="transactional">
+        <field name="agentDocumentIndexRunId" type="id" is-pk="true"/>
+        <field name="mathModelRunId" type="id"/>
+        <field name="indexName" type="text-medium"/>
+        <field name="documentSchemaVersion" type="text-short"/>
+        <field name="embeddingProvider" type="text-short"/>
+        <field name="embeddingModel" type="text-medium"/>
+        <field name="embeddingDimensions" type="number-integer"/>
+        <field name="artifactVersionHash" type="text-medium"/>
+        <field name="startedDate" type="date-time"/>
+        <field name="completedDate" type="date-time"/>
+        <field name="statusId" type="id"/>
+        <field name="metricsJson" type="text-very-long"/>
+        <field name="reportLocation" type="text-medium"/>
+        <index name="MCPADIR_INDEX">
+            <index-field name="indexName"/>
+        </index>
+        <relationship type="one-nofk" related="moqui.math.MathModelRun" short-alias="mathModelRun">
+            <key-map field-name="mathModelRunId"/>
+        </relationship>
+    </entity>
+</entities>

@@ -1,0 +1,86 @@
+{
+  "service-call": {
+    "statementClass": "service_call",
+    "operationEffect": "delegated_operation"
+  },
+  "script": {
+    "statementClass": "opaque_code",
+    "operationEffect": "opaque"
+  },
+  "set": {
+    "statementClass": "assignment",
+    "operationEffect": "derive_or_assign"
+  },
+  "if": {
+    "statementClass": "control_flow",
+    "operationEffect": "conditional_branch"
+  },
+  "if-compare": {
+    "statementClass": "control_flow",
+    "operationEffect": "conditional_branch"
+  },
+  "iterate": {
+    "statementClass": "control_flow",
+    "operationEffect": "loop"
+  },
+  "while": {
+    "statementClass": "control_flow",
+    "operationEffect": "loop"
+  },
+  "return": {
+    "statementClass": "exit",
+    "operationEffect": "return_or_error"
+  },
+  "entity-find": {
+    "statementClass": "entity_read",
+    "operationEffect": "read_list"
+  },
+  "entity-find-one": {
+    "statementClass": "entity_read",
+    "operationEffect": "read_one"
+  },
+  "entity-find-by-and": {
+    "statementClass": "entity_read",
+    "operationEffect": "read_list"
+  },
+  "entity-find-count": {
+    "statementClass": "entity_read",
+    "operationEffect": "read_count"
+  },
+  "entity-find-related": {
+    "statementClass": "entity_read",
+    "operationEffect": "read_related_list"
+  },
+  "entity-find-related-one": {
+    "statementClass": "entity_read",
+    "operationEffect": "read_related_one"
+  },
+  "entity-create": {
+    "statementClass": "entity_write",
+    "operationEffect": "create"
+  },
+  "entity-update": {
+    "statementClass": "entity_write",
+    "operationEffect": "update"
+  },
+  "entity-delete": {
+    "statementClass": "entity_write",
+    "operationEffect": "delete"
+  },
+  "entity-store": {
+    "statementClass": "entity_write",
+    "operationEffect": "store"
+  },
+  "entity-set": {
+    "statementClass": "entity_write",
+    "operationEffect": "upsert"
+  },
+  "message": {
+    "statementClass": "message",
+    "operationEffect": "inform"
+  },
+  "log": {
+    "statementClass": "message",
+    "operationEffect": "log"
+  }
+}

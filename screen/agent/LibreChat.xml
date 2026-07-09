@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- This software is in the public domain under CC0 1.0 Universal plus a
+     Grant of Patent License. -->
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
+        require-authentication="true" menu-title="LibreChat">
+
+    <actions>
+        <set field="librechatUrl" value="/librechat/"/>
+        <set field="librechatDirectUrl" value="http://localhost:3080/"/>
+    </actions>
+
+    <widgets>
+        <render-mode>
+            <text type="html,vuet,qvt"><![CDATA[
+                <div style="padding:0 0 12px 0;">
+                    <a href="${librechatDirectUrl}" target="_blank" rel="noopener">Open LibreChat in a new tab</a>
+                    <span style="padding:0 8px; color:#999;">|</span>
+                    <a href="${librechatUrl}" target="_blank" rel="noopener">Open proxied path</a>
+                </div>
+                <div style="width:100%; height:calc(100vh - 120px);">
+                    <iframe
+                        src="${librechatDirectUrl}"
+                        style="width:100%; height:100%; border:none; border-radius:8px; background:white;"
+                        allow="clipboard-read; clipboard-write; microphone; camera">
+                    </iframe>
+                </div>
+            ]]></text>
+        </render-mode>
+    </widgets>
+</screen>

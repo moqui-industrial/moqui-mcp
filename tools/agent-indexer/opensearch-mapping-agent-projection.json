@@ -1,0 +1,49 @@
+{
+  "settings": {
+    "index": {
+      "knn": true,
+      "knn.algo_param.ef_search": 128,
+      "number_of_shards": 1,
+      "number_of_replicas": 0
+    }
+  },
+  "mappings": {
+    "dynamic": true,
+    "properties": {
+      "documentId": { "type": "keyword" },
+      "documentKind": { "type": "keyword" },
+      "projectionDocumentType": { "type": "keyword" },
+      "sourceGraphId": { "type": "keyword" },
+      "sourceVertexId": { "type": "keyword" },
+      "sourceArtifactUri": { "type": "keyword" },
+      "derivedFromVertexIds": { "type": "keyword" },
+      "derivedFromEdgeIds": { "type": "keyword" },
+      "area": { "type": "keyword" },
+      "subArea": { "type": "keyword" },
+      "domainObject": { "type": "keyword" },
+      "component": { "type": "keyword" },
+      "serviceName": { "type": "keyword" },
+      "sourceScreenPath": { "type": "keyword" },
+      "fieldNames": { "type": "keyword" },
+      "relatedEntities": { "type": "keyword" },
+      "boundServices": { "type": "keyword" },
+      "runtimeExecutable": { "type": "boolean" },
+      "knowledgeOnly": { "type": "boolean" },
+      "canonicalPrompt": { "type": "text" },
+      "embeddingText": { "type": "text" },
+      "humanExplanation": { "type": "text" },
+      "englishPromptVariants": { "type": "text" },
+      "italianPromptVariants": { "type": "text" },
+      "uiLabels": { "type": "text" },
+      "embedding": {
+        "type": "knn_vector",
+        "dimension": 3072,
+        "method": {
+          "name": "hnsw",
+          "engine": "lucene",
+          "space_type": "cosinesimil"
+        }
+      }
+    }
+  }
+}

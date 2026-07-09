@@ -1,0 +1,230 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- This software is in the public domain under CC0 1.0 Universal plus a
+     Grant of Patent License.
+
+     To the extent possible under law, the author(s) have dedicated all
+     copyright and related and neighboring rights to this software to the
+     public domain worldwide. This software is distributed without any warranty.
+
+     You should have received a copy of the CC0 Public Domain Dedication
+     along with this software (see the LICENSE.md file). If not, see
+     <https://creativecommons.org/publicdomain/zero/1.0/>. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- Runtime auto-discovery: scans component directories and indexes artifacts directly into OpenSearch.
+         Replaces the Python extract_* + index pipeline for environments where the Python toolchain is unavailable.
+         Requires MCP_INDEX_ADMIN or ADMIN group. -->
+    <service verb="discover" noun="AndIndexArtifacts" authenticate="true" transaction-timeout="3600">
+        <description>Scans all Moqui component directories at runtime, extracts service/entity/screen/XSD artifacts, and bulk-indexes them into moqui_artifacts_v1. Complements the Python indexer for live environments.</description>
+        <in-parameters>
+            <parameter name="componentNameList" type="List"/>
+            <parameter name="artifactTypeList" type="List"/>
+            <parameter name="indexName"/>
+            <parameter name="forceReindex" type="Boolean"/>
+            <parameter name="generateEmbeddings" type="Boolean" default="false"/>
+            <parameter name="batchSize" type="Integer" default="100"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="indexedCount" type="Integer"/>
+            <parameter name="skippedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="componentCount" type="Integer"/>
+            <parameter name="metrics" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.AgentConfigUtil
+                import org.moqui.agent.rag.AgentArtifactExtractor
+                import org.moqui.agent.search.ElasticBackendAdapter
+                import groovy.json.JsonOutput
+
+                Set<String> userGroups = (ec.user.userGroupIdSet ?: []) as Set
+                if (!userGroups.contains('ADMIN') && !userGroups.contains('MCP_INDEX_ADMIN')) {
+                    ec.message.addError("Access denied: discover#AndIndexArtifacts requires ADMIN or MCP_INDEX_ADMIN")
+                    return
+                }
+
+                String effectiveIndex = indexName ?: AgentConfigUtil.getString('moqui.agent.rag.indexName', 'moqui_artifacts_v1')
+                int effectiveBatchSize = Math.max(10, batchSize ?: 100)
+                Set<String> allowedTypes = artifactTypeList ? (artifactTypeList as Set) : (['service', 'entity', 'screen', 'xsd'] as Set)
+                Set<String> allowedComponents = componentNameList ? (componentNameList as Set) : null
+
+                def adapter = new ElasticBackendAdapter(ec)
+                if (Boolean.TRUE.equals(forceReindex) && adapter.indexExists(effectiveIndex)) {
+                    adapter.deleteIndex(effectiveIndex)
+                }
+                if (!adapter.indexExists(effectiveIndex)) {
+                    // Minimal mapping for artifact index: keyword + text fields
+                    Map artifactMapping = [
+                        properties: [
+                            artifactType: [type: 'keyword'],
+                            artifactName: [type: 'keyword'],
+                            componentName: [type: 'keyword'],
+                            title: [type: 'text', analyzer: 'standard'],
+                            summary: [type: 'text', analyzer: 'standard'],
+                            content: [type: 'text', analyzer: 'standard'],
+                            tags: [type: 'keyword'],
+                            embedding: [type: 'knn_vector', dimension: AgentConfigUtil.getInt('moqui.agent.embedding.dimensions', 3072, 1)]
+                        ]
+                    ]
+                    adapter.createIndex(effectiveIndex, [mappings: artifactMapping])
+                }
+
+                // Discover component directories
+                String runtimePath = System.getProperty('moqui.runtime') ?: ec.factory.runtimePath
+                File componentDir = new File(runtimePath, 'component')
+                List<File> componentDirs = []
+                if (componentDir.exists() && componentDir.isDirectory()) {
+                    componentDir.listFiles()?.each { File f ->
+                        if (f.isDirectory() && (allowedComponents == null || allowedComponents.contains(f.name))) {
+                            componentDirs << f
+                        }
+                    }
+                }
+                // Also scan framework directory
+                File frameworkDir = new File(runtimePath, '../framework')
+                if (frameworkDir.exists() && (allowedComponents == null || allowedComponents.contains('framework'))) {
+                    componentDirs << frameworkDir.canonicalFile
+                }
+
+                componentCount = componentDirs.size() as Integer
+                indexedCount = 0
+                skippedCount = 0
+                failedCount = 0
+                def extractor = new AgentArtifactExtractor()
+
+                Closure indexBatch = { List<Map> batch ->
+                    if (!batch) return
+                    if (Boolean.TRUE.equals(generateEmbeddings)) {
+                        String embProvider = AgentConfigUtil.getString('moqui.agent.embedding.provider', 'none')
+                        String embModel = AgentConfigUtil.getString('moqui.agent.embedding.model', '')
+                        Integer embDims = AgentConfigUtil.getInt('moqui.agent.embedding.dimensions', 3072, 1)
+                        if (embProvider && embProvider != 'none') {
+                            batch.each { Map doc ->
+                                String text = (doc.content ?: doc.summary ?: '').toString().take(8000)
+                                if (!text) return
+                                try {
+                                    Map embResult = ec.service.sync()
+                                        .name('org.moqui.agent.AgentDocumentServices.get#QueryEmbedding')
+                                        .parameters([queryText: text, embeddingProvider: embProvider, embeddingModel: embModel, embeddingDimensions: embDims])
+                                        .call()
+                                    if (embResult?.embedding) doc.embedding = embResult.embedding
+                                } catch (Throwable embEx) {
+                                    ec.logger.warn("discover#AndIndexArtifacts: embedding failed for ${doc.artifactName}: ${embEx.message}")
+                                }
+                            }
+                        }
+                    }
+                    try {
+                        adapter.bulkIndex(effectiveIndex, batch)
+                        indexedCount += batch.size()
+                    } catch (Throwable batchEx) {
+                        failedCount += batch.size()
+                        ec.logger.warn("discover#AndIndexArtifacts: batch index failed: ${batchEx.message}")
+                    }
+                }
+
+                Map<String, Integer> typePattern = [
+                    service: 0, entity: 0, screen: 0, xsd: 0
+                ]
+
+                componentDirs.each { File compDir ->
+                    String compName = compDir.name
+                    List<Map> batch = []
+
+                    Closure processFile = { File f, String artifactType ->
+                        if (!allowedTypes.contains(artifactType)) { skippedCount++; return }
+                        try {
+                            List<Map> artifacts = extractor.extractArtifacts([artifactType: artifactType, filePath: f.absolutePath])
+                            artifacts.each { Map art ->
+                                art.componentName = compName
+                                art._id = "${artifactType}::${compName}::${art.artifactName ?: f.name}"
+                                typePattern[artifactType] = (typePattern[artifactType] ?: 0) + 1
+                                batch.add(art)
+                                if (batch.size() >= effectiveBatchSize) {
+                                    indexBatch(batch)
+                                    batch = []
+                                }
+                            }
+                        } catch (Throwable ex) {
+                            failedCount++
+                            ec.logger.warn("discover#AndIndexArtifacts: failed to extract ${f.path}: ${ex.message}")
+                        }
+                    }
+
+                    // Service XML files
+                    new File(compDir, 'service').eachFileRecurse { File f ->
+                        if (f.name.endsWith('.xml')) processFile(f, 'service')
+                    }
+                    // Entity XML files
+                    new File(compDir, 'entity').eachFileRecurse { File f ->
+                        if (f.name.endsWith('.xml')) processFile(f, 'entity')
+                    }
+                    // Screen XML files
+                    new File(compDir, 'screen').eachFileRecurse { File f ->
+                        if (f.name.endsWith('.xml')) processFile(f, 'screen')
+                    }
+                    // XSD files under framework/xsd
+                    new File(compDir, 'xsd').eachFileRecurse { File f ->
+                        if (f.name.endsWith('.xsd')) processFile(f, 'xsd')
+                    }
+
+                    if (batch) indexBatch(batch)
+                    ec.logger.info("discover#AndIndexArtifacts: finished component ${compName}")
+                }
+
+                metrics = [
+                    indexName: effectiveIndex,
+                    componentCount: componentCount,
+                    indexedCount: indexedCount,
+                    skippedCount: skippedCount,
+                    failedCount: failedCount,
+                    byType: typePattern,
+                    generateEmbeddings: generateEmbeddings
+                ]
+                ec.logger.info("discover#AndIndexArtifacts complete: ${JsonOutput.toJson(metrics)}")
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="get" noun="DiscoveryStatus" authenticate="true">
+        <description>Returns current state of the artifact discovery index: document counts by type and index health.</description>
+        <in-parameters>
+            <parameter name="indexName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="indexExists" type="Boolean"/>
+            <parameter name="documentCount" type="Integer"/>
+            <parameter name="countByType" type="Map"/>
+            <parameter name="indexName"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.AgentConfigUtil
+                import org.moqui.agent.search.ElasticBackendAdapter
+
+                indexName = indexName ?: AgentConfigUtil.getString('moqui.agent.rag.indexName', 'moqui_artifacts_v1')
+                def adapter = new ElasticBackendAdapter(ec)
+                indexExists = adapter.indexExists(indexName)
+                documentCount = 0
+                countByType = [:]
+                if (!indexExists) return
+
+                // count total
+                Map countResult = adapter.search(indexName, [size: 0, query: [match_all: [:]]])
+                documentCount = (countResult?.hits?.total?.value ?: 0) as Integer
+
+                // count by artifactType using aggregation
+                Map aggResult = adapter.search(indexName, [
+                    size: 0,
+                    aggs: [by_type: [terms: [field: 'artifactType', size: 20]]]
+                ])
+                aggResult?.aggregations?.by_type?.buckets?.each { Map bucket ->
+                    countByType[bucket.key as String] = (bucket.doc_count ?: 0) as Integer
+                }
+            ]]></script>
+        </actions>
+    </service>
+
+</services>

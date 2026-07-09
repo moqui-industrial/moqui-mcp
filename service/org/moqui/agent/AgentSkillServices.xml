@@ -1,0 +1,308 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="refresh" noun="AgentSkills" authenticate="true" allow-remote="true" transaction-timeout="3600">
+        <description>Scan component skills directories, upsert AgentSkillRegister rows, and optionally refresh the skill DataFeed index.</description>
+        <in-parameters>
+            <parameter name="componentNameList" type="List"/>
+            <parameter name="reindex" type="Boolean" default="false"/>
+            <parameter name="clusterName" default-value="default"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="skillCount" type="Integer"/>
+            <parameter name="createdCount" type="Integer"/>
+            <parameter name="updatedCount" type="Integer"/>
+            <parameter name="skippedCount" type="Integer"/>
+            <parameter name="indexedCount" type="Integer"/>
+            <parameter name="skillList" type="List"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.AgentSkillSupport
+
+                AgentSkillSupport.ensureSkillLookupData(ec)
+
+                Set<String> userGroups = (ec.user.userGroupIdSet ?: []) as Set<String>
+                if (!userGroups.intersect(['ADMIN', 'MCP_INDEX_ADMIN'] as Set<String>)) {
+                    ec.message.addError("Access denied: refresh#AgentSkills requires ADMIN or MCP_INDEX_ADMIN")
+                    return
+                }
+
+                skillList = []
+                skillCount = 0
+                createdCount = 0
+                updatedCount = 0
+                skippedCount = 0
+                indexedCount = 0
+
+                List<File> skillFiles = AgentSkillSupport.listSkillFiles(ec, componentNameList)
+                skillFiles.each { File skillFile ->
+                    Map skillData = AgentSkillSupport.parseSkillFile(skillFile)
+                    if (!skillData?.skillId || !skillData?.artifactName) {
+                        skippedCount++
+                        return
+                    }
+
+                    Map upsertValues = [
+                            skillId: skillData.skillId,
+                            artifactName: skillData.artifactName,
+                            artifactTypeEnumId: skillData.artifactTypeEnumId ?: 'AT_OTHER',
+                            artifactGroupId: skillData.artifactGroupId ?: 'McpRuntimeServices',
+                            skillTypeEnumId: skillData.skillTypeEnumId ?: 'AGSKL_SYSTEM',
+                            domainName: skillData.domainName ?: '',
+                            title: skillData.title ?: skillData.skillId,
+                            description: skillData.description ?: '',
+                            componentName: skillData.componentName ?: '',
+                            skillLocation: skillData.skillLocation ?: '',
+                            skillPath: skillData.skillPath ?: '',
+                            statusId: skillData.statusId ?: 'SkillActive',
+                            frontmatterJson: skillData.frontmatterJson ?: '{}',
+                            bodyText: skillData.bodyText ?: '',
+                            searchText: skillData.searchText ?: '',
+                            contentHash: skillData.contentHash ?: '',
+                            lastIndexedDate: ec.user.nowTimestamp
+                    ]
+
+                    def existing = ec.entity.find('moqui.agent.AgentSkillRegister')
+                            .condition('skillId', skillData.skillId)
+                            .useCache(false)
+                            .one()
+                    if (existing) {
+                        if (existing.contentHash != upsertValues.contentHash || existing.skillLocation != upsertValues.skillLocation || existing.title != upsertValues.title) {
+                            existing.setAll(upsertValues).update()
+                            updatedCount++
+                        } else {
+                            skippedCount++
+                        }
+                    } else {
+                        Map createValues = new LinkedHashMap(upsertValues)
+                        if (!createValues.agentSkillRegisterId) {
+                            createValues.agentSkillRegisterId = java.util.UUID.randomUUID().toString()
+                        }
+                        ec.entity.makeValue('moqui.agent.AgentSkillRegister').setAll(createValues).create()
+                        createdCount++
+                    }
+
+                    def artifactGroupMember = ec.entity.find('moqui.security.ArtifactGroupMember')
+                            .condition('artifactGroupId', upsertValues.artifactGroupId)
+                            .condition('artifactName', upsertValues.artifactName)
+                            .condition('artifactTypeEnumId', upsertValues.artifactTypeEnumId)
+                            .useCache(false)
+                            .one()
+                    if (!artifactGroupMember) {
+                        ec.entity.makeValue('moqui.security.ArtifactGroupMember').setAll([
+                                artifactGroupId: upsertValues.artifactGroupId,
+                                artifactName: upsertValues.artifactName,
+                                artifactTypeEnumId: upsertValues.artifactTypeEnumId,
+                                nameIsPattern: 'N',
+                                inheritAuthz: 'Y'
+                        ]).create()
+                    }
+
+                    skillList << upsertValues
+                }
+
+                skillCount = skillList.size()
+
+                if (reindex && skillCount > 0) {
+                    Map indexResult = ec.service.sync().name('org.moqui.agent.AgentSkillServices.index#AgentSkillDocuments')
+                            .parameters([clusterName: clusterName])
+                            .call()
+                    indexedCount = (indexResult?.documentsIndexed ?: 0) as Integer
+                }
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="list" noun="AgentSkills" authenticate="true" allow-remote="true">
+        <in-parameters>
+            <parameter name="skillTypeEnumId"/>
+            <parameter name="domainName"/>
+            <parameter name="componentName"/>
+            <parameter name="queryText"/>
+            <parameter name="limit" type="Integer" default="100"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="skillList" type="List"/>
+            <parameter name="skillCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.AgentToolSupport
+                import org.moqui.entity.EntityCondition
+
+                int effectiveLimit = Math.max(1, (limit ?: 100) as Integer)
+                def find = ec.entity.find('moqui.agent.AgentSkillRegister')
+                        .orderBy('domainName')
+                        .orderBy('title')
+                        .limit(effectiveLimit)
+                if (skillTypeEnumId) find.condition('skillTypeEnumId', skillTypeEnumId)
+                if (domainName) find.condition('domainName', domainName)
+                if (componentName) find.condition('componentName', componentName)
+                if (queryText) find.condition('searchText', EntityCondition.LIKE, "%${queryText}%")
+                def rows = find.list() ?: []
+                skillList = []
+                rows.each { row ->
+                    if (AgentToolSupport.checkArtifactAccess(ec, row.artifactTypeEnumId as String ?: 'AT_OTHER', 'AUTHZA_VIEW', row.artifactName as String ?: '')) {
+                        skillList << row.getPlainValueMap(0)
+                    }
+                }
+                skillCount = skillList.size()
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="get" noun="AgentSkill" authenticate="true" allow-remote="true">
+        <in-parameters>
+            <parameter name="skillId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="skill" type="Map"/>
+            <parameter name="authorized" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.AgentToolSupport
+
+                def skillValue = ec.entity.find('moqui.agent.AgentSkillRegister')
+                        .condition('skillId', skillId)
+                        .useCache(true)
+                        .one()
+                if (!skillValue) {
+                    ec.message.addError("Skill not found")
+                    return
+                }
+                authorized = AgentToolSupport.checkArtifactAccess(ec, skillValue.artifactTypeEnumId as String ?: 'AT_OTHER', 'AUTHZA_VIEW', skillValue.artifactName as String ?: '')
+                if (!authorized) {
+                    ec.message.addError("Skill not found")
+                    return
+                }
+
+                skill = skillValue.getPlainValueMap(0)
+                skill.frontmatter = skillValue.frontmatterJson ? new groovy.json.JsonSlurper().parseText(skillValue.frontmatterJson as String) : [:]
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="resolve" noun="AgentSkill" authenticate="true" allow-remote="true">
+        <description>Resolve the best authorized AgentSkill candidate for a natural-language business request.</description>
+        <in-parameters>
+            <parameter name="queryText" required="true"/>
+            <parameter name="domainName"/>
+            <parameter name="skillTypeEnumId"/>
+            <parameter name="limit" type="Integer" default="5"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="selectedSkill" type="Map"/>
+            <parameter name="candidateSkillList" type="List"/>
+            <parameter name="candidateSkillCount" type="Integer"/>
+            <parameter name="needsMoreContext" type="Boolean"/>
+            <parameter name="fallbackRecommended" type="Boolean"/>
+            <parameter name="reason"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                int effectiveLimit = Math.max(1, (limit ?: 5) as Integer)
+                Map searchResult = ec.service.sync().name('org.moqui.agent.AgentSkillServices.search#AgentSkills')
+                        .parameters([
+                                queryText: queryText,
+                                domainName: domainName,
+                                skillTypeEnumId: skillTypeEnumId,
+                                limit: effectiveLimit,
+                                clusterName: 'default'
+                        ]).call()
+
+                List<Map> candidates = (searchResult?.skillList instanceof List) ? (List<Map>) searchResult.skillList : []
+                if (!candidates) {
+                    Map listResult = ec.service.sync().name('org.moqui.agent.AgentSkillServices.list#AgentSkills')
+                            .parameters([
+                                    queryText: queryText,
+                                    domainName: domainName,
+                                    skillTypeEnumId: skillTypeEnumId,
+                                    limit: effectiveLimit
+                            ]).call()
+                    candidates = (listResult?.skillList instanceof List) ? (List<Map>) listResult.skillList : []
+                }
+
+                candidateSkillList = candidates
+                candidateSkillCount = candidates.size()
+                needsMoreContext = candidateSkillCount == 0
+                fallbackRecommended = candidateSkillCount == 0
+
+                if (candidateSkillCount > 0) {
+                    selectedSkill = candidates[0]
+                    if (candidateSkillCount > 1) {
+                        reason = "Multiple authorized skills matched; using the first candidate as the best available default."
+                    } else {
+                        reason = "Single authorized skill matched."
+                    }
+                } else {
+                    selectedSkill = null
+                    reason = "No authorized skill matched the query; prompt-first fallback may be required."
+                }
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="search" noun="AgentSkills" authenticate="true" allow-remote="true">
+        <description>Search skill documents through the standard DataDocument/OpenSearch path and filter the result by artifact authorization.</description>
+        <in-parameters>
+            <parameter name="queryText" required="true"/>
+            <parameter name="domainName"/>
+            <parameter name="skillTypeEnumId"/>
+            <parameter name="indexName" default-value="moqui_agent_skills_v1"/>
+            <parameter name="clusterName" default-value="default"/>
+            <parameter name="limit" type="Integer" default="20"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="skillList" type="List"/>
+            <parameter name="skillCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.AgentToolSupport
+
+                int effectiveLimit = Math.max(1, (limit ?: 20) as Integer)
+                String query = queryText ?: '*'
+                def searchResult = ec.service.sync().name('org.moqui.search.SearchServices.search#DataDocuments')
+                        .parameters([
+                                indexName: indexName,
+                                documentType: 'AgentSkillDocument',
+                                queryString: query,
+                                pageSize: effectiveLimit,
+                                pageIndex: 0,
+                                clusterName: clusterName,
+                                flattenDocument: true
+                        ]).call()
+                List<Map> docs = (searchResult?.documentList instanceof List) ? (List<Map>) searchResult.documentList : []
+                skillList = []
+                docs.each { Map doc ->
+                    if (domainName && (doc.domainName ?: '') != domainName) return
+                    if (skillTypeEnumId && (doc.skillTypeEnumId ?: '') != skillTypeEnumId) return
+                    if (AgentToolSupport.checkArtifactAccess(ec, doc.artifactTypeEnumId as String ?: 'AT_OTHER', 'AUTHZA_VIEW', doc.artifactName as String ?: '')) {
+                        skillList << doc
+                    }
+                }
+                skillCount = skillList.size()
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="index" noun="AgentSkillDocuments" authenticate="true" allow-remote="true" transaction-timeout="3600">
+        <description>Index the AgentSkillDocument DataFeed with the standard Moqui SearchServices path.</description>
+        <in-parameters>
+            <parameter name="dataFeedId" default="AgentSkillFeed"/>
+            <parameter name="clusterName" default-value="default"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="documentsIndexed" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <service-call name="org.moqui.search.SearchServices.index#DataFeedDocuments"
+                    in-map="[dataFeedId:dataFeedId, clusterName:clusterName]"
+                    out-map="context"/>
+        </actions>
+    </service>
+
+</services>

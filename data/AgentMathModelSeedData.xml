@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- This software is in the public domain under CC0 1.0 Universal plus a
+     Grant of Patent License.
+
+     To the extent possible under law, the author(s) have dedicated all
+     copyright and related and neighboring rights to this software to the
+     public domain worldwide. This software is distributed without any warranty.
+
+     You should have received a copy of the CC0 Public Domain Dedication
+     along with this software (see the LICENSE.md file). If not, see
+     <https://creativecommons.org/publicdomain/zero/1.0/>. -->
+<entity-facade-xml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-facade-3.xsd" type="seed-initial">
+
+    <moqui.basic.EnumerationType enumTypeId="MathModelType" description="Math Model Type"/>
+    <moqui.basic.Enumeration enumId="MmtModelDriven" enumTypeId="MathModelType" description="Model-Driven / Physics-Based / Constructed Model"/>
+    <moqui.basic.Enumeration enumId="MmtCodeDefinedFunction" parentEnumId="MmtModelDriven" enumTypeId="MathModelType" description="Code-Defined Function"/>
+    <moqui.basic.Enumeration enumId="MmtSymbolic" parentEnumId="MmtModelDriven" enumTypeId="MathModelType" description="Symbolic / Analytic Model"/>
+    <moqui.basic.Enumeration enumId="MmtDataDriven" enumTypeId="MathModelType" description="Data Driven Model"/>
+    <moqui.basic.Enumeration enumId="MmtDlModel" parentEnumId="MmtDataDriven" enumTypeId="MathModelType" description="Deep-Learning Model"/>
+    <moqui.basic.Enumeration enumId="MmtDlTransformer" parentEnumId="MmtDlModel" enumTypeId="MathModelType" description="Transformer Neural Network"/>
+    <moqui.basic.Enumeration enumId="MmtMeasuredDataSeries" parentEnumId="MmtDataDriven" enumTypeId="MathModelType" description="Measured Data Series Model"/>
+
+    <moqui.basic.EnumerationType enumTypeId="MathModelUsageContext" description="Math Model Usage Context"/>
+    <moqui.basic.Enumeration enumId="MmucAnalysis" enumTypeId="MathModelUsageContext" description="Analysis"/>
+    <moqui.basic.Enumeration enumId="MmucTest" enumTypeId="MathModelUsageContext" description="Test"/>
+    <moqui.basic.Enumeration enumId="MmucInference" enumTypeId="MathModelUsageContext" description="Inference"/>
+
+    <moqui.basic.EnumerationType enumTypeId="MathModelDomain" description="Math Model Domain"/>
+    <moqui.basic.Enumeration enumId="MmdEngineering" enumTypeId="MathModelDomain" description="Engineering"/>
+
+    <moqui.basic.StatusType statusTypeId="MathModelDef" description="Math Model Def Status"/>
+    <moqui.basic.StatusItem statusId="MathModelProduction" statusTypeId="MathModelDef" description="Production" sequenceNum="4"/>
+
+    <moqui.basic.EnumerationType enumTypeId="MathModelContentType" description="Math Model Content Type"/>
+    <moqui.basic.Enumeration enumId="MmCntPython" enumTypeId="MathModelContentType" description="Python Script"/>
+    <moqui.basic.Enumeration enumId="MmCntJson" enumTypeId="MathModelContentType" description="JSON"/>
+    <moqui.basic.Enumeration enumId="MmCntDocs" enumTypeId="MathModelContentType" description="Documentation"/>
+
+    <moqui.basic.EnumerationType enumTypeId="MathModelContentPurpose" description="Math Model Content Purpose"/>
+    <moqui.basic.Enumeration enumId="MmCnpMainLogic" enumTypeId="MathModelContentPurpose" description="Main Executable Logic"/>
+    <moqui.basic.Enumeration enumId="MmCnpModelDef" enumTypeId="MathModelContentPurpose" description="Model Definition"/>
+    <moqui.basic.Enumeration enumId="MmCnpSolverConfig" enumTypeId="MathModelContentPurpose" description="Solver Configuration"/>
+    <moqui.basic.Enumeration enumId="MmCnpPostProcessingScript" enumTypeId="MathModelContentPurpose" description="Post-processing Script"/>
+
+    <moqui.basic.EnumerationType enumTypeId="MathModelExternalSystem" description="Math Model External System"/>
+    <moqui.basic.Enumeration enumId="MmesOpenAi" enumTypeId="MathModelExternalSystem" description="OpenAI API"/>
+    <moqui.basic.Enumeration enumId="MmesInternal" enumTypeId="MathModelExternalSystem" description="Internal Registry"/>
+    <moqui.basic.Enumeration enumId="MmesCustom" enumTypeId="MathModelExternalSystem" description="Custom / Other"/>
+
+    <moqui.basic.EnumerationType enumTypeId="MathModelSource" description="Math Model Source"/>
+    <moqui.basic.Enumeration enumId="MmsManual" enumTypeId="MathModelSource" description="Manually Defined"/>
+
+    <moqui.basic.EnumerationType enumTypeId="ParameterType" description="Parameter Type"/>
+    <moqui.basic.Enumeration enumId="PtText" enumTypeId="ParameterType" description="Text"/>
+    <moqui.basic.Enumeration enumId="PtTextIndicator" parentEnumId="PtText" enumTypeId="ParameterType" description="Text Indicator"/>
+    <moqui.basic.Enumeration enumId="PtTextShort" parentEnumId="PtText" enumTypeId="ParameterType" description="Text Short"/>
+    <moqui.basic.Enumeration enumId="PtNumber" enumTypeId="ParameterType" description="Number"/>
+    <moqui.basic.Enumeration enumId="PtNumberInteger" parentEnumId="PtNumber" enumTypeId="ParameterType" description="Number Integer"/>
+
+    <moqui.basic.EnumerationType enumTypeId="ParameterPurpose" description="Parameter Purpose"/>
+    <moqui.basic.Enumeration enumId="PpMathModel" enumTypeId="ParameterPurpose" description="Math Model Parameter"/>
+
+    <moqui.basic.EnumerationType enumTypeId="TensorType" description="Tensor Type"/>
+    <moqui.basic.Enumeration enumId="TtDense" enumTypeId="TensorType" description="Dense Tensor"/>
+    <moqui.basic.EnumerationType enumTypeId="TensorPurpose" description="Tensor Purpose"/>
+    <moqui.basic.Enumeration enumId="TpOriginal" enumTypeId="TensorPurpose" description="Original Tensor"/>
+    <moqui.basic.EnumerationType enumTypeId="TensorStorageType" description="Tensor Storage Type"/>
+    <moqui.basic.Enumeration enumId="TstContent" enumTypeId="TensorStorageType" description="Elements stored as an external content"/>
+    <moqui.basic.EnumerationType enumTypeId="TensorMemoryFormat" description="Tensor memory Format / Layout - In-Memory Logical Index Order"/>
+    <moqui.basic.Enumeration enumId="TmfContig" enumTypeId="TensorMemoryFormat" description="Contiguous"/>
+    <moqui.basic.EnumerationType enumTypeId="TensorContentType" description="Tensor Content Type"/>
+    <moqui.basic.Enumeration enumId="TCntManifest" enumTypeId="TensorContentType" description="External Manifest / Metadata File"/>
+
+    <moqui.basic.EnumerationType enumTypeId="MathModelDataType" description="Math Model Data Type"/>
+    <moqui.basic.Enumeration enumId="MmdtTensor" enumTypeId="MathModelDataType" description="Tensor"/>
+    <moqui.basic.EnumerationType enumTypeId="MathModelDataPurpose" description="Math Model Data Purpose"/>
+    <moqui.basic.Enumeration enumId="MmdpModelOutputs" enumTypeId="MathModelDataPurpose" description="Model Outputs"/>
+
+    <moqui.math.MathModelDef mathModelDefId="AgentMoquiRagModelDef" modelTypeEnumId="MmtModelDriven" usageContextEnumId="MmucInference" domainEnumId="MmdEngineering" modelName="Moqui MCP RAG Pipeline" description="Root definition for the Moqui MCP retrieval, indexing, graph, embedding, and evaluation pipeline." versionNumber="1" releaseStatusId="MathModelProduction"/>
+    <moqui.math.MathModelDef mathModelDefId="AgentArtifactExtractionModelDef" parentModelDefId="AgentMoquiRagModelDef" modelTypeEnumId="MmtCodeDefinedFunction" usageContextEnumId="MmucAnalysis" domainEnumId="MmdEngineering" modelName="Artifact Extraction" description="Extracts Moqui artifacts and raw prompt/source knowledge." versionNumber="1" releaseStatusId="MathModelProduction"/>
+    <moqui.math.MathModelDef mathModelDefId="AgentXmlActionGrammarModelDef" parentModelDefId="AgentMoquiRagModelDef" modelTypeEnumId="MmtSymbolic" usageContextEnumId="MmucAnalysis" domainEnumId="MmdEngineering" modelName="XML Actions Grammar" description="Grammar extraction from xml-actions XSD for service action semantics." versionNumber="1" releaseStatusId="MathModelProduction"/>
+    <moqui.math.MathModelDef mathModelDefId="AgentServiceActionStatementModelDef" parentModelDefId="AgentMoquiRagModelDef" modelTypeEnumId="MmtCodeDefinedFunction" usageContextEnumId="MmucAnalysis" domainEnumId="MmdEngineering" modelName="Service Action Statements" description="Extracts service action statements and service-level semantic summaries." versionNumber="1" releaseStatusId="MathModelProduction"/>
+    <moqui.math.MathModelDef mathModelDefId="AgentScreenPromptGenerationModelDef" parentModelDefId="AgentMoquiRagModelDef" modelTypeEnumId="MmtCodeDefinedFunction" usageContextEnumId="MmucAnalysis" domainEnumId="MmdEngineering" modelName="Screen Prompt Generation" description="Generates screen-first agent documents and evaluation queries." versionNumber="1" releaseStatusId="MathModelProduction"/>
+    <moqui.math.MathModelDef mathModelDefId="AgentSeedTestKnowledgeModelDef" parentModelDefId="AgentMoquiRagModelDef" modelTypeEnumId="MmtCodeDefinedFunction" usageContextEnumId="MmucAnalysis" domainEnumId="MmdEngineering" modelName="Seed and Test Knowledge" description="Builds process and knowledge documents from seed/demo/test artifacts." versionNumber="1" releaseStatusId="MathModelProduction"/>
+    <moqui.math.MathModelDef mathModelDefId="AgentLocalizationExtractionModelDef" parentModelDefId="AgentMoquiRagModelDef" modelTypeEnumId="MmtCodeDefinedFunction" usageContextEnumId="MmucAnalysis" domainEnumId="MmdEngineering" modelName="Localization Extraction" description="Extracts localized labels and messages for multilingual embedding enrichment." versionNumber="1" releaseStatusId="MathModelProduction"/>
+    <moqui.math.MathModelDef mathModelDefId="AgentArtifactGraphGenerationModelDef" parentModelDefId="AgentMoquiRagModelDef" modelTypeEnumId="MmtCodeDefinedFunction" usageContextEnumId="MmucAnalysis" domainEnumId="MmdEngineering" modelName="Artifact Graph Generation" description="Generates the offline artifact graph JSONL export." versionNumber="1" releaseStatusId="MathModelProduction"/>
+    <moqui.math.MathModelDef mathModelDefId="AgentArtifactGraphLoadModelDef" parentModelDefId="AgentMoquiRagModelDef" modelTypeEnumId="MmtCodeDefinedFunction" usageContextEnumId="MmucInference" domainEnumId="MmdEngineering" serviceName="org.moqui.agent.AgentDocumentServices.load#ArtifactGraph" modelName="Artifact Graph Load" description="Materializes artifact graph exports into Graph, GraphVertex, GraphEdge, and GraphContent." versionNumber="1" releaseStatusId="MathModelProduction"/>
+    <moqui.math.MathModelDef mathModelDefId="AgentEmbeddingGenerationModelDef" parentModelDefId="AgentMoquiRagModelDef" modelTypeEnumId="MmtDlTransformer" usageContextEnumId="MmucInference" domainEnumId="MmdEngineering" serviceName="org.moqui.agent.AgentDocumentServices.get#QueryEmbedding" modelName="Embedding Generation" description="Generates embedding vectors for agent documents and queries." versionNumber="1" releaseStatusId="MathModelProduction"/>
+    <moqui.math.MathModelDef mathModelDefId="AgentOpenSearchIndexModelDef" parentModelDefId="AgentMoquiRagModelDef" modelTypeEnumId="MmtCodeDefinedFunction" usageContextEnumId="MmucInference" domainEnumId="MmdEngineering" serviceName="org.moqui.agent.AgentDocumentServices.index#AgentDocuments" modelName="OpenSearch Index" description="Indexes projected agent documents into the configured OpenSearch index." versionNumber="1" releaseStatusId="MathModelProduction"/>
+    <moqui.math.MathModelDef mathModelDefId="AgentRetrievalModelDef" parentModelDefId="AgentMoquiRagModelDef" modelTypeEnumId="MmtCodeDefinedFunction" usageContextEnumId="MmucInference" domainEnumId="MmdEngineering" serviceName="org.moqui.agent.AgentPromptServices.search#AgentPrompts" modelName="Retrieval" description="Retrieval across lexical, vector, and hybrid search modes." versionNumber="1" releaseStatusId="MathModelProduction"/>
+    <moqui.math.MathModelDef mathModelDefId="AgentDeterministicRerankModelDef" parentModelDefId="AgentMoquiRagModelDef" modelTypeEnumId="MmtCodeDefinedFunction" usageContextEnumId="MmucInference" domainEnumId="MmdEngineering" modelName="Deterministic Rerank" description="Deterministic reranking rules for agent prompts." versionNumber="1" releaseStatusId="MathModelProduction"/>
+    <moqui.math.MathModelDef mathModelDefId="AgentLlmRerankModelDef" parentModelDefId="AgentMoquiRagModelDef" modelTypeEnumId="MmtDlTransformer" usageContextEnumId="MmucInference" domainEnumId="MmdEngineering" modelName="LLM Rerank" description="Structured JSON reranking through OpenAI or OpenAI-compatible chat providers." versionNumber="1" releaseStatusId="MathModelProduction"/>
+    <moqui.math.MathModelDef mathModelDefId="AgentEvaluationModelDef" parentModelDefId="AgentMoquiRagModelDef" modelTypeEnumId="MmtMeasuredDataSeries" usageContextEnumId="MmucTest" domainEnumId="MmdEngineering" modelName="Evaluation" description="Evaluation and regression reporting for retrieval and reranking." versionNumber="1" releaseStatusId="MathModelProduction"/>
+    <moqui.math.MathModelDef mathModelDefId="AgentToolExecutionSummaryModelDef" parentModelDefId="AgentMoquiRagModelDef" modelTypeEnumId="MmtMeasuredDataSeries" usageContextEnumId="MmucAnalysis" domainEnumId="MmdEngineering" modelName="Tool Execution Summary" description="Aggregated summary runs derived from AgentToolExecutionBin with AgentToolExecutionElasticLog fallback/detail." versionNumber="1" releaseStatusId="MathModelProduction"/>
+
+    <moqui.math.MathModelDefContent mathModelContentId="AgentMcpGenerateFullScreensPy" mathModelDefId="AgentScreenPromptGenerationModelDef" contentLocation="component://moqui-mcp/tools/agent-indexer/generate_full_simplescreens_extension.py" contentTypeEnumId="MmCntPython" purposeEnumId="MmCnpMainLogic" description="Generates global screen prompt documents, service-action outputs, and graph exports."/>
+    <moqui.math.MathModelDefContent mathModelContentId="AgentMcpServiceActionCatalogPy" mathModelDefId="AgentServiceActionStatementModelDef" contentLocation="component://moqui-mcp/tools/agent-indexer/generate_service_action_catalog.py" contentTypeEnumId="MmCntPython" purposeEnumId="MmCnpMainLogic" description="Extracts service action statements and service action documents."/>
+    <moqui.math.MathModelDefContent mathModelContentId="AgentMcpXmlActionGrammarPy" mathModelDefId="AgentXmlActionGrammarModelDef" contentLocation="component://moqui-mcp/tools/agent-indexer/moqui_xsd_action_grammar.py" contentTypeEnumId="MmCntPython" purposeEnumId="MmCnpModelDef" description="Parses xml-actions-3.xsd into an action grammar catalog."/>
+    <moqui.math.MathModelDefContent mathModelContentId="AgentMcpLocalizationCatalogPy" mathModelDefId="AgentLocalizationExtractionModelDef" contentLocation="component://moqui-mcp/tools/agent-indexer/moqui_localization_catalog.py" contentTypeEnumId="MmCntPython" purposeEnumId="MmCnpMainLogic" description="Builds the localization catalog used to enrich screen-first documents."/>
+    <moqui.math.MathModelDefContent mathModelContentId="AgentMcpArtifactGraphPy" mathModelDefId="AgentArtifactGraphGenerationModelDef" contentLocation="component://moqui-mcp/tools/agent-indexer/generate_artifact_graph.py" contentTypeEnumId="MmCntPython" purposeEnumId="MmCnpMainLogic" description="Generates artifact graph vertex and edge JSONL exports."/>
+    <moqui.math.MathModelDefContent mathModelContentId="AgentMcpProjectionPy" mathModelDefId="AgentOpenSearchIndexModelDef" contentLocation="component://moqui-mcp/tools/agent-indexer/prepare_datadocument_projection.py" contentTypeEnumId="MmCntPython" purposeEnumId="MmCnpPostProcessingScript" description="Prepares projected JSONL with MathModel and graph metadata."/>
+    <moqui.math.MathModelDefContent mathModelContentId="AgentMcpXmlActionSemanticsJson" mathModelDefId="AgentXmlActionGrammarModelDef" contentLocation="component://moqui-mcp/tools/agent-indexer/config/xml_action_semantics.json" contentTypeEnumId="MmCntJson" purposeEnumId="MmCnpSolverConfig" description="Controlled semantic mapping from xml-actions grammar to statement semantics."/>
+    <moqui.math.MathModelDefContent mathModelContentId="AgentMcpIndexServiceXml" mathModelDefId="AgentOpenSearchIndexModelDef" contentLocation="component://moqui-mcp/service/org/moqui/agent/AgentDocumentServices.xml#index#AgentDocuments" contentTypeEnumId="MmCntDocs" purposeEnumId="MmCnpMainLogic" description="Moqui service implementation entry point for indexing agent documents."/>
+    <moqui.math.MathModelDefContent mathModelContentId="AgentMcpLoadGraphServiceXml" mathModelDefId="AgentArtifactGraphLoadModelDef" contentLocation="component://moqui-mcp/service/org/moqui/agent/AgentDocumentServices.xml#load#ArtifactGraph" contentTypeEnumId="MmCntDocs" purposeEnumId="MmCnpMainLogic" description="Moqui service implementation entry point for loading artifact graphs into MathEntities."/>
+
+    <moqui.math.MathModelDefIdentification mathModelDefId="AgentEmbeddingGenerationModelDef" externalSystemEnumId="MmesOpenAi" externalId="text-embedding-3-small" externalVersion="embeddingModel" externalUri="openai://text-embedding-3-small" isPrimary="Y" description="provider_model_id"/>
+    <moqui.math.MathModelDefIdentification mathModelDefId="AgentOpenSearchIndexModelDef" externalSystemEnumId="MmesCustom" externalId="moqui_agent_prompts_v1" externalVersion="indexName" externalUri="opensearch://moqui_agent_prompts_v1" isPrimary="Y" description="opensearch_index"/>
+    <moqui.math.MathModelDefIdentification mathModelDefId="AgentArtifactGraphGenerationModelDef" externalSystemEnumId="MmesInternal" externalId="AgentArtifactGraph" externalVersion="graphId" externalUri="graph://AgentArtifactGraph" isPrimary="Y" description="graph_id"/>
+
+    <moqui.math.ParameterDef parameterDefId="AgentEmbeddingProviderParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpMathModel" parameterCode="embeddingProvider" parameterName="Embedding Provider" description="Embedding provider id."/>
+    <moqui.math.ParameterDef parameterDefId="AgentEmbeddingModelParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpMathModel" parameterCode="embeddingModel" parameterName="Embedding Model" description="Embedding model id."/>
+    <moqui.math.ParameterDef parameterDefId="AgentEmbeddingDimensionsParam" parameterTypeEnumId="PtNumberInteger" purposeEnumId="PpMathModel" parameterCode="embeddingDimensions" parameterName="Embedding Dimensions" description="Embedding vector dimensions."/>
+    <moqui.math.ParameterDef parameterDefId="AgentEmbeddingVersionParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpMathModel" parameterCode="embeddingVersion" parameterName="Embedding Version" description="Embedding version string."/>
+    <moqui.math.ParameterDef parameterDefId="AgentIndexNameParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpMathModel" parameterCode="indexName" parameterName="Index Name" description="OpenSearch index name."/>
+    <moqui.math.ParameterDef parameterDefId="AgentDocumentSchemaVersionParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpMathModel" parameterCode="documentSchemaVersion" parameterName="Document Schema Version" description="Agent document schema version."/>
+    <moqui.math.ParameterDef parameterDefId="AgentSearchModeParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpMathModel" parameterCode="searchMode" parameterName="Search Mode" description="Default search mode."/>
+    <moqui.math.ParameterDef parameterDefId="AgentRerankModeParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpMathModel" parameterCode="rerankMode" parameterName="Rerank Mode" description="Deterministic or llm rerank strategy."/>
+    <moqui.math.ParameterDef parameterDefId="AgentLlmRerankEnabledParam" parameterTypeEnumId="PtTextIndicator" purposeEnumId="PpMathModel" parameterCode="llmRerankEnabled" parameterName="LLM Rerank Enabled" description="Whether LLM reranking is enabled by default."/>
+    <moqui.math.ParameterDef parameterDefId="AgentRerankTopKParam" parameterTypeEnumId="PtNumberInteger" purposeEnumId="PpMathModel" parameterCode="rerankTopK" parameterName="Rerank Top K" description="Top K results after reranking."/>
+    <moqui.math.ParameterDef parameterDefId="AgentRerankCandidateLimitParam" parameterTypeEnumId="PtNumberInteger" purposeEnumId="PpMathModel" parameterCode="rerankCandidateLimit" parameterName="Rerank Candidate Limit" description="Candidate count fed into reranking."/>
+    <moqui.math.ParameterDef parameterDefId="AgentBatchSizeParam" parameterTypeEnumId="PtNumberInteger" purposeEnumId="PpMathModel" parameterCode="batchSize" parameterName="Batch Size" description="Indexing batch size."/>
+    <moqui.math.ParameterDef parameterDefId="AgentIncludeScreensParam" parameterTypeEnumId="PtTextIndicator" purposeEnumId="PpMathModel" parameterCode="includeScreens" parameterName="Include Screens" description="Include screen-first documents."/>
+    <moqui.math.ParameterDef parameterDefId="AgentIncludeServicesParam" parameterTypeEnumId="PtTextIndicator" purposeEnumId="PpMathModel" parameterCode="includeServices" parameterName="Include Services" description="Include service-action documents."/>
+    <moqui.math.ParameterDef parameterDefId="AgentIncludeSeedDataParam" parameterTypeEnumId="PtTextIndicator" purposeEnumId="PpMathModel" parameterCode="includeSeedData" parameterName="Include Seed Data" description="Include seed/demo knowledge."/>
+    <moqui.math.ParameterDef parameterDefId="AgentIncludeTestSuitesParam" parameterTypeEnumId="PtTextIndicator" purposeEnumId="PpMathModel" parameterCode="includeTestSuites" parameterName="Include Test Suites" description="Include test workflow knowledge."/>
+    <moqui.math.ParameterDef parameterDefId="AgentIncludeLocalizationParam" parameterTypeEnumId="PtTextIndicator" purposeEnumId="PpMathModel" parameterCode="includeLocalization" parameterName="Include Localization" description="Include localized labels and messages."/>
+    <moqui.math.ParameterDef parameterDefId="AgentIncludeArtifactGraphParam" parameterTypeEnumId="PtTextIndicator" purposeEnumId="PpMathModel" parameterCode="includeArtifactGraph" parameterName="Include Artifact Graph" description="Include artifact graph generation and materialization."/>
+    <moqui.math.ParameterDef parameterDefId="AgentGraphIdParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpMathModel" parameterCode="graphId" parameterName="Graph Id" description="Materialized artifact graph id."/>
+    <moqui.math.ParameterDef parameterDefId="AgentGraphVersionParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpMathModel" parameterCode="graphVersion" parameterName="Graph Version" description="Artifact graph schema version."/>
+    <moqui.math.ParameterDef parameterDefId="AgentLocaleListParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpMathModel" parameterCode="localeList" parameterName="Locale List" description="Comma-separated locales included in localization enrichment."/>
+    <moqui.math.ParameterDef parameterDefId="AgentOpenSearchKnnEnabledParam" parameterTypeEnumId="PtTextIndicator" purposeEnumId="PpMathModel" parameterCode="opensearchKnnEnabled" parameterName="OpenSearch KNN Enabled" description="Whether vector/kNN indexing is enabled."/>
+
+    <moqui.math.Parameter parameterId="AgRagV1EmbProv" parameterDefId="AgentEmbeddingProviderParam" symbolicValue="openai"/>
+    <moqui.math.Parameter parameterId="AgRagV1EmbModel" parameterDefId="AgentEmbeddingModelParam" symbolicValue="text-embedding-3-small"/>
+    <moqui.math.Parameter parameterId="AgRagV1EmbDim" parameterDefId="AgentEmbeddingDimensionsParam" numericValue="1536"/>
+    <moqui.math.Parameter parameterId="AgRagV1EmbVer" parameterDefId="AgentEmbeddingVersionParam" symbolicValue="text-embedding-3-small-1536"/>
+    <moqui.math.Parameter parameterId="AgRagV1Index" parameterDefId="AgentIndexNameParam" symbolicValue="moqui_agent_prompts_v1"/>
+    <moqui.math.Parameter parameterId="AgRagV1DocVer" parameterDefId="AgentDocumentSchemaVersionParam" symbolicValue="screen-first-v1"/>
+    <moqui.math.Parameter parameterId="AgRagV1Search" parameterDefId="AgentSearchModeParam" symbolicValue="hybrid"/>
+    <moqui.math.Parameter parameterId="AgRagV1Rerank" parameterDefId="AgentRerankModeParam" symbolicValue="deterministic"/>
+    <moqui.math.Parameter parameterId="AgRagV1LlmOn" parameterDefId="AgentLlmRerankEnabledParam" symbolicValue="N"/>
+    <moqui.math.Parameter parameterId="AgRagV1TopK" parameterDefId="AgentRerankTopKParam" numericValue="3"/>
+    <moqui.math.Parameter parameterId="AgRagV1CandLim" parameterDefId="AgentRerankCandidateLimitParam" numericValue="8"/>
+    <moqui.math.Parameter parameterId="AgRagV1Batch" parameterDefId="AgentBatchSizeParam" numericValue="250"/>
+    <moqui.math.Parameter parameterId="AgRagV1Scr" parameterDefId="AgentIncludeScreensParam" symbolicValue="Y"/>
+    <moqui.math.Parameter parameterId="AgRagV1Svc" parameterDefId="AgentIncludeServicesParam" symbolicValue="Y"/>
+    <moqui.math.Parameter parameterId="AgRagV1Seed" parameterDefId="AgentIncludeSeedDataParam" symbolicValue="Y"/>
+    <moqui.math.Parameter parameterId="AgRagV1Test" parameterDefId="AgentIncludeTestSuitesParam" symbolicValue="Y"/>
+    <moqui.math.Parameter parameterId="AgRagV1L10n" parameterDefId="AgentIncludeLocalizationParam" symbolicValue="Y"/>
+    <moqui.math.Parameter parameterId="AgRagV1Graph" parameterDefId="AgentIncludeArtifactGraphParam" symbolicValue="Y"/>
+    <moqui.math.Parameter parameterId="AgRagV1GraphId" parameterDefId="AgentGraphIdParam" symbolicValue="AgentArtifactGraph"/>
+    <moqui.math.Parameter parameterId="AgRagV1GraphVer" parameterDefId="AgentGraphVersionParam" symbolicValue="artifact-graph-v1"/>
+    <moqui.math.Parameter parameterId="AgRagV1Locales" parameterDefId="AgentLocaleListParam" symbolicValue="en,it"/>
+    <moqui.math.Parameter parameterId="AgRagV1Knn" parameterDefId="AgentOpenSearchKnnEnabledParam" symbolicValue="Y"/>
+
+    <moqui.math.MathModel mathModelId="AgentMoquiRagModel_v1" mathModelDefId="AgentMoquiRagModelDef" graphId="AgentArtifactGraph" sourceEnumId="MmsManual" modelAlias="AgentMoquiRagV1" description="Moqui MCP RAG pipeline v1 with artifact graph, embedding metadata, and evaluation lineage." statusId="MathModelProduction"/>
+
+</entity-facade-xml>

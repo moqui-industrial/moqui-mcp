@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- This software is in the public domain under CC0 1.0 Universal plus a
+     Grant of Patent License.
+
+     To the extent possible under law, the author(s) have dedicated all
+     copyright and related and neighboring rights to this software to the
+     public domain worldwide. This software is distributed without any warranty.
+
+     You should have received a copy of the CC0 Public Domain Dedication
+     along with this software (see the LICENSE.md file). If not, see
+     <https://creativecommons.org/publicdomain/zero/1.0/>. -->
+
+<component xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/moqui-conf-3.xsd"
+          name="moqui-mcp" version="1.0.0">
+
+    <service-factory load-path="service/"/>
+    <entity-factory load-path="entity/"
+            load-data="data/AppSeedData.xml,data/McpSecuritySeedData.xml,data/AgentDocumentSeedData.xml,data/AgentAggregateDocumentSeedData.xml,data/AgentAggregatePatternSeedData.xml,data/AgentUniversalPatternSeedData.xml,data/AgentArtifactDocumentData.xml,data/AgentProjectionDocumentSeedData.xml,data/AgentArtifactGraphSeedData.xml,data/AgentGraphCompatibilitySeedData.xml,data/AgentGraphMetadataSeedData.xml,data/AgentMathModelSeedData.xml,data/AgentRuntimeSeedData.xml,data/McpRuntimeServicesFix.xml"/>
+</component>

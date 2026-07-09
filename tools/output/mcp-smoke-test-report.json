@@ -1,0 +1,73 @@
+{
+  "endpoint": "http://localhost:8080/mcp/message",
+  "sessionId": "111313",
+  "results": [
+    {
+      "name": "initialize",
+      "ok": true,
+      "detail": "protocolVersion=2025-06-18"
+    },
+    {
+      "name": "session_header_received",
+      "ok": true,
+      "detail": "mcpSessionId=111313"
+    },
+    {
+      "name": "notifications_initialized",
+      "ok": true,
+      "detail": "response={}"
+    },
+    {
+      "name": "tools_list_runtime_tool_visible",
+      "ok": true,
+      "detail": "tools=['moqui_get_runtime_context', 'moqui_check_runtime_configuration', 'moqui_search_agent_prompts', 'moqui_get_agent_document', 'moqui_get_session_context', 'moqui_update_session_context', 'moqui_execute_agent_prompt', 'moqui_check_artifact_access', 'moqui_find_records_guarded', 'moqui_resolve_and_execute', 'moqui_create_agent_session', 'moqui_update_agent_session_external_context']"
+    },
+    {
+      "name": "tools_list_debug_tools_hidden_for_runtime_user",
+      "ok": true,
+      "detail": "leaked_debug_tools=[]"
+    },
+    {
+      "name": "tools_call_debug_denied_or_blocked",
+      "ok": true,
+      "detail": "response={'content': [{'type': 'text', 'text': 'Tool not available for current user: moqui_search_artifacts'}], 'isError': True}"
+    },
+    {
+      "name": "search_agent_prompts",
+      "ok": true,
+      "detail": "resultCount=3"
+    },
+    {
+      "name": "update_session_context",
+      "ok": true,
+      "detail": "response={'content': [{'type': 'text', 'text': '{\"agentSessionContext\":{\"agentSessionContextId\":\"101326\",\"visitId\":\"111313\",\"userId\":\"100000\",\"sessionId\":\"111313\",\"currentArea\":\"Order\",\"currentSubArea\":null,\"currentScreen\":null,\"currentBusinessObjectsJson\":\"{\\\\\"orderId\\\\\":\\\\\"TEST-ORDER-1\\\\\"}\",\"loadedDocumentsJson\":null,\"lastRetrievedDocumentsJson\":null,\"lastExecutedArtifactJson\":null,\"lastResultJson\":null,\"createdDate\":\"2026-05-17T14:28:19+0000\",\"lastUpdatedDate\":\"2026-05-17T14:28:19+0000\",\"partyId\":null,\"clientTypeEnumId\":null,\"clientBaseUrl\":null,\"clientSessionId\":null,\"clientContextId\":null,\"clientConversationId\":null,\"clientUrl\":null,\"providerEnumId\":null,\"providerConversationId\":null,\"providerThreadId\":null,\"providerLastResponseId\":null,\"modelName\":null,\"contextStorageModeEnumId\":null,\"statusId\":null,\"lastUpdatedStamp\":\"2026-05-17T14:28:19+0000\",\"currentBusinessObjects\":{\"orderId\":\"TEST-ORDER-1\"},\"loadedDocuments\":null,\"lastRetrievedDocuments\":null,\"lastExecutedArtifact\":null,\"lastResult\":null}}'}], 'isError': False}"
+    },
+    {
+      "name": "create_agent_session",
+      "ok": true,
+      "detail": "agentSessionContextId=101123"
+    },
+    {
+      "name": "find_agent_sessions",
+      "ok": true,
+      "detail": "found=1 sessions, created_in_list=True"
+    },
+    {
+      "name": "update_agent_session_external_context",
+      "ok": true,
+      "detail": "response=AgSessActive"
+    },
+    {
+      "name": "close_agent_session",
+      "ok": true,
+      "detail": "statusId=AgSessClosed"
+    },
+    {
+      "name": "find_records_guarded_sensitive_denied",
+      "ok": true,
+      "detail": "response={'content': [{'type': 'text', 'text': 'Error: Query senza condizioni non consentita per entity sensibile: mantle.account.invoice.Invoice\\n'}], 'isError': True}"
+    }
+  ],
+  "passed": 13,
+  "failed": 0
+}
