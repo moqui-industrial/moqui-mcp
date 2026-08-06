@@ -23,7 +23,6 @@ class AgentPromptCandidateBuilder {
         String domainObject = context.domainObject as String
         String actionKind = context.actionKind as String
         String operationEffect = context.operationEffect as String
-        String currentScreen = context.currentScreen as String
         Map currentBusinessObjects = (context.currentBusinessObjects instanceof Map) ? (Map) context.currentBusinessObjects : [:]
         String indexName = context.indexName as String
         int size = Math.min(((context.limit ?: 8) as Integer), 25)
@@ -57,18 +56,6 @@ class AgentPromptCandidateBuilder {
         if (domainObject) filterList.add([term: [domainObject: domainObject]])
         if (actionKind) filterList.add([term: [actionKind: actionKind]])
         if (operationEffect) filterList.add([term: [operationEffect: operationEffect]])
-        if (currentScreen) {
-            filterList.add([
-                bool: [
-                    should: [
-                        [term: [sourceScreenPath: currentScreen]],
-                        [match: [sourceScreenPath: currentScreen]]
-                    ],
-                    minimum_should_match: 1
-                ]
-            ])
-        }
-
         List shouldList = []
         if (queryText) {
             shouldList.add([
@@ -126,7 +113,6 @@ class AgentPromptCandidateBuilder {
             domainObject : domainObject,
             actionKind : actionKind,
             operationEffect : operationEffect,
-            currentScreen : currentScreen,
             currentBusinessObjects : currentBusinessObjects,
             currentBusinessObjectKeys : currentBusinessObjectKeys,
             effectiveIndex : effectiveIndex,
@@ -139,7 +125,7 @@ class AgentPromptCandidateBuilder {
             filterList : filterList,
             shouldList : shouldList,
             lexicalQuerySpec : lexicalQuerySpec,
-            nonPrimaryChannels : ['screen_transition', 'read_query', 'unsupported'],
+            nonPrimaryChannels : ['read_query', 'unsupported'],
             hardExcludedChannels : ['unsupported']
         ]
     }

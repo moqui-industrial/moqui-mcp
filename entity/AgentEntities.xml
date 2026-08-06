@@ -271,36 +271,6 @@ along with this software (see the LICENSE.md file). If not, see
         </index>
     </entity>
 
-    <view-entity entity-name="AgentToolExecutionBinReport" package="moqui.agent" cache="never">
-        <member-entity entity-alias="ATEB" entity-name="moqui.agent.AgentToolExecutionBin"/>
-        <alias entity-alias="ATEB" name="toolName"/>
-        <alias entity-alias="ATEB" name="documentKind"/>
-        <alias entity-alias="ATEB" name="area"/>
-        <alias entity-alias="ATEB" name="subArea"/>
-        <alias entity-alias="ATEB" name="domainObject"/>
-        <alias entity-alias="ATEB" name="actionKind"/>
-        <alias entity-alias="ATEB" name="operationEffect"/>
-        <alias entity-alias="ATEB" name="executionChannel"/>
-        <alias entity-alias="ATEB" name="serviceName"/>
-        <alias entity-alias="ATEB" name="searchMode"/>
-        <alias entity-alias="ATEB" name="indexName"/>
-        <alias entity-alias="ATEB" name="executionCount" function="sum"/>
-        <alias entity-alias="ATEB" name="successCount" function="sum"/>
-        <alias entity-alias="ATEB" name="errorCount" function="sum"/>
-        <alias entity-alias="ATEB" name="deniedCount" function="sum"/>
-        <alias entity-alias="ATEB" name="confirmationRequiredCount" function="sum"/>
-        <alias entity-alias="ATEB" name="hybridLlmRerankCount" function="sum"/>
-        <alias entity-alias="ATEB" name="rerankerFallbackCount" function="sum"/>
-        <alias entity-alias="ATEB" name="totalTimeMillis" function="sum"/>
-        <alias entity-alias="ATEB" name="totalSquaredTime" function="sum"/>
-        <alias entity-alias="ATEB" name="minTimeMillis" function="min"/>
-        <alias entity-alias="ATEB" name="maxTimeMillis" function="max"/>
-        <alias entity-alias="ATEB" name="firstBinStartDateTime" field="binStartDateTime" function="min"/>
-        <alias entity-alias="ATEB" name="lastBinEndDateTime" field="binEndDateTime" function="max"/>
-        <alias entity-alias="ATEB" name="binStartDateTime"/><!-- filter only, don't select -->
-        <alias entity-alias="ATEB" name="binEndDateTime"/><!-- filter only, don't select -->
-    </view-entity>
-
     <entity entity-name="AgentDocumentIndexRun" package="moqui.agent" use="transactional">
         <field name="agentDocumentIndexRunId" type="id" is-pk="true"/>
         <field name="mathModelRunId" type="id"/>
@@ -320,6 +290,148 @@ along with this software (see the LICENSE.md file). If not, see
         </index>
         <relationship type="one-nofk" related="moqui.math.MathModelRun" short-alias="mathModelRun">
             <key-map field-name="mathModelRunId"/>
+        </relationship>
+    </entity>
+
+    <!-- ========== RAG ========== -->
+    <entity entity-name="AgentQueryEmbeddingCache" package="moqui.rag" use="nontransactional">
+        <field name="cacheKey" type="id" is-pk="true" enable-audit-log="false"/>
+        <field name="queryTextNorm" type="text-medium" enable-audit-log="false"/>
+        <field name="embeddingProvider" type="text-short" enable-audit-log="false"/>
+        <field name="embeddingModel" type="text-short" enable-audit-log="false"/>
+        <field name="embeddingDimensions" type="number-integer" enable-audit-log="false"/>
+        <field name="embeddingJson" type="text-very-long" enable-audit-log="false"/>
+        <field name="createdDate" type="date-time" enable-audit-log="false"/>
+        <field name="lastUsedDate" type="date-time" enable-audit-log="false"/>
+        <field name="hitCount" type="number-integer" enable-audit-log="false"/>
+    </entity>
+
+    <!-- ========== AGENT SKILLS ========== -->
+    <entity entity-name="AgentSkillRegister" package="moqui.agent" use="configuration" cache="true">
+        <field name="agentSkillRegisterId" type="id" is-pk="true"/>
+        <field name="skillId" type="id-long">
+            <description>Stable skill identifier from SKILL.md frontmatter or derived from its component path.</description>
+        </field>
+        <field name="artifactName" type="text-medium"/>
+        <field name="artifactTypeEnumId" type="id"/>
+        <field name="artifactGroupId" type="id"/>
+        <field name="skillTypeEnumId" type="id"/>
+        <field name="domainName" type="text-medium"/>
+        <field name="title" type="text-medium"/>
+        <field name="description" type="text-medium"/>
+        <field name="componentName" type="text-medium"/>
+        <field name="skillLocation" type="text-medium"/>
+        <field name="skillPath" type="text-medium"/>
+        <field name="statusId" type="id"/>
+        <field name="frontmatterJson" type="text-very-long"/>
+        <field name="bodyText" type="text-very-long"/>
+        <field name="searchText" type="text-very-long"/>
+        <field name="contentHash" type="text-medium"/>
+        <field name="lastIndexedDate" type="date-time"/>
+
+        <relationship type="one" related="moqui.basic.Enumeration" short-alias="artifactTypeEnum">
+            <key-map field-name="artifactTypeEnumId"/></relationship>
+        <relationship type="one" title="AgentSkillType" related="moqui.basic.Enumeration" short-alias="skillTypeEnum">
+            <key-map field-name="skillTypeEnumId"/></relationship>
+        <relationship type="one" related="moqui.security.ArtifactGroup" short-alias="artifactGroup">
+            <key-map field-name="artifactGroupId"/></relationship>
+        <relationship type="one" related="moqui.basic.StatusItem" short-alias="status">
+            <key-map field-name="statusId"/></relationship>
+        <index name="MCPASKILL_SKILLID" unique="true">
+            <index-field name="skillId"/></index>
+        <index name="MCPASKILL_ARTIFACT">
+            <index-field name="artifactName"/></index>
+        <index name="MCPASKILL_COMPONENT">
+            <index-field name="componentName"/></index>
+        <index name="MCPASKILL_DOMAIN">
+            <index-field name="domainName"/></index>
+        <index name="MCPASKILL_STATUS">
+            <index-field name="statusId"/></index>
+    </entity>
+
+    <!-- ========== PATTERNS ========== -->
+    <entity entity-name="AgentAggregatePattern" package="moqui.agent" use="transactional" cache="true">
+        <field name="agentAggregatePatternId" type="id" is-pk="true"/>
+        <field name="patternName" type="text-medium"/>
+        <field name="patternType" type="text-short"/>
+        <field name="silverstonChapterNumber" type="number-integer"/>
+        <field name="silverstonPatternKind" type="text-short"/>
+        <field name="rootEntityName" type="text-medium"/>
+        <field name="rootPkFieldNames" type="text-medium"/>
+        <field name="rootReferenceFieldName" type="text-medium"/>
+        <field name="parentReferenceFieldName" type="text-medium"/>
+        <field name="sequenceFieldNames" type="text-medium"/>
+        <field name="description" type="text-long"/>
+        <field name="usageNotes" type="text-very-long"/>
+        <field name="active" type="text-indicator"/>
+        <index name="AGAGPTN_NAME">
+            <index-field name="patternName"/>
+        </index>
+        <index name="AGAGPTN_TYPE">
+            <index-field name="patternType"/>
+        </index>
+        <relationship type="many" related="moqui.agent.AgentAggregatePatternMember" short-alias="members">
+            <key-map field-name="agentAggregatePatternId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="AgentAggregatePatternMember" package="moqui.agent" use="transactional" cache="true">
+        <field name="agentAggregatePatternId" type="id" is-pk="true"/>
+        <field name="patternMemberSeqId" type="id" is-pk="true"/>
+        <field name="memberName" type="text-medium"/>
+        <field name="memberRoleType" type="text-short"/>
+        <field name="entityName" type="text-medium"/>
+        <field name="parentEntityName" type="text-medium"/>
+        <field name="linkFieldNames" type="text-medium"/>
+        <field name="referencedFieldNames" type="text-medium"/>
+        <field name="sequenceFieldNames" type="text-medium"/>
+        <field name="cardinalityDescription" type="text-medium"/>
+        <field name="notes" type="text-very-long"/>
+        <index name="AGAGPMBR_ENTITY">
+            <index-field name="entityName"/>
+        </index>
+        <relationship type="one" related="moqui.agent.AgentAggregatePattern" short-alias="pattern">
+            <key-map field-name="agentAggregatePatternId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="AgentUniversalPattern" package="moqui.agent" use="transactional" cache="true">
+        <field name="agentUniversalPatternId" type="id" is-pk="true"/>
+        <field name="chapterNumber" type="number-integer"/>
+        <field name="chapterTitle" type="text-medium"/>
+        <field name="patternFamily" type="text-short"/>
+        <field name="coreQuestion" type="text-medium"/>
+        <field name="bookConceptName" type="text-medium"/>
+        <field name="description" type="text-very-long"/>
+        <field name="moquiRelevance" type="text-very-long"/>
+        <field name="active" type="text-indicator"/>
+        <index name="AGUNPAT_CHAPTER">
+            <index-field name="chapterNumber"/>
+        </index>
+        <index name="AGUNPAT_FAMILY">
+            <index-field name="patternFamily"/>
+        </index>
+        <relationship type="many" related="moqui.agent.AgentUniversalPatternLevel" short-alias="levels">
+            <key-map field-name="agentUniversalPatternId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="AgentUniversalPatternLevel" package="moqui.agent" use="transactional" cache="true">
+        <field name="agentUniversalPatternId" type="id" is-pk="true"/>
+        <field name="patternLevelSeqId" type="id" is-pk="true"/>
+        <field name="levelNumber" type="number-integer"/>
+        <field name="levelTitle" type="text-medium"/>
+        <field name="structureFocus" type="text-medium"/>
+        <field name="moquiMappingNotes" type="text-very-long"/>
+        <field name="mappedAggregatePatternId" type="id"/>
+        <index name="AGUNLVL_LEVEL">
+            <index-field name="levelNumber"/>
+        </index>
+        <relationship type="one" related="moqui.agent.AgentUniversalPattern" short-alias="pattern">
+            <key-map field-name="agentUniversalPatternId"/>
+        </relationship>
+        <relationship type="one" related="moqui.agent.AgentAggregatePattern" short-alias="aggregatePattern">
+            <key-map field-name="mappedAggregatePatternId" related="agentAggregatePatternId"/>
         </relationship>
     </entity>
 </entities>

@@ -13,4 +13,10 @@
     <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.update#AgentSessionExternalContext" artifactTypeEnumId="AT_SERVICE"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.find#AgentSessionsForUser" artifactTypeEnumId="AT_SERVICE"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.close#AgentSessionContext" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="mantle\\.other\\.BudgetServices\\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="create#mantle\\.other\\.budget\\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="store#mantle\\.other\\.budget\\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="delete#mantle\\.other\\.budget\\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="mantle\\.ledger\\.LedgerServices\\.find#PartyAcctgPreference" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="mantle\\.party\\.TimeServices\\.get#DescendantPeriods" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y"/>
 </entity-facade-xml>

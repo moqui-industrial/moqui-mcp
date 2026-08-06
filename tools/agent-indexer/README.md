@@ -467,7 +467,7 @@ python3 evaluate_screen_prompt_retrieval.py \
   --docs ./output/global-screen-prompt-documents.jsonl \
   --queries ./output/global-eval-queries.jsonl \
   --mode opensearch \
-  --opensearch-url http://localhost:9200 \
+  --opensearch-url http://localhost:9202 \
   --opensearch-index moqui_agent_prompts_v1 \
   --opensearch-knn \
   --embedding-field embedding \
@@ -481,7 +481,7 @@ Valutazione multi-modalita' per gate di release, misurata sul runtime reale `moq
 python3 evaluate_opensearch_modes.py \
   --docs ./output/global-screen-prompt-documents.jsonl \
   --queries ./output/global-eval-queries.jsonl \
-  --mcp-endpoint http://localhost:8080/mcp \
+  --mcp-endpoint http://localhost:8081/mcp \
   --output-dir ./output
 ```
 
@@ -511,8 +511,8 @@ Per tracciare la evaluation come run lungo dentro `MathModelRun`:
 python3 evaluate_opensearch_modes.py \
   --docs ./output/global-screen-prompt-documents.jsonl \
   --queries ./output/global-eval-queries.jsonl \
-  --mcp-endpoint http://localhost:8080/mcp \
-  --rpc-endpoint http://localhost:8080/rpc/json \
+  --mcp-endpoint http://localhost:8081/mcp \
+  --rpc-endpoint http://localhost:8081/rpc/json \
   --auth-header "Basic am9obi5kb2U6bW9xdWk=" \
   --output-dir ./output/full-eval \
   --math-model-id AgentMoquiRagModel_v1 \
@@ -535,7 +535,7 @@ Per validare il layer MathModel/graph/tensor su un runtime Moqui attivo:
 cd moqui-mcp
 
 python3 tools/runtime_validation_test.py \
-  --rpc-endpoint http://localhost:8080/rpc/json \
+  --rpc-endpoint http://localhost:8081/rpc/json \
   --auth-header "Basic am9obi5kb2U6bW9xdWk=" \
   --vertices-file tools/agent-indexer/output/graph/global-artifact-graph-vertices.jsonl \
   --edges-file tools/agent-indexer/output/graph/global-artifact-graph-edges.jsonl \

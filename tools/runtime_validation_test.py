@@ -76,7 +76,7 @@ def write_markdown(results: list[dict[str, Any]], target: Path) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Run runtime validation for moqui-mcp MathModel/graph/tensor services")
-    ap.add_argument("--rpc-endpoint", required=True, help="Moqui JSON-RPC endpoint, for example http://localhost:8080/rpc/json")
+    ap.add_argument("--rpc-endpoint", required=True, help="Moqui JSON-RPC endpoint, for example http://localhost:8081/rpc/json")
     ap.add_argument("--auth-header", default=None)
     ap.add_argument("--math-model-id", default="AgentMoquiRagModel_v1")
     ap.add_argument("--graph-id", default="AgentArtifactGraph")

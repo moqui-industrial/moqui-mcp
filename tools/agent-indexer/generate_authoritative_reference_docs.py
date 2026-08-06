@@ -22,6 +22,9 @@ from typing import Any
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile
 
+from generate_service_action_catalog import infer_semantics, load_semantics
+from moqui_xsd_action_grammar import extract_action_grammar
+
 
 def slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
@@ -260,7 +263,7 @@ def read_pdf_preview(path: Path, first_page: int = 1, last_page: int = 6) -> str
 def parse_making_apps_pdf(path: Path) -> list[dict[str, Any]]:
     preview = read_pdf_preview(path, 1, 8)
     lines = [line.strip() for line in preview.split(" ") if line.strip()]
-    title = "Making Apps with Moqui"
+    title = "Moqui Application Development Guide"
     explanation = "Authoritative Moqui guidebook covering framework concepts, application artifacts, execution context, and development approach."
     return [{
         "documentId": "agent-ref://moqui-guide/making-apps-overview",
@@ -349,6 +352,114 @@ def parse_epub_chapters(path: Path) -> list[dict[str, Any]]:
     return docs
 
 
+def parse_xml_actions_xsd(path: Path) -> list[dict[str, Any]]:
+    grammar = extract_action_grammar(path)
+    semantics_map = load_semantics()
+    docs: list[dict[str, Any]] = []
+
+    overview_text = (
+        "Moqui xml-actions is the core safe executable DSL used inside services, transitions, "
+        "conditions, and other declarative artifact logic. Native verbs can read entities, "
+        "write entities, call services, branch, assign variables, and return structured results."
+    )
+    docs.append({
+        "documentId": "agent-ref://xml-actions/overview",
+        "documentKind": "authoritative_xml_actions_guide",
+        "sourceKind": "authoritative_reference",
+        "canonicalPrompt": "understand moqui xml-actions dsl",
+        "area": "MoquiDsl",
+        "subArea": "xml-actions",
+        "domainObject": "XmlActionsDsl",
+        "patternName": "xml-actions overview",
+        "knowledgeCategory": "authoritative_reference",
+        "relatedEntities": [],
+        "requiredEntities": [],
+        "optionalEntities": [],
+        "serviceSequence": [],
+        "sourceArtifacts": [str(path)],
+        "sourceExamples": [str(path)],
+        "businessQuestions": [
+            "What is the role of xml-actions in Moqui?",
+            "Which native verbs can the planner and generator rely on in xml-actions?",
+        ],
+        "processHints": [
+            "Use xml-actions as the safe executable DSL for internal Moqui behavior.",
+            "Combine this reference with service-action statements to understand concrete usage patterns.",
+        ],
+        "relatedAgentPrompts": [],
+        "businessValidity": "authoritative_reference",
+        "verifiedByTest": False,
+        "knowledgeOnly": True,
+        "runtimeExecutable": False,
+        "sourceTitle": "xml-actions-3.xsd",
+        "humanExplanation": overview_text,
+        "embeddingText": " ".join([
+            "xml-actions", "Moqui DSL", "safe executable language", "service-call",
+            "entity-find", "entity-create", "entity-update", "set", "if", "return", overview_text
+        ]),
+    })
+
+    for element_name in sorted(grammar.keys()):
+        meta = grammar[element_name]
+        semantics = infer_semantics(element_name, semantics_map)
+        attrs = meta.get("attributes", [])
+        children = meta.get("children", [])
+        statement_class = semantics.get("statementClass", "unknown")
+        operation_effect = semantics.get("operationEffect", "unknown")
+        explanation = (
+            f"xml-actions element `{element_name}` belongs to statement class `{statement_class}` "
+            f"with operation effect `{operation_effect}`."
+        )
+        docs.append({
+            "documentId": f"agent-ref://xml-actions/{slug(element_name)}",
+            "documentKind": "authoritative_xml_action_element",
+            "sourceKind": "authoritative_reference",
+            "canonicalPrompt": f"understand xml-actions {element_name}",
+            "area": "MoquiDsl",
+            "subArea": "xml-actions",
+            "domainObject": "XmlActionElement",
+            "patternName": element_name,
+            "knowledgeCategory": "authoritative_reference",
+            "relatedEntities": [],
+            "requiredEntities": [],
+            "optionalEntities": [],
+            "serviceSequence": [],
+            "sourceArtifacts": [str(path)],
+            "sourceExamples": [str(path)],
+            "businessQuestions": [
+                f"What does the xml-actions element {element_name} do?",
+                f"Which attributes and child elements are valid for {element_name}?",
+            ],
+            "processHints": [
+                f"Statement class: {statement_class}",
+                f"Operation effect: {operation_effect}",
+                "Attributes: " + ", ".join(attrs) if attrs else "Attributes: none",
+                "Children: " + ", ".join(children) if children else "Children: none",
+            ],
+            "relatedAgentPrompts": [],
+            "businessValidity": "authoritative_reference",
+            "verifiedByTest": False,
+            "knowledgeOnly": True,
+            "runtimeExecutable": False,
+            "sourceTitle": "xml-actions-3.xsd",
+            "humanExplanation": explanation,
+            "xmlActionElement": element_name,
+            "statementClass": statement_class,
+            "operationEffect": operation_effect,
+            "grammarAttributes": attrs,
+            "grammarChildren": children,
+            "embeddingText": " ".join(part for part in [
+                element_name,
+                statement_class,
+                operation_effect,
+                explanation,
+                "attributes " + " ".join(attrs) if attrs else "",
+                "children " + " ".join(children) if children else "",
+            ] if part),
+        })
+    return docs
+
+
 def write_jsonl(path: Path, docs: list[dict[str, Any]]) -> None:
     with path.open("w", encoding="utf-8") as fh:
         for doc in docs:
@@ -379,6 +490,7 @@ def main() -> None:
     ap.add_argument("--moqui-org-page-data", required=True)
     ap.add_argument("--making-apps-pdf", required=True)
     ap.add_argument("--pattern-reference-epub", required=True)
+    ap.add_argument("--xml-actions-xsd", required=True)
     ap.add_argument("--output-dir", default="output")
     args = ap.parse_args()
 
@@ -391,6 +503,7 @@ def main() -> None:
     docs.extend(parse_moqui_org_pages(Path(args.moqui_org_page_data)))
     docs.extend(parse_making_apps_pdf(Path(args.making_apps_pdf)))
     docs.extend(parse_epub_chapters(Path(args.pattern_reference_epub)))
+    docs.extend(parse_xml_actions_xsd(Path(args.xml_actions_xsd)))
     docs.sort(key=lambda d: (d.get("documentKind", ""), d.get("area", ""), d.get("documentId", "")))
 
     jsonl_path = out_dir / "global-authoritative-reference-documents.jsonl"

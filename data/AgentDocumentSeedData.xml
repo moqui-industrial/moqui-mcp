@@ -36,11 +36,19 @@
 
     <moqui.entity.feed.DataFeedDocument dataFeedId="AgentPromptFeed" dataDocumentId="AgentPromptDocument"/>
 
-    <!-- ========== Agent Tool Execution Telemetry real-time feed ========== -->
+    <!-- ========== Agent Tool Execution Telemetry feed ========== -->
     <!--
         Telemetry/search projection feed. The transactional audit row remains
         AgentToolExecutionLog, but OpenSearch indexing should use the denormalized
         AgentToolExecutionElasticLog projection.
+
+        Keep this feed manual/pull instead of real-time push. The underlying
+        DataDocument currently resolves through a path that OpenSearch treats
+        like a multi-entity join during real-time feed execution, which causes
+        noisy rollback warnings even though the telemetry entity rows are
+        successfully written. Runtime inspection uses explicit backfill/index
+        services, so manual feed mode preserves observability without the
+        failing real-time hook.
     -->
     <moqui.entity.document.DataDocument
             dataDocumentId="AgentToolExecLog"
@@ -86,8 +94,9 @@
 
     <moqui.entity.feed.DataFeed
             dataFeedId="AgentToolExecLogFeed"
-            dataFeedTypeEnumId="DTFDTP_RT_PUSH"
-            feedName="Agent Tool Execution Log Real-Time Feed"
+            dataFeedTypeEnumId="DTFDTP_MAN_PULL"
+            indexOnStartEmpty="N"
+            feedName="Agent Tool Execution Log Manual Feed"
             feedReceiveServiceName="org.moqui.search.SearchServices.index#DataDocuments"
             feedDeleteServiceName="org.moqui.search.SearchServices.delete#DataDocument"/>
 

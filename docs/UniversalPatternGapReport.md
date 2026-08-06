@@ -16,6 +16,14 @@ The component already seeds these universal pattern families:
 - contact mechanism structures
 - business rule structures
 
+The seed now mirrors the explicit chapter-level variants from the volume more closely, including:
+
+- contextual role attribute variant
+- contextual role relationship variant
+- contextual role PARTY-only alternative
+- status type with multi rollup and rules
+- contact mechanism with flexible address parts
+
 These are represented today in:
 
 - [AgentUniversalPatternSeedData.xml](/home/igor/development/projects/moqui/tests/ai/moqui-mcp/data/AgentUniversalPatternSeedData.xml)
@@ -28,7 +36,7 @@ They are also now projected into the knowledge corpus through:
 - chapter-level reference documents from the universal-pattern volume
 - aggregate-pattern reference documents derived from seed metadata
 - `moqui-org` guide documents
-- `Making Apps with Moqui` overview guidance
+- application-development guide overview guidance
 
 ## Coverage By Pattern Family
 
@@ -79,6 +87,11 @@ Assessment:
 - seeded: strong
 - active in retrieval: strong
 - active in planner decomposition: strongest family so far
+
+Important note:
+
+- hierarchy and aggregation variants are modeled explicitly
+- peer-to-peer semantics are still acknowledged mainly as a gap, not yet as a dedicated aggregate/runtime pattern family
 
 ### 3. Classification And Type Systems
 
@@ -245,3 +258,13 @@ The remaining work is to connect that vocabulary to:
 
 The strongest implemented area today is recursive aggregate structure.
 The biggest opportunity is to activate the other pattern families so they become queryable evidence, not only seed metadata.
+
+## Coverage checkpoint
+
+As of this revision, chapters 2 through 8 are all represented explicitly in seed metadata, and the remaining volume-3 gap is no longer chapter omission.
+The remaining gap is operational:
+
+- richer graph tagging
+- stronger lookup and retrieval activation
+- planner use of universal-pattern evidence
+- peer-to-peer structure handling as a first-class runtime pattern

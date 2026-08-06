@@ -61,7 +61,7 @@
     <default-property name="moqui.agent.provider.openai_compatible.supportsEmbeddings" value="true"/>
     <default-property name="moqui.agent.provider.openai_compatible.supportsToolCalling" value="false"/>
     <default-property name="moqui.agent.provider.openai_compatible.supportsProviderManagedContext" value="false"/>
-    <default-property name="moqui.agent.elasticTelemetry.enabled" value="false"/>
+    <default-property name="moqui.agent.elasticTelemetry.enabled" value="true"/>
     <default-property name="moqui.agent.elasticTelemetry.bestEffort" value="true"/>
     <default-property name="moqui.agent.elasticTelemetry.includeParameters" value="false"/>
     <default-property name="moqui.agent.elasticTelemetry.includeResults" value="false"/>
@@ -73,7 +73,9 @@
     <!-- LibreChat Proxy Servlet settings (same pattern as kibana_host/kibana_port in MoquiDefaultConf.xml) -->
     <default-property name="librechat_host" value="127.0.0.1"/>
     <default-property name="librechat_port" value="3080"/>
-    <!-- Local MCP service account used to initialize LibreChat without depending on browser session cookies. -->
+    <default-property name="elasticsearch_url" value="http://127.0.0.1:9200"/>
+    <!-- Local MCP service account used to initialize LibreChat without depending on browser session cookies.
+         For validation of business flows we use the demo admin account with full permissions. -->
     <default-property name="moqui.mcp.serviceAccountEnabled" value="true"/>
     <default-property name="moqui.mcp.serviceAccountUserId" value="john.doe"/>
 
@@ -90,7 +92,12 @@
     <webapp-list>
         <webapp name="webroot">
             <filter name="McpAuthFilter" class="org.moqui.impl.webapp.MoquiAuthFilter" async-supported="true">
+                <url-pattern>/mcp</url-pattern>
                 <url-pattern>/mcp/*</url-pattern>
+                <url-pattern>/sse</url-pattern>
+                <url-pattern>/sse/*</url-pattern>
+                <url-pattern>/message</url-pattern>
+                <url-pattern>/message/*</url-pattern>
             </filter>
             <!-- LibreChat auth filter and proxy servlet, same pattern as Kibana in MoquiDefaultConf.xml -->
             <filter name="LibreChatAuthFilter" class="org.moqui.impl.webapp.MoquiAuthFilter" async-supported="true">
@@ -163,7 +170,12 @@
                 <init-param name="allowCredentials" value="true"/>
                 <init-param name="keepAliveIntervalSeconds" value="30"/>
                 <init-param name="maxConnections" value="100"/>
+                <url-pattern>/mcp</url-pattern>
                 <url-pattern>/mcp/*</url-pattern>
+                <url-pattern>/sse</url-pattern>
+                <url-pattern>/sse/*</url-pattern>
+                <url-pattern>/message</url-pattern>
+                <url-pattern>/message/*</url-pattern>
             </servlet>
         </webapp>
     </webapp-list>
@@ -181,11 +193,16 @@
             <subscreens-item name="agent" menu-title="Agent Chat" menu-index="97"
                     location="component://moqui-mcp/screen/agent.xml"/>
         </screen>
-        <!-- Register "message" and "sse" directly under webroot because WebFacadeImpl.getPathInfoList()
-             strips the servlet path (/mcp), leaving only ["message"] or ["sse"] visible to ScreenUrlInfo.
-             Without these, UserFacadeImpl.initFromHttpRequest() throws ScreenResourceNotFoundException
-             before it can create the Visit. -->
+        <!-- Register both "mcp" and the stripped child paths under webroot.
+             Depending on request path normalization, ScreenUrlInfo may see either:
+             - ["mcp"]
+             - ["mcp", "message"]
+             - ["message"]
+             - ["sse"]
+             The servlet still handles the actual MCP protocol, but these stub routes let
+             Moqui create Visit/auth context before servlet dispatch without 404ing first. -->
         <screen location="component://webroot/screen/webroot.xml">
+            <subscreens-item name="mcp" menu-include="false" location="component://moqui-mcp/screen/mcp.xml"/>
             <subscreens-item name="message" menu-include="false" location="component://moqui-mcp/screen/mcp.xml"/>
             <subscreens-item name="sse" menu-include="false" location="component://moqui-mcp/screen/mcp.xml"/>
             <subscreens-item name="LibreChat" menu-title="LibreChat" location="component://moqui-mcp/screen/agent/LibreChat.xml"/>

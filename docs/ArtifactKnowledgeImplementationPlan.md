@@ -54,10 +54,10 @@ Primary sources:
 
 Support sources:
 
-- `Making Apps with Moqui`
+- local application-development guide
   - found in `moqui-org/screen/moqui.org/MakingAppsWithMoqui-1.0.pdf`
-- Len Silverston books
-  - especially Volume 3 for universal patterns
+- external data-model reference corpus
+  - especially the universal-pattern volume
 - local Moqui skills and project notes
 
 Source precedence:
@@ -66,9 +66,9 @@ Source precedence:
 2. XSD-defined language structure
 3. seed data and test suites
 4. standard data-document/data-feed recipes
-5. books and supporting documentation
+5. external reference corpus and supporting documentation
 
-Books are support for naming, interpretation, and pattern classification.
+External reference documents are support for naming, interpretation, and pattern classification.
 They must not override actual Moqui artifact structure.
 
 ### Layer A - Internal Artifact Knowledge
@@ -266,7 +266,7 @@ Use labels and parameters instead of adding hardcoded fields to graph entities.
 
 ## 8. Pattern Taxonomy
 
-Aggregate and structural pattern names should align with stable data-model concepts, especially Silverston-style universal structures.
+Aggregate and structural pattern names should align with stable data-model concepts, especially universal reference structures from the external pattern corpus.
 
 Current Moqui-oriented canonical set:
 
@@ -591,7 +591,7 @@ This distinction must remain, because sibling artifacts may be operationally acc
 
 ## 17. Immediate Next Steps
 
-1. Finalize the source inventory, including `moqui-org` and Silverston references
+1. Finalize the source inventory, including `moqui-org` and external pattern references
 2. Complete graph extraction coverage for entities, services, screens, and XSD-backed references
 3. Normalize graph labels and edge types to standard Moqui terminology
 4. Generate technical `DataDocument` definitions from graph entities

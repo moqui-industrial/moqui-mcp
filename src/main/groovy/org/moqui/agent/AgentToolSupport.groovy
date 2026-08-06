@@ -117,6 +117,46 @@ class AgentToolSupport {
                     fallbackEntityName : 'mantle.other.budget.BudgetAndTimePeriod',
                     fallbackExactFields : ['budgetId', 'description']
             ],
+            budgetType : [
+                    indexName : 'mantle',
+                    documentType : 'BudgetTypeLookup',
+                    idField : 'enumId',
+                    exactFields : ['enumId', 'description', 'descriptionNormalized'],
+                    canonicalFields : ['enumId', 'descriptionNormalized'],
+                    textFields : ['description', 'descriptionNormalized', 'enumId'],
+                    fallbackEntityName : 'moqui.basic.Enumeration',
+                    fallbackExactFields : ['enumId', 'description']
+            ],
+            roleType : [
+                    indexName : 'mantle',
+                    documentType : 'RoleTypeLookup',
+                    idField : 'roleTypeId',
+                    exactFields : ['roleTypeId', 'description', 'descriptionNormalized'],
+                    canonicalFields : ['roleTypeId', 'descriptionNormalized'],
+                    textFields : ['description', 'descriptionNormalized', 'roleTypeId'],
+                    fallbackEntityName : 'mantle.party.RoleType',
+                    fallbackExactFields : ['roleTypeId', 'description']
+            ],
+            status : [
+                    indexName : 'mantle',
+                    documentType : 'StatusItemLookup',
+                    idField : 'statusId',
+                    exactFields : ['statusId', 'description', 'descriptionNormalized'],
+                    canonicalFields : ['statusId', 'descriptionNormalized'],
+                    textFields : ['description', 'descriptionNormalized', 'statusId', 'statusTypeId'],
+                    fallbackEntityName : 'moqui.basic.StatusItem',
+                    fallbackExactFields : ['statusId', 'description']
+            ],
+            fiscalYearTimePeriod : [
+                    indexName : 'mantle',
+                    documentType : 'FiscalYearTimePeriod',
+                    idField : 'timePeriodId',
+                    exactFields : ['timePeriodId', 'periodName', 'periodNameNormalized', 'partyId'],
+                    canonicalFields : ['timePeriodId', 'periodNameNormalized'],
+                    textFields : ['periodName', 'periodNameNormalized', 'timePeriodId', 'partyId'],
+                    fallbackEntityName : 'mantle.party.time.TimePeriod',
+                    fallbackExactFields : ['timePeriodId', 'periodName']
+            ],
             emplPositionClass : [
                     indexName : 'mantle',
                     documentType : 'EmplPositionClass',
@@ -544,12 +584,13 @@ class AgentToolSupport {
         Map plan = inferStructuredPromptPlan(ec, queryText, mergedParameters)
         if (!plan?.planType) return [:]
         if (plan.missingFields) {
+            String missingMessage = (plan.missingMessage ?: "Contesto mancante per ${plan.compositeType ?: plan.planType}: ${(plan.missingFields as List).join(', ')}") as String
             return [
                 compositeExecution : true,
                 compositeType : plan.compositeType ?: plan.planType,
                 success : false,
-                messages : [],
-                errors : ["Contesto mancante per ${plan.compositeType ?: plan.planType}: ${(plan.missingFields as List).join(', ')}"],
+                messages : [missingMessage],
+                errors : [missingMessage],
                 executionResult : [
                     success : false,
                     operation : plan.operation ?: plan.compositeType ?: plan.planType,
@@ -663,10 +704,16 @@ class AgentToolSupport {
     static Map inferEmploymentPositionPlan(ExecutionContext ec, String queryText, Map mergedParameters = null) {
         String normalizedText = normalizePromptWhitespace(queryText)
         if (!normalizedText || !looksLikeEmploymentPositionPrompt(normalizedText)) return [:]
+        String lowerText = normalizedText.toLowerCase()
+        boolean requestsAssignment = ['assegn', 'assign'].any { lowerText.contains(it) }
+        boolean requestsNewEmployee = ['nuovo impiegato', 'new employee', 'nuova persona', 'new person'].any { lowerText.contains(it) }
+        boolean referencesBudget = lowerText.contains('budget')
+        if ((requestsAssignment || requestsNewEmployee) && referencesBudget) return [:]
 
         Map budgetContext = [:]
         String budgetDescription = extractBudgetDescription(normalizedText)
         if (budgetDescription) budgetContext = resolveBudgetContextByDescription(ec, budgetDescription)
+        List<String> missingFields = []
 
         String personName = extractEmployeePersonName(normalizedText) ?: extractAssignedPersonName(normalizedText)
         String firstName = null
@@ -690,11 +737,12 @@ class AgentToolSupport {
         if (positionDescription) positionParams.description = positionDescription
 
         String positionClassDescription = extractPositionClassDescription(normalizedText)
-        if (!positionClassDescription && normalizedText.contains('project manager')) positionClassDescription = 'Project Manager'
-        if (positionClassDescription) {
-            String positionClassId = resolveEmplPositionClassIdByToken(ec, positionClassDescription)
-            if (positionClassId) positionParams.emplPositionClassId = positionClassId
+        String positionClassId = positionClassDescription ? resolveEmplPositionClassIdByToken(ec, positionClassDescription) : null
+        if (!positionClassId && normalizedText.toLowerCase().contains('project manager')) {
+            positionClassDescription = 'Project Manager'
+            positionClassId = resolveEmplPositionClassIdByToken(ec, positionClassDescription)
         }
+        if (positionClassId) positionParams.emplPositionClassId = positionClassId
 
         String statusId = inferEmplPositionStatusId(normalizedText)
         if (statusId) positionParams.statusId = statusId
@@ -707,6 +755,7 @@ class AgentToolSupport {
         if (budgetContext?.organizationPartyId) positionParams.organizationPartyId = budgetContext.organizationPartyId
         positionParams = collectNonNullEntries(positionParams)
         if (!positionParams.description) return [:]
+        if (budgetDescription && !budgetContext?.budgetId) missingFields.add('budgetId')
 
         List<Map> actions = []
         Map<String, Object> planContext = new LinkedHashMap(initialContext)
@@ -737,20 +786,39 @@ class AgentToolSupport {
         ])
 
         String employerPartyId = (budgetContext?.organizationPartyId ?: positionParams.organizationPartyId ?: resolveDefaultPartyContextValue(ec, initialContext, 'organizationPartyId')) as String
+        if (!personName && !resolvedPersonId) missingFields.add('personName')
+        if (!employerPartyId) missingFields.add('organizationPartyId')
         if (employerPartyId) {
             if (!positionParams.organizationPartyId) positionParams.organizationPartyId = employerPartyId
             if (!initialContext.organizationPartyId) initialContext.organizationPartyId = employerPartyId
         }
-        actions.add([
-                actionName : 'createEmployment',
-                serviceName : 'mantle.humanres.EmploymentServices.create#Employment',
-                parameters : collectNonNullEntries([
-                        fromPartyId : resolvedPersonId ?: '{@context.personPartyId}',
-                        toPartyId : employerPartyId ?: '{@context.organizationPartyId}',
-                        emplPositionId : '{@context.emplPositionId}',
-                        fromDate : ec?.user?.nowTimestamp
-                ])
-        ])
+        Map existingEmployment = (resolvedPersonId && employerPartyId) ?
+                findActiveEmploymentForPartyAndOrg(ec, resolvedPersonId, employerPartyId) : [:]
+        if (existingEmployment?.partyRelationshipId) {
+            planContext.activeEmploymentId = existingEmployment.partyRelationshipId
+            actions.add([
+                    actionName : 'updateEmployment',
+                    serviceName : 'mantle.humanres.EmploymentServices.update#Employment',
+                    parameters : collectNonNullEntries([
+                            partyRelationshipId : existingEmployment.partyRelationshipId,
+                            fromPartyId : existingEmployment.fromPartyId ?: resolvedPersonId,
+                            toPartyId : existingEmployment.toPartyId ?: employerPartyId,
+                            fromDate : existingEmployment.fromDate,
+                            emplPositionId : '{@context.emplPositionId}'
+                    ])
+            ])
+        } else {
+            actions.add([
+                    actionName : 'createEmployment',
+                    serviceName : 'mantle.humanres.EmploymentServices.create#Employment',
+                    parameters : collectNonNullEntries([
+                            fromPartyId : resolvedPersonId ?: '{@context.personPartyId}',
+                            toPartyId : employerPartyId ?: '{@context.organizationPartyId}',
+                            emplPositionId : '{@context.emplPositionId}',
+                            fromDate : ec?.user?.nowTimestamp
+                    ])
+            ])
+        }
 
         if (!actions) return [:]
         return [
@@ -768,10 +836,19 @@ class AgentToolSupport {
                         budgetId : '{@context.budgetId}',
                         organizationPartyId : '{@context.organizationPartyId}',
                         personPartyId : '{@context.personPartyId}',
-                        emplPositionId : '{@context.emplPositionId}'
+                        emplPositionId : '{@context.emplPositionId}',
+                        partyRelationshipId : '{@context.activeEmploymentId}'
                 ]),
                 primaryService : 'create#mantle.humanres.position.EmplPosition',
-                actions : actions
+                actions : actions,
+                missingFields : missingFields.unique(),
+                missingMessage : missingFields ? buildEmploymentPositionMissingMessage(missingFields.unique(), budgetDescription, personName) : null,
+                parsedParameters : collectNonNullEntries([
+                        budgetDescription : budgetDescription,
+                        personName : personName,
+                        organizationPartyId : employerPartyId,
+                        description : positionParams.description
+                ])
         ]
     }
 
@@ -1088,16 +1165,16 @@ class AgentToolSupport {
     protected static List<Map> loadAggregatePatternRegistry(ExecutionContext ec) {
         if (!ec?.entity) return []
         try {
-            def patternList = ec.entity.find('moqui.agent.AgentAggregatePattern').disableAuthz()
-                    .condition('active', 'Y')
+            def patternList = ec.entity.find('moqui.agent.AgentAggregatePattern').disableAuthz().useCache(false)
                     .orderBy('patternName')
                     .list()
+                    .findAll { ((it.get('active') ?: 'Y') as String).equalsIgnoreCase('Y') }
             List<Map> registry = []
             patternList.each { patternEv ->
                 String patternId = patternEv.getString('agentAggregatePatternId')
                 List<Map> members = []
                 try {
-                    members = ec.entity.find('moqui.agent.AgentAggregatePatternMember').disableAuthz()
+                    members = ec.entity.find('moqui.agent.AgentAggregatePatternMember').disableAuthz().useCache(false)
                             .condition('agentAggregatePatternId', patternId)
                             .orderBy('patternMemberSeqId')
                             .list()
@@ -1133,6 +1210,159 @@ class AgentToolSupport {
             ec.logger.warn("Unable to load aggregate pattern registry: ${t.message}")
             return []
         }
+    }
+
+    static List<Map> loadUniversalPatternRegistry(ExecutionContext ec) {
+        if (!ec?.entity) return []
+        try {
+            def patternList = ec.entity.find('moqui.agent.AgentUniversalPattern').disableAuthz().useCache(false)
+                    .orderBy('chapterNumber, agentUniversalPatternId')
+                    .list()
+                    .findAll { ((it.get('active') ?: 'Y') as String).equalsIgnoreCase('Y') }
+            List<Map> registry = []
+            patternList.each { patternEv ->
+                String patternId = patternEv.getString('agentUniversalPatternId')
+                List<Map> levels = []
+                try {
+                    levels = ec.entity.find('moqui.agent.AgentUniversalPatternLevel').disableAuthz().useCache(false)
+                            .condition('agentUniversalPatternId', patternId)
+                            .orderBy('patternLevelSeqId')
+                            .list()
+                            .collect { it.getMap() }
+                } catch (Throwable ignored) { }
+                registry.add(collectNonNullEntries([
+                        universalPatternId : patternId,
+                        chapterNumber : patternEv.get('chapterNumber'),
+                        chapterTitle : patternEv.getString('chapterTitle'),
+                        patternFamily : patternEv.getString('patternFamily'),
+                        coreQuestion : patternEv.getString('coreQuestion'),
+                        bookConceptName : patternEv.getString('bookConceptName'),
+                        description : patternEv.getString('description'),
+                        moquiRelevance : patternEv.getString('moquiRelevance'),
+                        levelTitles : levels.collect { it.levelTitle }.findAll { it },
+                        structureFocuses : levels.collect { it.structureFocus }.findAll { it },
+                        mappedAggregatePatternIds : levels.collect { it.mappedAggregatePatternId }.findAll { it }.unique()
+                ]))
+            }
+            return registry
+        } catch (Throwable t) {
+            ec.logger.warn("Unable to load universal pattern registry: ${t.message}")
+            return []
+        }
+    }
+
+    static Map inferPatternEvidence(ExecutionContext ec, Map artifactContext) {
+        Map ctx = artifactContext ?: [:]
+        String entityName = (ctx.entityName ?: '') as String
+        String domainObject = (ctx.domainObject ?: '') as String
+        String serviceName = (ctx.serviceName ?: '') as String
+        String serviceNoun = (ctx.serviceNoun ?: '') as String
+        String vertexType = (ctx.vertexType ?: '') as String
+        String label = (ctx.label ?: '') as String
+        String sourceArtifactUri = (ctx.sourceArtifactUri ?: '') as String
+        String xmlActionElement = (ctx.xmlActionElement ?: '') as String
+
+        Set<String> contextTokens = [] as Set<String>
+        [entityName, domainObject, serviceName, serviceNoun, vertexType, label, sourceArtifactUri, xmlActionElement].each { String raw ->
+            if (raw) contextTokens.addAll(tokenizeSearchText(raw))
+            String simple = simpleEntityName(raw)
+            if (simple) contextTokens.addAll(tokenizeSearchText(simple))
+        }
+        contextTokens = contextTokens.findAll { it } as Set<String>
+        if (!contextTokens) return [:]
+
+        List<Map> aggregateRegistry = loadAggregatePatternRegistry(ec)
+        List<Map> universalRegistry = loadUniversalPatternRegistry(ec)
+        List<Map> aggregateMatches = []
+
+        aggregateRegistry.each { Map pattern ->
+            int score = 0
+            Set<String> patternTokens = [] as Set<String>
+            String rootEntityName = (pattern.rootEntityName ?: '') as String
+            String rootSimple = simpleEntityName(rootEntityName)
+            List<String> memberEntityNames = (pattern.memberEntityNames ?: []) as List<String>
+            List<String> memberNames = (pattern.memberNames ?: []) as List<String>
+            List<String> memberRoles = []
+
+            [pattern.patternName, pattern.patternType, pattern.silverstonPatternKind, rootEntityName, rootSimple].each { String raw ->
+                if (raw) patternTokens.addAll(tokenizeSearchText(raw))
+            }
+            memberEntityNames.each { String raw ->
+                if (raw) patternTokens.addAll(tokenizeSearchText(raw))
+                String simple = simpleEntityName(raw)
+                if (simple) patternTokens.addAll(tokenizeSearchText(simple))
+            }
+            memberNames.each { String raw -> if (raw) patternTokens.addAll(tokenizeSearchText(raw)) }
+
+            if (entityName && ([rootEntityName, rootSimple] + memberEntityNames.collect { simpleEntityName(it) } + memberEntityNames).find { it?.equalsIgnoreCase(entityName) }) score += 120
+            if (domainObject && ([rootEntityName, rootSimple] + memberEntityNames.collect { simpleEntityName(it) }).find { it?.equalsIgnoreCase(domainObject) }) score += 90
+            if (serviceNoun && ([rootSimple] + memberEntityNames.collect { simpleEntityName(it) }).find { it?.equalsIgnoreCase(serviceNoun) }) score += 80
+
+            int tokenOverlap = contextTokens.intersect(patternTokens).size()
+            score += tokenOverlap * 8
+
+            if (entityName) {
+                List allMemberDefs = []
+                try {
+                    allMemberDefs = ec.entity.find('moqui.agent.AgentAggregatePatternMember').disableAuthz()
+                            .condition('agentAggregatePatternId', pattern.aggregatePatternId)
+                            .orderBy('patternMemberSeqId')
+                            .list()
+                            .collect { it.getMap() }
+                } catch (Throwable ignored) { }
+                allMemberDefs.each { Map member ->
+                    String candidate = (member.entityName ?: '') as String
+                    String candidateSimple = simpleEntityName(candidate)
+                    if (candidate && (candidate.equalsIgnoreCase(entityName) || candidateSimple.equalsIgnoreCase(entityName))) {
+                        String role = (member.memberRoleType ?: '') as String
+                        if (role) memberRoles.add(role)
+                    }
+                }
+            }
+
+            if (score > 0) {
+                aggregateMatches.add(collectNonNullEntries([
+                        aggregatePatternId : pattern.aggregatePatternId,
+                        patternName : pattern.patternName,
+                        patternType : pattern.patternType,
+                        silverstonChapterNumber : pattern.silverstonChapterNumber,
+                        silverstonPatternKind : pattern.silverstonPatternKind,
+                        rootEntityName : pattern.rootEntityName,
+                        rootEntitySimpleName : pattern.rootEntitySimpleName,
+                        memberRoles : memberRoles.unique(),
+                        score : score
+                ]))
+            }
+        }
+
+        aggregateMatches = aggregateMatches.sort { a, b -> ((b.score ?: 0) as Integer) <=> ((a.score ?: 0) as Integer) }
+        Set<String> matchedAggregateIds = aggregateMatches.collect { it.aggregatePatternId }.findAll { it } as Set<String>
+
+        List<Map> universalMatches = universalRegistry.findAll { Map pattern ->
+            List<String> mappedAggregateIds = (pattern.mappedAggregatePatternIds ?: []) as List<String>
+            return mappedAggregateIds.any { matchedAggregateIds.contains(it) }
+        }.collect { Map pattern ->
+            collectNonNullEntries([
+                    universalPatternId : pattern.universalPatternId,
+                    patternFamily : pattern.patternFamily,
+                    chapterNumber : pattern.chapterNumber,
+                    chapterTitle : pattern.chapterTitle,
+                    bookConceptName : pattern.bookConceptName,
+                    mappedAggregatePatternIds : pattern.mappedAggregatePatternIds
+            ])
+        }
+
+        return collectNonNullEntries([
+                aggregatePatterns : aggregateMatches,
+                aggregatePatternIds : aggregateMatches.collect { it.aggregatePatternId }.findAll { it }.unique(),
+                aggregatePatternNames : aggregateMatches.collect { it.patternName }.findAll { it }.unique(),
+                aggregatePatternTypes : aggregateMatches.collect { it.patternType }.findAll { it }.unique(),
+                aggregatePatternRoles : aggregateMatches.collectMany { (it.memberRoles ?: []) as List<String> }.findAll { it }.unique(),
+                universalPatterns : universalMatches,
+                universalPatternIds : universalMatches.collect { it.universalPatternId }.findAll { it }.unique(),
+                universalPatternFamilies : universalMatches.collect { it.patternFamily }.findAll { it }.unique(),
+                universalPatternChapters : universalMatches.collect { it.chapterNumber?.toString() }.findAll { it }.unique()
+        ])
     }
 
     protected static List<Map> buildSupportedAggregatePatternHints(ExecutionContext ec) {
@@ -1174,7 +1404,15 @@ class AgentToolSupport {
         String normalized = normalizePromptWhitespace(queryText).toLowerCase()
         if (!normalized) return [:]
 
-        if (looksLikeEmploymentPositionPrompt(queryText) || looksLikeAssetMoveStatusPrompt(queryText)) return [:]
+        boolean employmentWorkflowBoundary =
+                looksLikeEmploymentPositionPrompt(queryText) &&
+                        normalized.contains('budget') &&
+                        (
+                                ['assegn', 'assign', 'nuovo impiegato', 'new employee', 'nuova persona', 'new person']
+                                        .any { String token -> normalized.contains(token) }
+                        )
+
+        if ((looksLikeEmploymentPositionPrompt(queryText) && !employmentWorkflowBoundary) || looksLikeAssetMoveStatusPrompt(queryText)) return [:]
         if (looksLikeRootChildHierarchyPrompt(queryText)) return [:]
 
         List<Map> domainFamilies = [
@@ -1205,7 +1443,7 @@ class AgentToolSupport {
         if (matchedFamilies.contains('order') && normalized.contains('part') && normalized.contains('item')) supportedPatterns.add('order')
         if (matchedFamilies.contains('facility') && normalized.contains('child')) supportedPatterns.add('facility')
         if (matchedFamilies.contains('party') && (normalized.contains('person') || normalized.contains('organization'))) supportedPatterns.add('party')
-        if (supportedPatterns || looksLikeEmploymentPositionPrompt(queryText)) return [:]
+        if (supportedPatterns || (looksLikeEmploymentPositionPrompt(queryText) && !employmentWorkflowBoundary)) return [:]
 
         String message = "La richiesta combina più domini o gerarchie non modellate come un unico pattern supportato (${matchedFamilies.join(', ')}). " +
                 "Stai uscendo dalla gerarchia di una root entity e delle sue child entities e stai chiedendo un workflow multi-dominio. " +
@@ -1906,37 +2144,61 @@ Rules:
         Map effectiveParentContext = parentContext ?: [:]
         Map nodeParameters = buildAggregateNodeParameters(node, effectiveRootContext, effectiveParentContext)
         Map execResult
-        if (node.serviceName) {
-            Map guardedResult = ec.service.sync().name('org.moqui.agent.AgentRuntimeServices.call#ServiceGuarded')
-                    .parameters([
-                            serviceName : node.serviceName,
-                            parameters : nodeParameters,
-                            confirmed : confirmed,
-                            toolName : 'moqui_execute_agent_prompt',
-                            sessionId : sessionId,
-                            directToolCall : false
-                    ]).call()
-            Map serviceResult = (guardedResult?.serviceResult instanceof Map) ? (guardedResult.serviceResult as Map) : [:]
+        try {
+            if (node.serviceName) {
+                Map guardedResult = ec.service.sync().name('org.moqui.agent.AgentRuntimeServices.call#ServiceGuarded')
+                        .parameters([
+                                serviceName : node.serviceName,
+                                parameters : nodeParameters,
+                                confirmed : confirmed,
+                                toolName : 'moqui_execute_agent_prompt',
+                                sessionId : sessionId,
+                                directToolCall : false
+                        ]).call()
+                Map serviceResult = (guardedResult?.serviceResult instanceof Map) ? (guardedResult.serviceResult as Map) : [:]
+                List<String> serviceErrors = (serviceResult?.errors instanceof List) ? (serviceResult.errors as List<String>) : []
+                execResult = [
+                        success : !Boolean.TRUE.equals(guardedResult?.confirmationRequired) && !serviceErrors,
+                        serviceResult : serviceResult,
+                        messages : serviceResult?.message ? [serviceResult.message as String] : [],
+                        errors : serviceErrors
+                ]
+            } else {
+                Map executeParameters = [
+                        documentId : node.documentId,
+                        parameters : nodeParameters,
+                        confirmed : confirmed,
+                        dryRun : false,
+                        // Aggregate execution already propagates context explicitly through root/parent maps.
+                        // Re-reading AgentSessionContext here leaks the previous node's workEffortId into child creates.
+                        useSessionContext : false,
+                        sessionId : sessionId
+                ]
+                if (node.indexName) executeParameters.indexName = node.indexName
+                execResult = ec.service.sync().name('org.moqui.agent.AgentExecutionServices.execute#AgentPrompt')
+                        .parameters(executeParameters).call()
+            }
+        } catch (Throwable t) {
+            String errMsg = t.message ?: t.toString()
+            ec.message.clearErrors()
             execResult = [
-                    success : !Boolean.TRUE.equals(guardedResult?.confirmationRequired),
-                    serviceResult : serviceResult,
-                    messages : serviceResult?.message ? [serviceResult.message as String] : [],
-                    errors : []
+                    success : false,
+                    serviceResult : [:],
+                    messages : [],
+                    errors : [errMsg],
+                    exceptionMessage : errMsg
             ]
-        } else {
-            Map executeParameters = [
-                    documentId : node.documentId,
-                    parameters : nodeParameters,
-                    confirmed : confirmed,
-                    dryRun : false,
-                    // Aggregate execution already propagates context explicitly through root/parent maps.
-                    // Re-reading AgentSessionContext here leaks the previous node's workEffortId into child creates.
-                    useSessionContext : false,
-                    sessionId : sessionId
+        }
+
+        if (ec.message.hasError()) {
+            String facadeErrors = ec.message.errorsString
+            ec.message.clearErrors()
+            List<String> existingErrors = (execResult?.errors instanceof List) ? (execResult.errors as List<String>) : []
+            if (facadeErrors && !existingErrors.contains(facadeErrors)) existingErrors = existingErrors + [facadeErrors]
+            execResult = (execResult ?: [:]) + [
+                    success : false,
+                    errors : existingErrors
             ]
-            if (node.indexName) executeParameters.indexName = node.indexName
-            execResult = ec.service.sync().name('org.moqui.agent.AgentExecutionServices.execute#AgentPrompt')
-                    .parameters(executeParameters).call()
         }
 
         List messages = []
@@ -2679,7 +2941,8 @@ Rules:
     }
 
     protected static Map buildBudgetRootSeqHierarchyNode(Map plan) {
-        List<Map> itemNodes = ((plan.budgetItems ?: []) as List<Map>).collectWithIndex { Map budgetItem, int budgetItemIndex ->
+        List<Map> itemNodes = []
+        ((plan.budgetItems ?: []) as List<Map>).eachWithIndex { Map budgetItem, int budgetItemIndex ->
             List<Map> detailNodes = ((budgetItem.details ?: []) as List<Map>).collect { Map budgetItemDetail ->
                 [
                         nodeType : 'budget_item_detail',
@@ -2699,7 +2962,7 @@ Rules:
                         inheritParentFields : [budgetItemSeqId : 'budgetItemSeqId']
                 ]
             }
-            [
+            itemNodes.add([
                     nodeType : 'budget_item',
                     documentId : 'agent-prompt://accounting/editbudgetitems/createbudgetitem',
                     serviceName : 'store#mantle.other.budget.BudgetItem',
@@ -2714,12 +2977,13 @@ Rules:
                     ]),
                     inheritRootFields : [budgetId : 'budgetId'],
                     children : detailNodes
-            ]
+            ])
         }
 
         return [
                 nodeType : 'budget',
                 documentId : plan.rootDocumentId,
+                serviceName : 'mantle.other.BudgetServices.create#Budget',
                 resultIdField : 'budgetId',
                 contextKey : 'budget',
                 parameters : collectNonNullEntries([
@@ -2916,12 +3180,12 @@ Rules:
     protected static String extractAssignedPersonName(String text) {
         if (!text) return null
         List<String> patterns = [
-                /(?i)\bassegna(?:\s+tutti\s+i?\s*ta?sks?)?.*?\ba\s+([^,.\n]+?)(?=(?:\s+con\s+ruolo\b|,|\.|$))/,
-                /(?i)\bassign(?:\s+all\s+tasks?)?.*?\bto\s+([^,.\n]+?)(?=(?:\s+with\s+role\b|,|\.|$))/
+                /(?i)\bassegna(?:\s+tutti\s+i?\s*ta?sks?)?.*?\ba\s+([^,.\n?!]+?)(?=(?:\s+con\s+ruolo\b|,|\.|\?|!|$))/,
+                /(?i)\bassign(?:\s+all\s+tasks?)?.*?\bto\s+([^,.\n?!]+?)(?=(?:\s+with\s+role\b|,|\.|\?|!|$))/
         ]
         for (pattern in patterns) {
             def matcher = (text =~ pattern)
-            if (matcher.find()) return cleanupPromptSegment(matcher.group(1))
+            if (matcher.find()) return sanitizePersonNameCandidate(cleanupPromptSegment(matcher.group(1)))
         }
         return null
     }
@@ -3089,6 +3353,9 @@ Rules:
         String inferred = inferBudgetTypeEnumId(normalized)
         if (inferred) return inferred
 
+        String lookupEnumId = resolveIdByLookupSpec(ec, 'budgetType', normalized)
+        if (lookupEnumId) return lookupEnumId
+
         try {
             def enumeration = ec?.entity?.find('moqui.basic.Enumeration')?.disableAuthz()
                     ?.condition('enumTypeId', 'BudgetType')
@@ -3227,13 +3494,21 @@ Rules:
         if (!text) return []
         List<Map> items = []
         String normalized = normalizePromptWhitespace(text)
+                .replaceFirst(/(?i)[,.;:]?\s+(?:note(?:\s+ordine)?|order\s+note)\b.*$/, '')
+                .trim()
         List<String> explicitProductSegments = []
         def explicitMatcher = (normalized =~ /(?is)\b(?:prodotto|product|prodotti|products)\b\s*[:#-]?\s*[A-Z0-9_.-]+.*?(?=(?:\b(?:prodotto|product|prodotti|products)\b\s*[:#-]?\s*[A-Z0-9_.-]+)|$)/)
         while (explicitMatcher.find()) {
             String explicitSegment = cleanupPromptSegment(explicitMatcher.group(0))
             if (explicitSegment) explicitProductSegments.add(explicitSegment)
         }
-        List<String> segments = explicitProductSegments ?: (normalized.split(/(?i)\s+e\s+/) as List<String>)
+        List<String> segments = explicitProductSegments
+        if (segments?.size() == 1) {
+            List<String> slicedSegments = sliceProductLikeSegments(segments[0])
+            if (slicedSegments.size() > 1) segments = slicedSegments
+        }
+        if (!segments) segments = sliceProductLikeSegments(normalized)
+        if (!segments) segments = (normalized.split(/(?i)\s+e\s+/) as List<String>)
         segments.each { String segment ->
             Map item = buildOrderItemEntry(segment)
             if (item) items.add(item)
@@ -3243,6 +3518,28 @@ Rules:
             if (singleItem) items.add(singleItem)
         }
         return items
+    }
+
+    protected static List<String> sliceProductLikeSegments(String text) {
+        if (!text) return []
+        String normalized = normalizePromptWhitespace(text)
+        def tokenMatcher = (normalized =~ /\b([A-Z0-9]+(?:[_.-][A-Z0-9]+)+|[A-Z]{2,}[0-9][A-Z0-9_.-]*)\b/)
+        List<Map> matches = []
+        while (tokenMatcher.find()) {
+            String token = tokenMatcher.group(1)
+            if (!token || token ==~ /^\d+$/) continue
+            matches.add([token: token, start: tokenMatcher.start(1), end: tokenMatcher.end(1)])
+        }
+        if (matches.size() <= 1) return []
+
+        List<String> segments = []
+        matches.eachWithIndex { Map match, int idx ->
+            int start = (match.start as Integer)
+            int end = idx + 1 < matches.size() ? (matches[idx + 1].start as Integer) : normalized.length()
+            String segment = cleanupPromptSegment(normalized.substring(start, end))
+            if (segment) segments.add(segment)
+        }
+        return segments
     }
 
     protected static Map buildOrderItemEntry(String text) {
@@ -3262,7 +3559,7 @@ Rules:
         }
         if (!productToken) return null
         BigDecimal quantity = null
-        def qtyMatcher = (segment =~ /(?i)\b(?:qty|quantity|quantit[àa])\s*([0-9]+(?:[.,][0-9]+)?)/)
+        def qtyMatcher = (segment =~ /(?i)\b(?:qty|quantity|quantita(?:[àa]|['’])?)\s*[:#-]?\s*([0-9]+(?:[.,][0-9]+)?)/)
         if (qtyMatcher.find()) {
             try { quantity = new BigDecimal(qtyMatcher.group(1).replace(',', '.')) } catch (Throwable ignored) { }
         }
@@ -3285,18 +3582,36 @@ Rules:
         ]
         for (pattern in detailPatterns) purpose = cleanupPromptSegment(purpose.replaceFirst(pattern, ''))
         String glAccountId = null
-        def glMatcher = (purpose =~ /(?i)\b(?:gl\s*account|conto(?:\s+contabile)?|account(?:\s+code)?)\b(?:\s+(?:code|codice))?\s*[:#-]?\s*([A-Z0-9_.-]+)/)
+        def glMatcher = (purpose =~ /(?i)\b(?:gl\s*accounts?|cont(?:o|i)(?:\s+contabil(?:e|i))?|account(?:\s+codes?)?)\b(?:\s+(?:code|codice))?\s*[:#-]?\s*([A-Z0-9_.-]+)/)
         if (glMatcher.find()) {
             glAccountId = glMatcher.group(1)
             purpose = cleanupPromptSegment(purpose.replace(glMatcher.group(0), ''))
         }
+        if (!glAccountId) {
+            def leadingCodeMatcher = (purpose =~ /(?i)^\s*([0-9]{6,}|[A-Z0-9_.-]{6,})\b/)
+            if (leadingCodeMatcher.find()) {
+                glAccountId = leadingCodeMatcher.group(1)
+                purpose = cleanupPromptSegment(purpose.replaceFirst(/(?i)^\s*[A-Z0-9_.-]{6,}\b\s*/, ''))
+            }
+        }
+        purpose = cleanupPromptSegment(purpose
+                .replaceFirst(/(?i)^associate?\s+ai\s+conti\s+contabili\s*/, '')
+                .replaceFirst(/(?i)^associate?\s+al\s+conto\s+contabile\s*/, '')
+                .replaceFirst(/(?i)^associated?\s+to\s+(?:gl\s+accounts?|accounts?)\s*/, '')
+                .replaceFirst(/(?i)^collegate?\s+ai\s+conti\s+contabili\s*/, '')
+                .replaceFirst(/(?i)^associate?\s+ai\s+/, '')
+                .replaceFirst(/(?i)\s+per\s+un\s+importo\s*$/, '')
+                .replaceFirst(/(?i)\s+for\s+an?\s+amount\s*$/, ''))
 
         BigDecimal amount = null
-        def amountMatcher = (purpose =~ /(?i)\b(?:amount|importo|for|da|di)\s*([0-9]+(?:[.,][0-9]+)?)\b/)
+        def amountMatcher = (purpose =~ /(?i)\b(?:amount|importo|for|da|di)\s*([0-9]+(?:[.,][0-9]+)?)(?:\s+[A-Z]{3})?\b/)
         if (amountMatcher.find()) {
             try { amount = new BigDecimal(amountMatcher.group(1).replace(',', '.')) } catch (Throwable ignored) { }
             purpose = cleanupPromptSegment(purpose.replace(amountMatcher.group(0), ''))
         }
+        purpose = cleanupPromptSegment(purpose
+                .replaceFirst(/(?i)\s+per\s+un\s+importo\s*$/, '')
+                .replaceFirst(/(?i)\s+for\s+an?\s+amount\s*$/, ''))
 
         String subTimePeriodId = null
         def subPeriodMatcher = (itemText =~ /(?i)\b(?:periodo|period|sub-?period)\s+([A-Z0-9_.-]+)/)
@@ -3311,6 +3626,16 @@ Rules:
                 subTimePeriodId : subTimePeriodId,
                 details : details
         ])
+    }
+
+    protected static String buildEmploymentPositionMissingMessage(List<String> missingFields, String budgetDescription, String personName) {
+        if (!missingFields) return null
+        List<String> details = []
+        if (missingFields.contains('budgetId')) details.add("il budget${budgetDescription ? " '${budgetDescription}'" : ''} non è stato trovato")
+        if (missingFields.contains('organizationPartyId')) details.add('non è stata determinata l’organizzazione datore di lavoro')
+        if (missingFields.contains('personName')) details.add("manca il nominativo dell'impiegato da creare o assegnare")
+        String summary = details ? details.join('; ') : "mancano riferimenti obbligatori (${missingFields.join(', ')})"
+        return "La richiesta descrive un workflow HR supportato, ma non posso eseguirlo perché ${summary}. Completa i prerequisiti e poi rilancia la richiesta."
     }
 
     protected static List<Map> extractBudgetItemDetailPlan(String text) {
@@ -3528,11 +3853,12 @@ Rules:
 
     protected static String resolvePartyIdByPersonName(ExecutionContext ec, String fullName) {
         if (!ec || !fullName) return null
-        List<String> nameParts = normalizePromptWhitespace(fullName).split(/\s+/).findAll { it } as List<String>
+        String normalizedFullName = sanitizePersonNameCandidate(fullName)
+        List<String> nameParts = normalizePromptWhitespace(normalizedFullName).split(/\s+/).findAll { it } as List<String>
         if (nameParts.size() < 2) return null
         String firstName = nameParts.first()
         String lastName = nameParts.last()
-        String searchedPersonId = resolveIdByLookupSpec(ec, 'person', fullName)
+        String searchedPersonId = resolveIdByLookupSpec(ec, 'person', normalizedFullName)
         if (searchedPersonId) return searchedPersonId
         try {
             def person = ec.entity.find('mantle.party.Person').disableAuthz()
@@ -3542,6 +3868,32 @@ Rules:
             if (person?.partyId) return person.partyId as String
         } catch (Throwable ignored) { }
         return null
+    }
+
+    protected static Map findActiveEmploymentForPartyAndOrg(ExecutionContext ec, String partyId, String organizationPartyId) {
+        if (!ec || !partyId || !organizationPartyId) return [:]
+        def nowTs = ec.user?.nowTimestamp
+        try {
+            List relList = ec.entity.find('mantle.party.PartyRelationship').disableAuthz()
+                    .condition('fromPartyId', partyId)
+                    .condition('toPartyId', organizationPartyId)
+                    .condition('relationshipTypeEnumId', 'PrtEmployee')
+                    .orderBy('-fromDate')
+                    .list() ?: []
+            def activeRel = relList.find { ev ->
+                def fromDate = ev.fromDate
+                def thruDate = ev.thruDate
+                boolean started = !fromDate || !nowTs || fromDate <= nowTs
+                boolean notEnded = !thruDate || !nowTs || thruDate > nowTs
+                started && notEnded
+            }
+            if (!activeRel) return [:]
+            Map row = [:]
+            activeRel.getMap().each { k, v -> row[k] = v }
+            return row
+        } catch (Throwable ignored) {
+            return [:]
+        }
     }
 
     protected static String resolvePartyIdByDisplayName(ExecutionContext ec, String displayName) {
@@ -3554,6 +3906,8 @@ Rules:
 
     protected static String resolveRoleTypeIdByDescription(ExecutionContext ec, String description) {
         if (!description) return null
+        String resolvedRoleTypeId = resolveIdByLookupSpec(ec, 'roleType', description)
+        if (resolvedRoleTypeId) return resolvedRoleTypeId
         try {
             def roleType = ec?.entity?.find('mantle.party.RoleType')?.disableAuthz()
                     ?.condition('description', description)
@@ -3566,6 +3920,20 @@ Rules:
 
     protected static String resolveFiscalYearTimePeriodId(ExecutionContext ec, String organizationPartyId, Integer yearNumber) {
         if (!ec || yearNumber == null) return null
+        try {
+            List<Map> documentList = searchDataDocumentLookup(ec, (DATA_DOCUMENT_LOOKUP_SPECS.fiscalYearTimePeriod ?: [:]) as Map<String, Object>, yearNumber.toString())
+            if (documentList) {
+                Map preferred = (documentList as List<Map>).find { Map doc ->
+                    String partyId = doc.partyId as String
+                    (organizationPartyId ? partyId == organizationPartyId : true) && looksLikeYearTimePeriodDocument(doc, yearNumber)
+                } ?: (documentList as List<Map>).find { Map doc ->
+                    looksLikeYearTimePeriodDocument(doc, yearNumber)
+                }
+                if (preferred?.timePeriodId) return preferred.timePeriodId as String
+            }
+        } catch (Throwable ignored) {
+            ec.message.clearErrors()
+        }
         try {
             def find = ec.entity.find('mantle.party.time.TimePeriod').disableAuthz()
                     .condition('timePeriodTypeId', 'FiscalYear')
@@ -3785,7 +4153,12 @@ Rules:
         ]
         for (pattern in patterns) {
             def matcher = (text =~ pattern)
-            if (matcher.find()) return cleanupPromptSegment(matcher.group(1))
+            String lastCandidate = null
+            while (matcher.find()) {
+                String candidate = cleanupPromptSegment(matcher.group(1))
+                if (candidate) lastCandidate = candidate
+            }
+            if (lastCandidate) return lastCandidate
         }
         return null
     }
@@ -3793,19 +4166,34 @@ Rules:
     protected static String extractEmployeePersonName(String text) {
         if (!text) return null
         List<String> patterns = [
-                /(?i)\b(?:assegna(?:rla|rlo|rli|rle)?\s+al|assign(?:\s+it)?\s+to|assegna\s+a|al\s+nuovo\s+(?:impiegato|dipendente|employee|collaboratore|persona)|a\s+nuovo\s+(?:impiegato|dipendente|employee|collaboratore|persona)|new\s+employee|nuovo\s+(?:impiegato|dipendente|employee|collaboratore|persona))\s+([^,.\n]+?)(?=(?:\s+con\b|\s+with\b|,|\.|$))/,
-                /(?i)\b(?:impiegato|dipendente|employee|persona|person)\s+([^,.\n]+?)(?=(?:\s+con\b|\s+with\b|,|\.|$))/
+                /(?i)\b(?:assegna(?:rla|rlo|rli|rle)?\s+al|assign(?:\s+it)?\s+to|assegna\s+a|al\s+nuovo\s+(?:impiegato|dipendente|employee|collaboratore|persona)|a\s+nuovo\s+(?:impiegato|dipendente|employee|collaboratore|persona)|new\s+employee|nuovo\s+(?:impiegato|dipendente|employee|collaboratore|persona))\s+([^,.\n?!]+?)(?=(?:\s+con\b|\s+with\b|,|\.|\?|!|$))/,
+                /(?i)\b(?:impiegato|dipendente|employee|persona|person)\s+([^,.\n?!]+?)(?=(?:\s+con\b|\s+with\b|,|\.|\?|!|$))/
         ]
         for (pattern in patterns) {
             def matcher = (text =~ pattern)
             if (matcher.find()) {
-                String candidate = cleanupPromptSegment(matcher.group(1))
+                String candidate = sanitizePersonNameCandidate(cleanupPromptSegment(matcher.group(1)))
                 candidate = candidate?.replaceAll(/(?i)^(?:nuovo|new)\s+/, '')?.trim()
                 candidate = candidate?.replaceAll(/(?i)^(?:impiegato|dipendente|employee|persona|person|collaboratore)\s+/, '')?.trim()
                 if (candidate) return candidate
             }
         }
         return null
+    }
+
+    protected static String sanitizePersonNameCandidate(String text) {
+        if (!text) return null
+        List<String> tokens = normalizePromptWhitespace(text).split(/\s+/).findAll { it } as List<String>
+        if (!tokens) return null
+
+        List<String> cleanedTokens = tokens.findAll { String token ->
+            String normalized = token?.replaceAll(/^[^A-Za-z0-9À-ÿ]+|[^A-Za-z0-9À-ÿ]+$/, '')
+            if (!normalized) return false
+            if (normalized ==~ /(?i)codx\d+[a-z]?/) return false
+            if (normalized ==~ /(?i)[a-z]{2,}\d{3,}[a-z0-9]*/) return false
+            return true
+        }
+        return cleanedTokens ? cleanupPromptSegment(cleanedTokens.join(' ')) : null
     }
 
     protected static String inferEmplPositionStatusId(String text) {
@@ -3909,6 +4297,7 @@ Rules:
             return (ec.transaction.runRequireNew(null, 'Agent DataDocument lookup failed', {
                 Map searchResult = ec.service.sync()
                         .name('org.moqui.search.SearchServices.search#DataDocuments')
+                        .disableAuthz()
                         .ignoreTransaction(true)
                         .ignorePreviousError(true)
                         .parameters([
@@ -3984,7 +4373,11 @@ Rules:
             String andClause = tokens.collect { toLucenePhrase(it) }.findAll { it }.join(' AND ')
             if (andClause) clauses.add("(${andClause})")
         }
-        return clauses.findAll { it }.unique().join(' OR ')
+        String dynamicClause = clauses.findAll { it }.unique().join(' OR ')
+        List<String> requiredClauses = ((spec.requiredClauses ?: []) as List<String>).findAll { it } as List<String>
+        if (!requiredClauses) return dynamicClause
+        String filterClause = requiredClauses.collect { "(${it})" }.join(' AND ')
+        return dynamicClause ? "((${dynamicClause})) AND ${filterClause}" : filterClause
     }
 
     protected static Map selectBestDataDocumentLookupHit(List<Map> documentList, Map<String, Object> spec, String token) {
@@ -4020,6 +4413,35 @@ Rules:
         return score
     }
 
+    protected static boolean looksLikeYearTimePeriodDocument(Map document, Integer yearNumber) {
+        if (!(document instanceof Map) || yearNumber == null) return false
+        String yearText = yearNumber.toString()
+        String periodName = (document.periodName ?: '') as String
+        if (periodName?.contains(yearText)) return true
+        Integer periodNum = safeInteger(document.periodNum)
+        if (periodNum != null && periodNum == yearNumber) return true
+        Integer fromYear = extractCalendarYear(document.fromDate)
+        Integer thruYear = extractCalendarYear(document.thruDate)
+        return fromYear == yearNumber || thruYear == yearNumber
+    }
+
+    protected static Integer extractCalendarYear(Object value) {
+        if (value == null) return null
+        try {
+            if (value instanceof java.sql.Timestamp || value instanceof java.sql.Date || value instanceof java.util.Date) {
+                Calendar cal = Calendar.getInstance()
+                cal.setTime(value as java.util.Date)
+                return cal.get(Calendar.YEAR)
+            }
+            if (value instanceof CharSequence) {
+                String text = value.toString()
+                def matcher = (text =~ /(\d{4})/)
+                if (matcher.find()) return safeInteger(matcher.group(1))
+            }
+        } catch (Throwable ignored) { }
+        return null
+    }
+
     protected static String toLucenePhrase(String text) {
         String escaped = escapeLuceneQueryValue(text)
         return escaped ? '"' + escaped + '"' : null
@@ -4041,6 +4463,18 @@ Rules:
     protected static String resolveStatusIdByDescription(ExecutionContext ec, String description, String statusPrefix = null) {
         if (!ec || !description) return null
         String normalized = normalizePromptWhitespace(description)
+        try {
+            List<Map> documentList = searchDataDocumentLookup(ec, (DATA_DOCUMENT_LOOKUP_SPECS.status ?: [:]) as Map<String, Object>, normalized)
+            if (documentList) {
+                Map preferred = (documentList as List<Map>).find { Map doc ->
+                    String statusId = doc.statusId as String
+                    statusId && (!statusPrefix || statusId.startsWith(statusPrefix))
+                } ?: [:]
+                if (preferred?.statusId) return preferred.statusId as String
+            }
+        } catch (Throwable ignored) {
+            ec.message.clearErrors()
+        }
         try {
             List statusList = ec.entity.find('moqui.basic.StatusItem').disableAuthz().list()
             def exact = statusList.find { ev ->
@@ -4105,6 +4539,73 @@ Rules:
         }
         String text = value.toString()
         return text.size() > 200 ? text.substring(0, 200) + '...' : text
+    }
+
+    static Map buildBusinessResultSummary(Map result) {
+        Map resultMap = (result ?: [:]) as Map
+        Map executionResult = (resultMap.executionResult instanceof Map) ? (resultMap.executionResult as Map) : [:]
+        Map serviceResult = (resultMap.serviceResult instanceof Map) ? (resultMap.serviceResult as Map) : [:]
+        Map currentBusinessObjects = (executionResult.currentBusinessObjects instanceof Map) ? (executionResult.currentBusinessObjects as Map) : [:]
+        List actionList = (executionResult.actions instanceof Collection) ? (executionResult.actions as List) : []
+
+        Map summary = [:]
+        if (resultMap.containsKey('success')) summary.success = resultMap.success
+        if (executionResult.operation) summary.operation = executionResult.operation
+        if (executionResult.planType) summary.planType = executionResult.planType
+        if (resultMap.confirmationRequired != null) summary.confirmationRequired = resultMap.confirmationRequired
+        if (resultMap.needsMoreContext != null) summary.needsMoreContext = resultMap.needsMoreContext
+
+        Map businessObjects = extractIdentifierMap(currentBusinessObjects)
+        if (!businessObjects && serviceResult) businessObjects = extractIdentifierMap(serviceResult)
+        if (businessObjects) summary.businessObjects = businessObjects
+
+        List actionSummaries = []
+        actionList.each { Object actionObj ->
+            if (!(actionObj instanceof Map)) return
+            Map action = (Map) actionObj
+            Map actionSummary = [:]
+            if (action.actionName) actionSummary.actionName = action.actionName
+            if (action.serviceName) actionSummary.serviceName = action.serviceName
+            Map actionIds = extractIdentifierMap(action.serviceResult instanceof Map ? (action.serviceResult as Map) : [:])
+            if (!actionIds) actionIds = extractIdentifierMap(action.parameters instanceof Map ? (action.parameters as Map) : [:])
+            if (actionIds) actionSummary.identifiers = actionIds
+            if (actionSummary) actionSummaries.add(actionSummary)
+        }
+        if (actionSummaries) summary.actions = actionSummaries.take(10)
+
+        List messages = (resultMap.messages instanceof Collection) ? (resultMap.messages as List) : []
+        List errors = (resultMap.errors instanceof Collection) ? (resultMap.errors as List) : []
+        if (messages) summary.messageCount = messages.size()
+        if (errors) {
+            summary.errorCount = errors.size()
+            summary.errorPreview = errors.collect { summarizeValue(it)?.toString() }.findAll { it }.take(3)
+        }
+
+        if (!summary && serviceResult) {
+            Map serviceIds = extractIdentifierMap(serviceResult)
+            if (serviceIds) summary.businessObjects = serviceIds
+        }
+        return summary
+    }
+
+    static Map extractIdentifierMap(Map source) {
+        Map sourceMap = (source ?: [:]) as Map
+        if (!sourceMap) return [:]
+        Map identifiers = [:]
+        sourceMap.each { Object keyObj, Object value ->
+            if (value == null) return
+            String key = keyObj?.toString()
+            if (!key) return
+            boolean looksLikeIdentifier = key == 'id' ||
+                    key.endsWith('Id') ||
+                    key.endsWith('SeqId') ||
+                    key.endsWith('Number') ||
+                    key.endsWith('No')
+            if (!looksLikeIdentifier) return
+            if (value instanceof Map || value instanceof Collection || value.getClass().isArray()) return
+            identifiers[key] = value
+        }
+        return identifiers
     }
 
     static Object maskValue(Object value) {

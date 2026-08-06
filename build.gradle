@@ -65,8 +65,8 @@ def agentIndexerDir = layout.projectDirectory.dir('tools/agent-indexer')
 def toolsDir = layout.projectDirectory.dir('tools')
 def defaultOutputDir = agentIndexerDir.dir('output')
 def defaultMoquiRoot = providers.gradleProperty('moquiRoot').orElse(moquiDir.absolutePath)
-def defaultMcpEndpoint = providers.gradleProperty('mcpEndpoint').orElse('http://localhost:8080/mcp/message')
-def defaultRpcEndpoint = providers.gradleProperty('rpcEndpoint').orElse('http://localhost:8080/rpc/json')
+def defaultMcpEndpoint = providers.gradleProperty('mcpEndpoint').orElse('http://localhost:8081/mcp/message')
+def defaultRpcEndpoint = providers.gradleProperty('rpcEndpoint').orElse('http://localhost:8081/rpc/json')
 def defaultIndexName = providers.gradleProperty('indexName').orElse('moqui_agent_prompts_v1')
 def defaultSessionId = providers.gradleProperty('sessionId').orElse('gradle-session')
 def defaultAuthHeader = providers.gradleProperty('authHeader').orNull
@@ -76,6 +76,14 @@ def workspaceRoot = moquiDir.parentFile
 def openSearchRuntimeDir = file(moquiDir.absolutePath + '/runtime/opensearch')
 def openSearchConfigSourceDir = layout.projectDirectory.dir('tools/opensearch/config')
 def openSearchScriptsSourceDir = layout.projectDirectory.dir('tools/opensearch')
+
+def resolvePatternReferenceEpub = {
+    def candidates = fileTree(workspaceRoot) {
+        include '**/*Universal*Patterns*.epub'
+    }.files.sort { a, b -> a.name <=> b.name }
+    if (!candidates) throw new GradleException('No universal-pattern reference EPUB found under workspace root')
+    return candidates.first()
+}
 
 tasks.register('generateAgentDocs', Exec) {
     group = 'moqui-mcp'
@@ -364,7 +372,8 @@ tasks.register('generateAuthoritativeReferenceDocs', Exec) {
             '--aggregate-pattern-seed', new File(projectDir, 'data/AgentAggregatePatternSeedData.xml').absolutePath,
             '--moqui-org-page-data', new File(moquiDir, 'runtime/component/moqui-org/data/MoquiOrgPageData.xml').absolutePath,
             '--making-apps-pdf', new File(moquiDir, 'runtime/component/moqui-org/screen/moqui.org/MakingAppsWithMoqui-1.0.pdf').absolutePath,
-            '--pattern-reference-epub', new File(workspaceRoot, 'The Data Model Resource Book VOLume 3 Universal Patterns for Data Modeling by Silverston, LenAgnew, PaulPaul Agnew (z-lib.org).epub').absolutePath,
+            '--pattern-reference-epub', resolvePatternReferenceEpub().absolutePath,
+            '--xml-actions-xsd', new File(moquiDir, 'framework/xsd/xml-actions-3.xsd').absolutePath,
             '--output-dir', defaultOutputDir.asFile.absolutePath
 }
 

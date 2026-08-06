@@ -17,7 +17,7 @@ Validate LibreChat as the real multi-provider chat client while `moqui-mcp` rema
 
 ## Preconditions
 
-- Moqui runtime is up on `http://localhost:8080`
+- Moqui runtime is up on `http://localhost:8081`
 - LibreChat stack is up from `docker/librechat-compose.yml`
 - reverse proxy path `/librechat/` is active
 - Moqui demo user with MCP access exists
@@ -29,7 +29,7 @@ Run:
 
 ```bash
 python3 tools/librechat_proxy_smoke_test.py \
-  --base-url http://localhost:8080/librechat/ \
+  --base-url http://localhost:8081/librechat/ \
   --out-json tools/output/librechat-proxy-smoke.json \
   --out-md tools/output/librechat-proxy-smoke.md
 ```

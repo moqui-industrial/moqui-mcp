@@ -139,6 +139,49 @@
         </actions>
     </service>
 
+    <service verb="get" noun="UniversalPatternRegistry" authenticate="true">
+        <out-parameters>
+            <parameter name="registry" type="List"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.AgentToolSupport
+                registry = AgentToolSupport.loadUniversalPatternRegistry(ec)
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="get" noun="PatternEvidence" authenticate="true">
+        <in-parameters>
+            <parameter name="label"/>
+            <parameter name="vertexType"/>
+            <parameter name="sourceArtifactUri"/>
+            <parameter name="serviceName"/>
+            <parameter name="serviceNoun"/>
+            <parameter name="entityName"/>
+            <parameter name="domainObject"/>
+            <parameter name="xmlActionElement"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="evidence" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.AgentToolSupport
+                evidence = AgentToolSupport.inferPatternEvidence(ec, [
+                        label : label,
+                        vertexType : vertexType,
+                        sourceArtifactUri : sourceArtifactUri,
+                        serviceName : serviceName,
+                        serviceNoun : serviceNoun,
+                        entityName : entityName,
+                        domainObject : domainObject,
+                        xmlActionElement : xmlActionElement
+                ])
+            ]]></script>
+        </actions>
+    </service>
+
     <service verb="check" noun="RuntimeConfiguration" authenticate="true">
         <in-parameters>
             <parameter name="requireEmbedding" type="Boolean"/>
@@ -343,7 +386,7 @@
         </actions>
     </service>
 
-    <service verb="call" noun="ServiceGuarded" authenticate="true">
+    <service verb="call" noun="ServiceGuarded" authenticate="false">
         <in-parameters>
             <parameter name="serviceName" required="true"/>
             <parameter name="parameters" type="Map"/>
@@ -386,7 +429,10 @@
                             authzActionEnumId : authzActionEnumId
                     ]
                     if (shouldLogDirectly) {
-                        ec.service.sync().name('org.moqui.agent.AgentExecutionServices.log#ToolExecution').parameters([
+                        ec.message.pushErrors()
+                        try {
+                            ec.service.sync().name('org.moqui.agent.AgentExecutionServices.log#ToolExecution')
+                                .requireNewTransaction(true).parameters([
                             visitId : sessionId ?: ec.user.visitId,
                             toolName : toolName ?: 'moqui_call_service_guarded',
                             documentId : documentId,
@@ -394,27 +440,107 @@
                             artifactName : serviceName,
                             authzActionEnumId : authzActionEnumId,
                             parameters : parameters ?: [:],
-                            result : serviceResult,
+                            toolResult : serviceResult,
                             success : false,
                             confirmed : confirmed,
                             riskLevelEnumId : riskLevelEnumId
                         ]).call()
+                        } finally {
+                            ec.message.popErrors()
+                        }
                     }
                     return
                 }
 
                 boolean hadErrorsBeforeCall = ec.message.hasError()
                 String errorsBeforeCall = hadErrorsBeforeCall ? ec.message.getErrorsString() : null
-                serviceResult = ec.service.sync().name(serviceName).parameters(parameters ?: [:]).call()
+                try {
+                    serviceResult = ec.service.sync().name(serviceName).requireNewTransaction(true).parameters(parameters ?: [:]).call()
+                } catch (Throwable serviceFailure) {
+                    String failureMessage = serviceFailure.message ?: serviceFailure.toString()
+                    ec.message.clearErrors()
+                    serviceResult = [
+                            success : false,
+                            serviceName : serviceName,
+                            errorType : serviceFailure.getClass().getName(),
+                            errorMessage : failureMessage,
+                            errors : [failureMessage]
+                    ]
+                    if (shouldLogDirectly) {
+                        ec.message.pushErrors()
+                        try {
+                            ec.service.sync().name('org.moqui.agent.AgentExecutionServices.log#ToolExecution')
+                                .requireNewTransaction(true).parameters([
+                                visitId : sessionId ?: ec.user.visitId,
+                                toolName : toolName ?: 'moqui_call_service_guarded',
+                                documentId : documentId,
+                                artifactTypeEnumId : 'AT_SERVICE',
+                                artifactName : serviceName,
+                                authzActionEnumId : authzActionEnumId,
+                                parameters : parameters ?: [:],
+                                toolResult : serviceResult,
+                                success : false,
+                                errorMessage : failureMessage,
+                                confirmed : confirmed,
+                                riskLevelEnumId : riskLevelEnumId
+                            ]).call()
+                        } finally {
+                            ec.message.popErrors()
+                        }
+                    }
+                    return
+                }
                 boolean hasErrorsAfterCall = ec.message.hasError()
                 String errorsAfterCall = hasErrorsAfterCall ? ec.message.getErrorsString() : null
                 if ((!hadErrorsBeforeCall && hasErrorsAfterCall) ||
                         (hadErrorsBeforeCall && errorsAfterCall && errorsAfterCall != errorsBeforeCall)) {
-                    throw new IllegalStateException("Service ${serviceName} returned errors: ${errorsAfterCall}")
+                    List<String> structuredErrors = []
+                    if (errorsAfterCall) {
+                        errorsAfterCall.split(/;\s*/).each { String err ->
+                            String text = err != null ? err.toString().trim() : ''
+                            if (text && !structuredErrors.contains(text)) structuredErrors.add(text)
+                        }
+                    }
+                    ec.message.clearErrors()
+                    serviceResult = (serviceResult instanceof Map) ? new LinkedHashMap(serviceResult as Map) : [:]
+                    serviceResult.success = false
+                    serviceResult.serviceName = serviceName
+                    serviceResult.errorMessage = "Service ${serviceName} returned errors: ${errorsAfterCall}"
+                    if (structuredErrors) serviceResult.errors = structuredErrors
+                    if (shouldLogDirectly) {
+                        ec.message.pushErrors()
+                        try {
+                            ec.service.sync().name('org.moqui.agent.AgentExecutionServices.log#ToolExecution')
+                                .requireNewTransaction(true).parameters([
+                                visitId : sessionId ?: ec.user.visitId,
+                                toolName : toolName ?: 'moqui_call_service_guarded',
+                                documentId : documentId,
+                                artifactTypeEnumId : 'AT_SERVICE',
+                                artifactName : serviceName,
+                                authzActionEnumId : authzActionEnumId,
+                                parameters : parameters ?: [:],
+                                toolResult : serviceResult,
+                                success : false,
+                                errorMessage : structuredErrors ? structuredErrors.join('; ') : errorsAfterCall,
+                                confirmed : confirmed,
+                                riskLevelEnumId : riskLevelEnumId
+                            ]).call()
+                        } finally {
+                            ec.message.popErrors()
+                        }
+                    }
+                    return
+                }
+                if (serviceResult instanceof Map && !serviceResult.containsKey('success')) {
+                    serviceResult = new LinkedHashMap(serviceResult as Map)
+                    serviceResult.success = true
                 }
 
                 if (shouldLogDirectly) {
-                    ec.service.sync().name('org.moqui.agent.AgentExecutionServices.log#ToolExecution').parameters([
+                    ec.message.pushErrors()
+                    try {
+                        ec.service.sync().name('org.moqui.agent.AgentExecutionServices.log#ToolExecution')
+                            .requireNewTransaction(true).parameters([
                         visitId : sessionId ?: ec.user.visitId,
                         toolName : toolName ?: 'moqui_call_service_guarded',
                         documentId : documentId,
@@ -422,11 +548,14 @@
                         artifactName : serviceName,
                         authzActionEnumId : authzActionEnumId,
                         parameters : parameters ?: [:],
-                        result : serviceResult,
+                        toolResult : serviceResult,
                         success : true,
                         confirmed : confirmed,
                         riskLevelEnumId : riskLevelEnumId
                     ]).call()
+                    } finally {
+                        ec.message.popErrors()
+                    }
                 }
             ]]></script>
         </actions>
@@ -493,28 +622,105 @@
         </out-parameters>
         <actions>
             <script><![CDATA[
+                Timestamp startTs = ec.user.nowTimestamp
                 messages = []
                 errors = []
+                Closure normalizeResolveOutcome = {
+                    List<String> normalizedErrors = []
+                    if (errors instanceof Collection) {
+                        (errors as Collection).each { Object err ->
+                            String text = err != null ? err.toString().trim() : ''
+                            if (text && !normalizedErrors.contains(text)) normalizedErrors.add(text)
+                        }
+                    }
+                    if (ec.message.hasError()) {
+                        String facadeErrors = ec.message.errorsString
+                        ec.message.clearErrors()
+                        if (facadeErrors) {
+                            facadeErrors.split(/;\s*/).each { String err ->
+                                String text = err != null ? err.toString().trim() : ''
+                                if (text && !normalizedErrors.contains(text)) normalizedErrors.add(text)
+                            }
+                        }
+                    }
+                    errors = normalizedErrors
+                    success = Boolean.TRUE.equals(success) && normalizedErrors.isEmpty()
+                    if (executionResult instanceof Map) {
+                        Map normalizedExecutionResult = new LinkedHashMap(executionResult as Map)
+                        normalizedExecutionResult.success = Boolean.TRUE.equals(success)
+                        if (normalizedErrors) normalizedExecutionResult.errors = normalizedErrors
+                        executionResult = normalizedExecutionResult
+                    }
+                }
+                Closure logResolveAndExecute = { Boolean logSuccess ->
+                    try {
+                        normalizeResolveOutcome()
+                        Boolean effectiveSuccess = Boolean.TRUE.equals(logSuccess) && Boolean.TRUE.equals(success)
+                        ec.message.pushErrors()
+                        ec.service.sync().name('org.moqui.agent.AgentExecutionServices.log#ToolExecution')
+                                .requireNewTransaction(true).parameters([
+                                visitId : sessionId ?: ec.user.visitId,
+                                toolName : 'moqui_resolve_and_execute',
+                                documentId : resolvedDocumentId,
+                                artifactTypeEnumId : resolvedDocumentId ? 'AT_OTHER' : null,
+                                artifactName : resolvedDocumentId,
+                                authzActionEnumId : 'AUTHZA_ALL',
+                                parameters : [
+                                        queryText : queryText,
+                                        confirmed : confirmed,
+                                        dryRun : dryRun,
+                                        area : area,
+                                        subArea : subArea,
+                                        domainObject : domainObject,
+                                        actionKind : actionKind,
+                                        operationEffect : operationEffect
+                                ],
+                                toolResult : [
+                                        success : effectiveSuccess,
+                                        resolvedDocumentId : resolvedDocumentId,
+                                        candidateCount : candidateCount,
+                                        executionResult : executionResult,
+                                        messages : messages,
+                                        errors : errors
+                                ],
+                                success : effectiveSuccess,
+                                errorMessage : errors ? (errors as List).join('; ') : null,
+                                confirmed : confirmed,
+                                riskLevelEnumId : 'normal',
+                                startDate : startTs,
+                                endDate : ec.user.nowTimestamp
+                        ]).call()
+                    } catch (Throwable ignored) {
+                    } finally {
+                        ec.message.popErrors()
+                    }
+                }
 
                 Map directAssetCompositeResult = org.moqui.agent.AgentToolSupport.executeStructuredPromptPlan(
                         ec, queryText, (parameters instanceof Map ? (parameters as Map) : [:]), confirmed, dryRun, sessionId ?: ec.user.visitId)
                 if (directAssetCompositeResult?.compositeExecution) {
-                    resolvedDocumentId = 'agent-prompt://asset/assetdetail/updateasset'
+                    resolvedDocumentId = ((directAssetCompositeResult.compositeType ?: '') == 'asset_move_status') ?
+                            'agent-prompt://asset/assetdetail/updateasset' :
+                            (directAssetCompositeResult.documentId ?: directAssetCompositeResult.executionResult?.documentId)
                     success = Boolean.TRUE.equals(directAssetCompositeResult.success)
                     executionResult = directAssetCompositeResult.executionResult as Map
                     if (directAssetCompositeResult.messages) messages.addAll(directAssetCompositeResult.messages as List)
                     if (directAssetCompositeResult.errors) errors.addAll(directAssetCompositeResult.errors as List)
+                    logResolveAndExecute(success)
                     return
                 }
 
                 Map directReadResult = org.moqui.agent.AgentToolSupport.executeDirectReadPromptPlan(
                         ec, queryText, (parameters instanceof Map ? (parameters as Map) : [:]))
                 if (directReadResult?.compositeExecution) {
-                    resolvedDocumentId = 'agent-prompt://asset/assetdetail/assetstatusquery'
+                    resolvedDocumentId = ((directReadResult.compositeType ?: '') == 'asset_status_query') ?
+                            'agent-prompt://asset/assetdetail/assetstatusquery' :
+                            (directReadResult.documentId ?: directReadResult.executionResult?.documentId)
                     success = Boolean.TRUE.equals(directReadResult.success)
                     executionResult = directReadResult.executionResult as Map
                     if (directReadResult.messages) messages.addAll(directReadResult.messages as List)
                     if (directReadResult.errors) errors.addAll(directReadResult.errors as List)
+                    logResolveAndExecute(success)
                     return
                 }
 
@@ -533,10 +739,14 @@
                         messages.add(unsupportedWorkflow.message as String)
                         errors.add(unsupportedWorkflow.message as String)
                     }
+                    logResolveAndExecute(false)
                     return
                 }
 
                 Map skillResolveResult = [:]
+                Map selectedSkill = null
+                Map selectedSkillExecutionPolicy = [:]
+                Map selectedSkillPlan = [:]
                 try {
                     skillResolveResult = ec.service.sync()
                             .name('org.moqui.agent.AgentSkillServices.resolve#AgentSkill')
@@ -547,7 +757,30 @@
                                     limit: Math.min(limit ?: 5, 5)
                             ]).call()
                     if (skillResolveResult?.selectedSkill instanceof Map) {
-                        Map selectedSkill = skillResolveResult.selectedSkill as Map
+                        selectedSkill = skillResolveResult.selectedSkill as Map
+                        if (selectedSkill?.skillId) {
+                            Map loadedSkill = ec.service.sync()
+                                    .name('org.moqui.agent.AgentSkillServices.get#AgentSkill')
+                                    .parameters([skillId: selectedSkill.skillId])
+                                    .call()?.skill as Map
+                            if (loadedSkill) selectedSkill = loadedSkill
+                        }
+                        selectedSkillExecutionPolicy = org.moqui.agent.AgentSkillSupport.buildExecutionPolicy(selectedSkill)
+                        if (selectedSkill?.skillId) {
+                            selectedSkillPlan = ec.service.sync()
+                                    .name('org.moqui.agent.AgentSkillServices.plan#AgentSkill')
+                                    .parameters([
+                                            skillId: selectedSkill.skillId,
+                                            queryText: queryText,
+                                            parameters: (parameters instanceof Map) ? (parameters as Map) : [:],
+                                            sessionId: sessionId
+                                    ]).call() ?: [:]
+                            if (ec.message.hasError()) {
+                                messages.add("AgentSkill planning fallback used for ${selectedSkill.skillId}: ${ec.message.errorsString}")
+                                ec.message.clearErrors()
+                                selectedSkillPlan = [:]
+                            }
+                        }
                         messages.add("Resolved AgentSkill ${selectedSkill.skillId ?: ''}${selectedSkill.title ? " (${selectedSkill.title})" : ''}".toString().trim())
                     } else if (Boolean.TRUE.equals(skillResolveResult?.needsMoreContext)) {
                         messages.add("No authorized AgentSkill matched directly; falling back to prompt resolution.")
@@ -555,6 +788,109 @@
                 } catch (Throwable skillFailure) {
                     messages.add("AgentSkill resolution fallback used: ${skillFailure.message ?: skillFailure.toString()}")
                     ec.message.clearErrors()
+                }
+
+                if ((selectedSkillPlan?.servicePlan instanceof List) && selectedSkillPlan.servicePlan) {
+                    List<Map> unresolvedServiceEntries = (selectedSkillPlan.servicePlan as List<Map>).findAll { Map entry ->
+                        !Boolean.TRUE.equals(entry?.defined)
+                    } as List<Map>
+                    if (unresolvedServiceEntries) {
+                        messages.add("AgentSkill service plan contains unresolved services: " +
+                                unresolvedServiceEntries.collect { it.serviceName }.join(', '))
+                    }
+                }
+
+                if ((selectedSkillPlan?.state ?: '') == 'needsMoreContext' &&
+                        !Boolean.TRUE.equals(selectedSkillExecutionPolicy?.promptFallbackAllowed)) {
+                    success = false
+                    resolvedDocumentId = null
+                    List<Map> missingInputs = (selectedSkillPlan?.missingInputs instanceof List) ?
+                            (List<Map>) selectedSkillPlan.missingInputs : []
+                    String selectedSkillTitle = (selectedSkill?.title ?: selectedSkill?.skillId ?: 'selected skill') as String
+                    String missingMessage = "The request cannot be executed yet for ${selectedSkillTitle} because required inputs are missing."
+                    if (missingInputs) {
+                        missingMessage += " Missing: " + missingInputs.collect { it.name }.join(', ')
+                    }
+                    errors.add(missingMessage)
+                    messages.add(missingMessage)
+                    executionResult = [
+                            success : false,
+                            operation : 'skill_missing_inputs',
+                            blocked : true,
+                            skillId : selectedSkill?.skillId,
+                            title : selectedSkill?.title,
+                            missingInputs : missingInputs,
+                            fallbackAllowed : false,
+                            message : missingMessage
+                    ]
+                    logResolveAndExecute(false)
+                    return
+                }
+
+                if (org.moqui.agent.AgentSkillSupport.shouldUseSkillDrivenAggregatePath(selectedSkill, queryText)) {
+                    String skillDrivenDocumentId = org.moqui.agent.AgentSkillSupport.resolveAggregateRootDocumentId(queryText, selectedSkill)
+                    if (skillDrivenDocumentId) {
+                        Map skillDrivenRootDoc = ec.service.sync()
+                                .name('org.moqui.agent.AgentPromptServices.get#AgentDocument')
+                                .parameters([documentId : skillDrivenDocumentId])
+                                .call()?.document as Map
+                        if (Boolean.TRUE.equals(skillDrivenRootDoc?.runtimeExecutable)) {
+                            resolvedDocumentId = skillDrivenDocumentId
+                            resolvedDocument = skillDrivenRootDoc
+                            messages.add("Using AgentSkill-driven aggregate execution path via ${skillDrivenDocumentId}.")
+                            Map inferredParameters = org.moqui.agent.AgentToolSupport.inferPromptParameters(queryText, skillDrivenRootDoc)
+                            Map mergedParameters = [:]
+                            if (selectedSkillPlan?.resolvedInputs instanceof Map) mergedParameters.putAll(selectedSkillPlan.resolvedInputs as Map)
+                            if (inferredParameters) mergedParameters.putAll(inferredParameters)
+                            if (parameters instanceof Map) mergedParameters.putAll(parameters as Map)
+                            Map aggregateResult = org.moqui.agent.AgentToolSupport.executeRootChildHierarchyPlan(
+                                    ec, queryText, skillDrivenRootDoc, mergedParameters, confirmed, dryRun, sessionId ?: ec.user.visitId)
+                            if (aggregateResult?.compositeExecution) {
+                                success = Boolean.TRUE.equals(aggregateResult.success)
+                                executionResult = aggregateResult.executionResult as Map
+                                if (aggregateResult.messages) messages.addAll(aggregateResult.messages as List)
+                                if (aggregateResult.errors) errors.addAll(aggregateResult.errors as List)
+                                logResolveAndExecute(success)
+                                return
+                            }
+                            messages.add("AgentSkill-driven aggregate path fell back because no executable aggregate plan was produced.")
+                        }
+                    }
+                }
+
+                if ((((selectedSkillPlan?.state ?: '') == 'refused') ||
+                        selectedSkillExecutionPolicy?.aggregateGuidance || selectedSkillExecutionPolicy?.refusalRules) &&
+                        !Boolean.TRUE.equals(selectedSkillExecutionPolicy?.promptFallbackAllowed)) {
+                    success = false
+                    resolvedDocumentId = null
+                    String selectedSkillTitle = (selectedSkill?.title ?: selectedSkill?.skillId ?: 'selected skill') as String
+                    List<String> refusalRules = (selectedSkillExecutionPolicy?.refusalRules instanceof List) ?
+                            (selectedSkillExecutionPolicy.refusalRules as List<String>) : []
+                    String refusalMessage = "The request is outside the supported execution boundary of ${selectedSkillTitle}."
+                    if ((selectedSkillPlan?.state ?: '') == 'refused' && (selectedSkillPlan?.servicePlan instanceof List)) {
+                        List<Map> unresolvedServiceEntries = (selectedSkillPlan.servicePlan as List<Map>).findAll { Map entry ->
+                            !Boolean.TRUE.equals(entry?.defined)
+                        } as List<Map>
+                        if (unresolvedServiceEntries) {
+                            refusalMessage = "The request cannot be executed for ${selectedSkillTitle} because required services are not available: " +
+                                    unresolvedServiceEntries.collect { it.serviceName }.join(', ')
+                        }
+                    }
+                    if (refusalRules) refusalMessage += " " + refusalRules[0]
+                    errors.add(refusalMessage)
+                    messages.add(refusalMessage)
+                    executionResult = [
+                            success : false,
+                            operation : 'skill_boundary_refusal',
+                            blocked : true,
+                            skillId : selectedSkill?.skillId,
+                            title : selectedSkill?.title,
+                            refusalRules : refusalRules,
+                            fallbackAllowed : false,
+                            message : refusalMessage
+                    ]
+                    logResolveAndExecute(false)
+                    return
                 }
 
                 // Step 1: search for matching executable documents
@@ -627,6 +963,7 @@
                 if (!topDoc) {
                     success = false
                     errors.add("No agent document found for query: ${queryText}")
+                    logResolveAndExecute(false)
                     return
                 }
 
@@ -636,6 +973,7 @@
                 if (!Boolean.TRUE.equals(topDoc.runtimeExecutable)) {
                     success = false
                     errors.add("Top document ${resolvedDocumentId} is not executable. Inspect it with moqui_get_agent_document.")
+                    logResolveAndExecute(false)
                     return
                 }
 
@@ -651,6 +989,7 @@
                     executionResult = aggregateResult.executionResult as Map
                     if (aggregateResult.messages) messages.addAll(aggregateResult.messages as List)
                     if (aggregateResult.errors) errors.addAll(aggregateResult.errors as List)
+                    logResolveAndExecute(success)
                     return
                 }
 
@@ -670,6 +1009,7 @@
                 executionResult = execResult
                 if (execResult?.messages) messages.addAll(execResult.messages as List)
                 if (execResult?.errors) errors.addAll(execResult.errors as List)
+                logResolveAndExecute(success)
             ]]></script>
         </actions>
     </service>

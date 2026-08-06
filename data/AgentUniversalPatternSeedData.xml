@@ -14,19 +14,19 @@
             levelTitle="Level 1 Declarative Role Pattern"
             structureFocus="Simple reusable role type catalog"
             moquiMappingNotes="Use when only role definitions are needed, such as RoleType and simple PartyRole linkage."
-            mappedAggregatePatternId="AggrPartySpec"/>
+            mappedAggregatePatternId="AggrPartyRoleCtx"/>
     <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRoleDecl" patternLevelSeqId="02"
             levelNumber="2"
             levelTitle="Level 2 Declarative Role Pattern"
             structureFocus="Role type plus richer descriptive structure"
             moquiMappingNotes="Useful when role definitions need attributes, grouping, or inheritance across role types."
-            mappedAggregatePatternId="AggrPartySpec"/>
+            mappedAggregatePatternId="AggrPartyRoleCtx"/>
     <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRoleDecl" patternLevelSeqId="03"
             levelNumber="3"
             levelTitle="Level 3 Declarative Role Pattern"
             structureFocus="Role structure with advanced flexibility"
             moquiMappingNotes="Useful when the agent must reason over role metadata instead of just assigning hardcoded role ids."
-            mappedAggregatePatternId="AggrPartySpec"/>
+            mappedAggregatePatternId="AggrPartyRoleCtx"/>
 
     <moqui.agent.AgentUniversalPattern agentUniversalPatternId="AgUpRoleCtx"
             chapterNumber="3"
@@ -39,28 +39,40 @@
             moquiRelevance="Maps to WorkEffortParty, RequestParty, Order roles, customer/vendor roles, assignee roles, and any agent workflow that binds a party to a record with role semantics."/>
     <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRoleCtx" patternLevelSeqId="01"
             levelNumber="1"
-            levelTitle="Level 1 Contextual Role Pattern"
-            structureFocus="Role participation with attributes and relationships"
-            moquiMappingNotes="Use for assignment records like WorkEffortParty or RequestParty where the relation itself has semantics."
-            mappedAggregatePatternId="AggrPartySpec"/>
+            levelTitle="Level 1 Contextual Role Pattern, Attributes"
+            structureFocus="Role participation with relation attributes"
+            moquiMappingNotes="Use for assignment records like WorkEffortParty or RequestParty where the relation itself carries dates, priority, or contextual attributes."
+            mappedAggregatePatternId="AggrPartyRoleCtx"/>
     <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRoleCtx" patternLevelSeqId="02"
+            levelNumber="1"
+            levelTitle="Level 1 Contextual Role Pattern, Relationships"
+            structureFocus="Role participation with relationship semantics"
+            moquiMappingNotes="Use when the party-to-context link itself is the important business relationship and must be reasoned about explicitly."
+            mappedAggregatePatternId="AggrPartyRoleCtx"/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRoleCtx" patternLevelSeqId="03"
             levelNumber="2"
             levelTitle="Level 2 Contextual Role Pattern"
             structureFocus="Context-specific role participation"
             moquiMappingNotes="Important when the same party can play multiple roles in the same domain object."
-            mappedAggregatePatternId="AggrPartySpec"/>
-    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRoleCtx" patternLevelSeqId="03"
+            mappedAggregatePatternId="AggrPartyRoleCtx"/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRoleCtx" patternLevelSeqId="04"
+            levelNumber="2"
+            levelTitle="Level 2 Contextual Role Pattern, PARTY Only Alternative"
+            structureFocus="Contextual participation using direct party references"
+            moquiMappingNotes="Use when Moqui models the contextual party mostly on the root record, with lighter supporting role metadata."
+            mappedAggregatePatternId="AggrPartyRoleCtx"/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRoleCtx" patternLevelSeqId="05"
             levelNumber="3"
             levelTitle="Level 3 Contextual Role Pattern"
             structureFocus="Advanced contextual role model"
             moquiMappingNotes="Useful for richer orchestration and RAG explanations of who is reporter, assignee, manager, customer, vendor, or owner."
-            mappedAggregatePatternId="AggrPartySpec"/>
-    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRoleCtx" patternLevelSeqId="04"
+            mappedAggregatePatternId="AggrPartyRoleCtx"/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRoleCtx" patternLevelSeqId="06"
             levelNumber="3"
             levelTitle="Hybrid Contextual Role Pattern"
             structureFocus="Hybrid role strategy"
             moquiMappingNotes="Use when Moqui mixes explicit contextual records with simpler party references on the root entity."
-            mappedAggregatePatternId="AggrPartySpec"/>
+            mappedAggregatePatternId="AggrPartyRoleCtx"/>
 
     <moqui.agent.AgentUniversalPattern agentUniversalPatternId="AgUpRecursive"
             chapterNumber="4"
@@ -115,22 +127,26 @@
             levelNumber="1"
             levelTitle="Level 1 Classification Pattern"
             structureFocus="Simple type assignment"
-            moquiMappingNotes="Use for direct type fields like workEffortTypeEnumId or requestTypeEnumId."/>
+            moquiMappingNotes="Use for direct type fields like workEffortTypeEnumId or requestTypeEnumId."
+            mappedAggregatePatternId="AggrEnumClass"/>
     <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpClassify" patternLevelSeqId="02"
             levelNumber="2"
             levelTitle="Level 2 Classification Pattern"
             structureFocus="Reusable classification structure"
-            moquiMappingNotes="Use when types are shared across multiple entities or need metadata."/>
+            moquiMappingNotes="Use when types are shared across multiple entities or need metadata."
+            mappedAggregatePatternId="AggrEnumClass"/>
     <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpClassify" patternLevelSeqId="03"
             levelNumber="3"
             levelTitle="Level 3 Classification Pattern"
             structureFocus="Taxonomy / category hierarchy"
-            moquiMappingNotes="Use for deeper agent reasoning over product, party, work effort, or accounting classifications."/>
+            moquiMappingNotes="Use for deeper agent reasoning over product, party, work effort, or accounting classifications."
+            mappedAggregatePatternId="AggrEnumClass"/>
     <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpClassify" patternLevelSeqId="04"
             levelNumber="3"
             levelTitle="Level 3 Classification Pattern with Rollups and Schemes"
             structureFocus="Classification with rollups and multiple schemes"
-            moquiMappingNotes="Important for Moqui enumerations, category schemes, and cases where the same record is classified in more than one hierarchy."/>
+            moquiMappingNotes="Important for Moqui enumerations, category schemes, and cases where the same record is classified in more than one hierarchy."
+            mappedAggregatePatternId="AggrEnumClass"/>
 
     <moqui.agent.AgentUniversalPattern agentUniversalPatternId="AgUpStatus"
             chapterNumber="6"
@@ -145,27 +161,38 @@
             levelNumber="1"
             levelTitle="Level 1 Status Pattern"
             structureFocus="Single current status field"
-            moquiMappingNotes="Common in Moqui root entities with a direct statusId."/>
+            moquiMappingNotes="Common in Moqui root entities with a direct statusId."
+            mappedAggregatePatternId="AggrStatusLife"/>
     <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpStatus" patternLevelSeqId="02"
             levelNumber="2"
             levelTitle="Level 2 Status Pattern, Current Status"
             structureFocus="Current status with structured semantics"
-            moquiMappingNotes="Relevant when current status is explicit but transitions are still important."/>
+            moquiMappingNotes="Relevant when current status is explicit but transitions are still important."
+            mappedAggregatePatternId="AggrStatusLife"/>
     <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpStatus" patternLevelSeqId="03"
             levelNumber="3"
             levelTitle="Level 3 Status Pattern"
             structureFocus="Status history and lifecycle semantics"
-            moquiMappingNotes="Use when the agent must reason about status progression or previous states."/>
+            moquiMappingNotes="Use when the agent must reason about status progression or previous states."
+            mappedAggregatePatternId="AggrStatusLife"/>
     <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpStatus" patternLevelSeqId="04"
             levelNumber="4"
             levelTitle="Level 4 Status Pattern"
             structureFocus="Full status lifecycle model"
-            moquiMappingNotes="Useful for advanced action guards and state-machine-like prompts."/>
+            moquiMappingNotes="Useful for advanced action guards and state-machine-like prompts."
+            mappedAggregatePatternId="AggrStatusLife"/>
     <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpStatus" patternLevelSeqId="05"
             levelNumber="4"
             levelTitle="Status Category Pattern"
             structureFocus="Status grouped into categories"
-            moquiMappingNotes="Useful for broad policy checks such as open/closed/cancelled classes of state."/>
+            moquiMappingNotes="Useful for broad policy checks such as open/closed/cancelled classes of state."
+            mappedAggregatePatternId="AggrStatusLife"/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpStatus" patternLevelSeqId="06"
+            levelNumber="4"
+            levelTitle="Status Type with Multi Rollup and Rules Pattern"
+            structureFocus="Status taxonomy with rollups and explicit lifecycle rules"
+            moquiMappingNotes="Useful when Moqui status items are grouped, rolled up, or constrained by explicit business policies and transition rules."
+            mappedAggregatePatternId="AggrStatusLife"/>
 
     <moqui.agent.AgentUniversalPattern agentUniversalPatternId="AgUpContact"
             chapterNumber="7"
@@ -180,27 +207,38 @@
             levelNumber="1"
             levelTitle="Level 1 Contact Mechanism Pattern"
             structureFocus="Simple contact mechanism"
-            moquiMappingNotes="Use for a single direct contact mechanism record."/>
+            moquiMappingNotes="Use for a single direct contact mechanism record."
+            mappedAggregatePatternId="AggrPartyContact"/>
     <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpContact" patternLevelSeqId="02"
             levelNumber="2"
             levelTitle="Level 2 Contact Mechanism Pattern"
             structureFocus="Reusable contact record"
-            moquiMappingNotes="Useful for PartyContactMech and similar linking structures."/>
+            moquiMappingNotes="Useful for PartyContactMech and similar linking structures."
+            mappedAggregatePatternId="AggrPartyContact"/>
     <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpContact" patternLevelSeqId="03"
             levelNumber="3"
             levelTitle="Level 3 Contact Mechanism Pattern"
             structureFocus="Contextualized contact mechanism"
-            moquiMappingNotes="Use when contact data has purpose, status, or lifecycle semantics."/>
+            moquiMappingNotes="Use when contact data has purpose, status, or lifecycle semantics."
+            mappedAggregatePatternId="AggrPartyContact"/>
     <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpContact" patternLevelSeqId="04"
             levelNumber="4"
             levelTitle="Level 4 Contact Mechanism Pattern"
             structureFocus="Advanced contact model"
-            moquiMappingNotes="Use for flexible addressing and complex communication preferences."/>
+            moquiMappingNotes="Use for flexible addressing and complex communication preferences."
+            mappedAggregatePatternId="AggrPartyContact"/>
     <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpContact" patternLevelSeqId="05"
             levelNumber="4"
             levelTitle="Contact Mechanism Pattern with Geographic Boundary"
             structureFocus="Contact with geographic context"
-            moquiMappingNotes="Relevant for addresses, facilities, shipping, and geography-aware routing."/>
+            moquiMappingNotes="Relevant for addresses, facilities, shipping, and geography-aware routing."
+            mappedAggregatePatternId="AggrPartyContact"/>
+    <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpContact" patternLevelSeqId="06"
+            levelNumber="4"
+            levelTitle="Contact Mechanism with Flexible Address Parts Pattern"
+            structureFocus="Flexible address decomposition and reusable address-part structure"
+            moquiMappingNotes="Useful when Moqui address handling needs country-specific flexibility instead of assuming one rigid address shape."
+            mappedAggregatePatternId="AggrPartyContact"/>
 
     <moqui.agent.AgentUniversalPattern agentUniversalPatternId="AgUpRule"
             chapterNumber="8"
@@ -215,16 +253,18 @@
             levelNumber="2"
             levelTitle="Level 2 Business Rules Pattern"
             structureFocus="Structured rule representation"
-            moquiMappingNotes="Use for explicit rule metadata instead of burying all policy in imperative code."/>
+            moquiMappingNotes="Use for explicit rule metadata instead of burying all policy in imperative code."
+            mappedAggregatePatternId="AggrStatusLife"/>
     <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRule" patternLevelSeqId="02"
             levelNumber="3"
             levelTitle="Level 3 Business Rules Pattern"
             structureFocus="Advanced rule structure"
-            moquiMappingNotes="Useful when multiple entities, statuses, or role contexts affect execution."/>
+            moquiMappingNotes="Useful when multiple entities, statuses, or role contexts affect execution."
+            mappedAggregatePatternId="AggrStatusLife"/>
     <moqui.agent.AgentUniversalPatternLevel agentUniversalPatternId="AgUpRule" patternLevelSeqId="03"
             levelNumber="3"
             levelTitle="Business Rules with Party Roles"
             structureFocus="Rules constrained by party role participation"
             moquiMappingNotes="Important when agent permissions or workflow steps depend on who is manager, assignee, customer, or owner."
-            mappedAggregatePatternId="AggrPartySpec"/>
+            mappedAggregatePatternId="AggrPartyRoleCtx"/>
 </entity-facade-xml>

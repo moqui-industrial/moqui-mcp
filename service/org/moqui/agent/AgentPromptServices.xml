@@ -126,7 +126,7 @@
     </service>
 
     <service verb="search" noun="AllDocuments" authenticate="true">
-        <description>Unified search across moqui_agent_prompts_v1 (screen-first + knowledge) and moqui_artifacts_v1 (raw artifacts). Merges results using Reciprocal Rank Fusion (RRF). Returns merged results with a sourceIndex and rrfScore field per hit.</description>
+        <description>Unified search across moqui_agent_prompts_v1 (agent documents + knowledge) and moqui_artifacts_v1 (raw artifacts). Merges results using Reciprocal Rank Fusion (RRF). Returns merged results with a sourceIndex and rrfScore field per hit.</description>
         <in-parameters>
             <parameter name="queryText" required="true"/>
             <parameter name="limit" type="Integer" default="5"/>
@@ -149,7 +149,7 @@
                 int fetchLimit = Math.min(effectiveLimit * 3, 30)
                 int k = rrfK ?: 60
 
-                // Search prompt index (screen-first + knowledge docs)
+                // Search prompt index (agent documents + knowledge docs)
                 List promptResults = []
                 try {
                     def promptRes = ec.service.sync()

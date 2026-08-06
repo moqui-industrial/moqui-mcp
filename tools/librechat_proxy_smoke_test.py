@@ -40,7 +40,7 @@ def write_md(results: list[dict], path: Path) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Basic reverse-proxy smoke test for LibreChat behind Moqui")
-    ap.add_argument("--base-url", required=True, help="Example: http://localhost:8080/librechat/")
+    ap.add_argument("--base-url", required=True, help="Example: http://localhost:8081/librechat/")
     ap.add_argument("--out-json", required=True)
     ap.add_argument("--out-md", required=True)
     ap.add_argument("--allow-auth-challenge", action="store_true",

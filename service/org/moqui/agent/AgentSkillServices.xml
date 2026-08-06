@@ -47,8 +47,8 @@
                     Map upsertValues = [
                             skillId: skillData.skillId,
                             artifactName: skillData.artifactName,
-                            artifactTypeEnumId: skillData.artifactTypeEnumId ?: 'AT_OTHER',
-                            artifactGroupId: skillData.artifactGroupId ?: 'McpRuntimeServices',
+                            artifactTypeEnumId: skillData.artifactTypeEnumId ?: 'AT_AGENT_SKILL',
+                            artifactGroupId: skillData.artifactGroupId ?: 'McpAgentSkills',
                             skillTypeEnumId: skillData.skillTypeEnumId ?: 'AGSKL_SYSTEM',
                             domainName: skillData.domainName ?: '',
                             title: skillData.title ?: skillData.skillId,
@@ -133,21 +133,35 @@
                 import org.moqui.entity.EntityCondition
 
                 int effectiveLimit = Math.max(1, (limit ?: 100) as Integer)
+                int candidateFetchLimit = Math.max(effectiveLimit * 10, 100)
+                Set<String> queryTerms = []
+                if (queryText) {
+                    queryTerms = queryText.toString().toLowerCase()
+                            .split(/[^a-z0-9]+/)
+                            .findAll { it && it.length() > 2 && !['the', 'and', 'for', 'with', 'from', 'this', 'that', 'are', 'was', 'into', 'into', 'create', 'update', 'new'].contains(it) } as Set<String>
+                }
+
                 def find = ec.entity.find('moqui.agent.AgentSkillRegister')
                         .orderBy('domainName')
                         .orderBy('title')
-                        .limit(effectiveLimit)
+                        .limit(candidateFetchLimit)
                 if (skillTypeEnumId) find.condition('skillTypeEnumId', skillTypeEnumId)
                 if (domainName) find.condition('domainName', domainName)
                 if (componentName) find.condition('componentName', componentName)
-                if (queryText) find.condition('searchText', EntityCondition.LIKE, "%${queryText}%")
                 def rows = find.list() ?: []
                 skillList = []
                 rows.each { row ->
-                    if (AgentToolSupport.checkArtifactAccess(ec, row.artifactTypeEnumId as String ?: 'AT_OTHER', 'AUTHZA_VIEW', row.artifactName as String ?: '')) {
+                    boolean matchesQuery = true
+                    if (queryTerms) {
+                        String haystack = ((row.searchText ?: '') + ' ' + (row.title ?: '') + ' ' + (row.description ?: '')).toLowerCase()
+                        matchesQuery = queryTerms.any { haystack.contains(it) }
+                    }
+                    if (!matchesQuery) return
+                    if (AgentToolSupport.checkArtifactAccess(ec, row.artifactTypeEnumId as String ?: 'AT_AGENT_SKILL', 'AUTHZA_VIEW', row.artifactName as String ?: '')) {
                         skillList << row.getPlainValueMap(0)
                     }
                 }
+                if (skillList.size() > effectiveLimit) skillList = skillList.take(effectiveLimit)
                 skillCount = skillList.size()
             ]]></script>
         </actions>
@@ -173,7 +187,7 @@
                     ec.message.addError("Skill not found")
                     return
                 }
-                authorized = AgentToolSupport.checkArtifactAccess(ec, skillValue.artifactTypeEnumId as String ?: 'AT_OTHER', 'AUTHZA_VIEW', skillValue.artifactName as String ?: '')
+                authorized = AgentToolSupport.checkArtifactAccess(ec, skillValue.artifactTypeEnumId as String ?: 'AT_AGENT_SKILL', 'AUTHZA_VIEW', skillValue.artifactName as String ?: '')
                 if (!authorized) {
                     ec.message.addError("Skill not found")
                     return
@@ -181,6 +195,344 @@
 
                 skill = skillValue.getPlainValueMap(0)
                 skill.frontmatter = skillValue.frontmatterJson ? new groovy.json.JsonSlurper().parseText(skillValue.frontmatterJson as String) : [:]
+
+                Closure<List<String>> normalizeStringList = { Object raw ->
+                    if (raw instanceof Collection) {
+                        return ((Collection) raw).collect { it?.toString()?.trim() }.findAll { it } as List<String>
+                    }
+                    String text = raw?.toString()?.trim()
+                    return text ? [text] : []
+                }
+
+                Closure<List<Map>> parseRequiredInputSpecs = { Object raw ->
+                    List<Map> result = []
+                    normalizeStringList(raw).each { String item ->
+                        List<String> parts = item.split(/\|/) as List<String>
+                        String name = parts ? parts[0]?.trim() : null
+                        if (!name) return
+                        Map spec = [name: name, requiredFor: 'execute', missingPolicy: 'ask_user', resolution: ['explicitParameter']]
+                        parts.drop(1).each { String token ->
+                            String trimmed = token?.trim()
+                            if (!trimmed) return
+                            int eqIdx = trimmed.indexOf('=')
+                            if (eqIdx < 0) return
+                            String key = trimmed.substring(0, eqIdx).trim()
+                            String value = trimmed.substring(eqIdx + 1).trim()
+                            if (!key) return
+                            if (key == 'resolution') {
+                                spec.resolution = value ? value.split(/\s*,\s*/).findAll { it } as List<String> : []
+                            } else {
+                                spec[key] = value
+                            }
+                        }
+                        result.add(spec)
+                    }
+                    return result
+                }
+
+                Map frontmatter = (skill.frontmatter instanceof Map) ? (Map) skill.frontmatter : [:]
+                List<String> patterns = normalizeStringList(frontmatter.patterns)
+                List<String> aggregatePatternIds = normalizeStringList(frontmatter.aggregatePatternIds)
+                List<String> preferredServices = normalizeStringList(frontmatter.preferredServices)
+                List<String> preferredRootServices = normalizeStringList(frontmatter.preferredRootServices)
+                List<String> preferredChildServices = normalizeStringList(frontmatter.preferredChildServices)
+                List<String> preferredLookupServices = normalizeStringList(frontmatter.preferredLookupServices)
+                List<String> refusalRules = normalizeStringList(frontmatter.refusalRules)
+                List<Map> requiredInputs = parseRequiredInputSpecs(frontmatter.requiredInputs)
+                String skillTypeEnumId = (skill.skillTypeEnumId ?: frontmatter.skillTypeEnumId ?: frontmatter.skillType ?: '') as String
+                String legacyFallbackDocumentId = (frontmatter.legacyFallbackDocumentId ?: frontmatter.rootDocumentId ?: '').toString().trim()
+                String fallbackMode = (frontmatter.fallbackMode ?: frontmatter.fallbackPolicyMode ?: '').toString().trim().toLowerCase()
+                if (!fallbackMode) fallbackMode = legacyFallbackDocumentId ? 'legacy_prompt_optional' : 'none'
+                if (!preferredRootServices && preferredServices) preferredRootServices = preferredServices
+
+                skill.executionPolicy = [
+                        frontmatter: frontmatter,
+                        patterns: patterns,
+                        aggregatePatternIds: aggregatePatternIds,
+                        preferredServices: preferredServices,
+                        preferredRootServices: preferredRootServices,
+                        preferredChildServices: preferredChildServices,
+                        preferredLookupServices: preferredLookupServices,
+                        requiredInputs: requiredInputs,
+                        refusalRules: refusalRules,
+                        skillTypeEnumId: skillTypeEnumId,
+                        aggregateGuidance: (patterns.any { it in ['aggregate', 'root-child', 'workflow-boundary', 'multi-root'] } || !aggregatePatternIds.isEmpty()),
+                        promptFallbackAllowed: !['none', 'disabled', 'forbid_prompt_search', 'no_prompt_fallback'].contains(fallbackMode),
+                        fallbackMode: fallbackMode,
+                        legacyFallbackDocumentId: legacyFallbackDocumentId
+                ]
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="resolve" noun="AgentSkillPattern" authenticate="true" allow-remote="true">
+        <in-parameters>
+            <parameter name="skillId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="skill" type="Map"/>
+            <parameter name="patternIdList" type="List"/>
+            <parameter name="patternList" type="List"/>
+            <parameter name="selectedPattern" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                Map skillResult = ec.service.sync().name('org.moqui.agent.AgentSkillServices.get#AgentSkill')
+                        .parameters([skillId: skillId])
+                        .call()
+                if (ec.message.hasError()) return
+
+                skill = (skillResult?.skill instanceof Map) ? (Map) skillResult.skill : null
+                if (!skill) {
+                    ec.message.addError("Skill not found")
+                    return
+                }
+
+                Map executionPolicy = (skill.executionPolicy instanceof Map) ? (Map) skill.executionPolicy : [:]
+                patternIdList = (executionPolicy.aggregatePatternIds instanceof List) ? (List) executionPolicy.aggregatePatternIds : []
+                patternList = []
+
+                patternIdList.each { String patternId ->
+                    def pattern = ec.entity.find('moqui.agent.AgentAggregatePattern')
+                            .condition('agentAggregatePatternId', patternId)
+                            .useCache(true)
+                            .one()
+                    if (!pattern) return
+                    Map patternMap = pattern.getPlainValueMap(0)
+                    List<Map> memberList = ec.entity.find('moqui.agent.AgentAggregatePatternMember')
+                            .condition('agentAggregatePatternId', patternId)
+                            .orderBy('patternMemberSeqId')
+                            .useCache(true)
+                            .list()
+                            ?.collect { it.getPlainValueMap(0) } ?: []
+                    patternMap.memberList = memberList
+                    patternList << patternMap
+                }
+
+                selectedPattern = patternList ? patternList[0] : null
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="resolve" noun="AgentSkillServices" authenticate="true" allow-remote="true">
+        <in-parameters>
+            <parameter name="skillId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="skill" type="Map"/>
+            <parameter name="serviceBindings" type="Map"/>
+            <parameter name="servicePlan" type="List"/>
+            <parameter name="missingServiceList" type="List"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.AgentSkillSupport
+                import org.moqui.agent.AgentToolSupport
+
+                Map skillResult = ec.service.sync().name('org.moqui.agent.AgentSkillServices.get#AgentSkill')
+                        .parameters([skillId: skillId])
+                        .call()
+                if (ec.message.hasError()) return
+
+                skill = (skillResult?.skill instanceof Map) ? (Map) skillResult.skill : null
+                if (!skill) {
+                    ec.message.addError("Skill not found")
+                    return
+                }
+
+                Map executionPolicy = (skill.executionPolicy instanceof Map) ? (Map) skill.executionPolicy : [:]
+                serviceBindings = [
+                        rootServices: (executionPolicy.preferredRootServices instanceof List) ? (List) executionPolicy.preferredRootServices : [],
+                        childServices: (executionPolicy.preferredChildServices instanceof List) ? (List) executionPolicy.preferredChildServices : [],
+                        lookupServices: (executionPolicy.preferredLookupServices instanceof List) ? (List) executionPolicy.preferredLookupServices : [],
+                        legacyServices: (executionPolicy.preferredServices instanceof List) ? (List) executionPolicy.preferredServices : []
+                ]
+                servicePlan = []
+                missingServiceList = []
+
+                [['root', serviceBindings.rootServices],
+                 ['child', serviceBindings.childServices],
+                 ['lookup', serviceBindings.lookupServices],
+                 ['legacy', serviceBindings.legacyServices]].each { List roleEntry ->
+                    String serviceRole = roleEntry[0] as String
+                    List<String> serviceNameList = (roleEntry[1] instanceof List) ? (List<String>) roleEntry[1] : []
+                    serviceNameList.each { String serviceName ->
+                        boolean defined = false
+                        try {
+                            defined = ec.service.isServiceDefined(serviceName)
+                        } catch (Throwable ignored) {
+                            defined = false
+                        }
+
+                        def serviceRegister = ec.entity.find('moqui.service.ServiceRegister')
+                                .condition('serviceName', serviceName)
+                                .useCache(true)
+                                .one()
+
+                        Map entry = [
+                                serviceRole: serviceRole,
+                                serviceName: serviceName,
+                                defined: defined,
+                                registered: serviceRegister != null,
+                                authzActionEnumId: AgentToolSupport.getServiceAuthzActionEnumId(serviceName)
+                        ]
+                        if (serviceRegister) {
+                            entry.serviceRegisterId = serviceRegister.serviceRegisterId
+                            entry.serviceTypeEnumId = serviceRegister.serviceTypeEnumId
+                            entry.serviceDescription = serviceRegister.description
+                            entry.configParameters = serviceRegister.configParameters
+                        }
+
+                        if (!defined) missingServiceList << serviceName
+                        servicePlan << entry
+                    }
+                }
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="plan" noun="AgentSkill" authenticate="true" allow-remote="true">
+        <in-parameters>
+            <parameter name="skillId" required="true"/>
+            <parameter name="queryText"/>
+            <parameter name="parameters" type="Map"/>
+            <parameter name="sessionId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="skill" type="Map"/>
+            <parameter name="executionPolicy" type="Map"/>
+            <parameter name="patternList" type="List"/>
+            <parameter name="servicePlan" type="List"/>
+            <parameter name="missingInputs" type="List"/>
+            <parameter name="resolvedInputs" type="Map"/>
+            <parameter name="state"/>
+            <parameter name="fallbackRecommended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                Map skillResult = ec.service.sync().name('org.moqui.agent.AgentSkillServices.get#AgentSkill')
+                        .parameters([skillId: skillId])
+                        .call()
+                if (ec.message.hasError()) return
+
+                skill = (skillResult?.skill instanceof Map) ? (Map) skillResult.skill : null
+                if (!skill) {
+                    ec.message.addError("Skill not found")
+                    return
+                }
+
+                executionPolicy = (skill.executionPolicy instanceof Map) ? (Map) skill.executionPolicy : [:]
+
+                Map patternResult = ec.service.sync().name('org.moqui.agent.AgentSkillServices.resolve#AgentSkillPattern')
+                        .parameters([skillId: skillId])
+                        .call()
+                if (ec.message.hasError()) return
+                patternList = (patternResult?.patternList instanceof List) ? (List) patternResult.patternList : []
+
+                Map serviceResult = ec.service.sync().name('org.moqui.agent.AgentSkillServices.resolve#AgentSkillServices')
+                        .parameters([skillId: skillId])
+                        .call()
+                if (ec.message.hasError()) return
+                servicePlan = (serviceResult?.servicePlan instanceof List) ? (List) serviceResult.servicePlan : []
+                List<String> missingServiceList = (serviceResult?.missingServiceList instanceof List) ? (List<String>) serviceResult.missingServiceList : []
+
+                resolvedInputs = [:]
+                if (parameters instanceof Map) resolvedInputs.putAll((Map) parameters)
+
+                Map sessionContext = null
+                if (sessionId) {
+                    def sessionValue = ec.entity.find('moqui.agent.AgentSessionContext')
+                            .condition('agentSessionId', sessionId)
+                            .useCache(false)
+                            .one()
+                    if (sessionValue) {
+                        sessionContext = sessionValue.getPlainValueMap(0)
+                        if (sessionValue.currentBusinessObjectsJson) {
+                            try {
+                                resolvedInputs.currentBusinessObjects = new groovy.json.JsonSlurper().parseText(sessionValue.currentBusinessObjectsJson as String)
+                            } catch (Throwable ignored) { }
+                        }
+                    }
+                }
+                if (queryText) resolvedInputs.queryText = queryText
+
+                missingInputs = []
+                List<Map> requiredInputSpecs = (executionPolicy.requiredInputs instanceof List) ? (List<Map>) executionPolicy.requiredInputs : []
+                requiredInputSpecs.each { Map spec ->
+                    String inputName = spec.name as String
+                    if (!inputName) return
+
+                    Object resolvedValue = resolvedInputs.containsKey(inputName) ? resolvedInputs[inputName] : null
+                    if (resolvedValue == null && sessionContext && sessionContext.containsKey(inputName)) {
+                        resolvedValue = sessionContext[inputName]
+                        resolvedInputs[inputName] = resolvedValue
+                    }
+                    if (resolvedValue == null && resolvedInputs.currentBusinessObjects instanceof Map &&
+                            ((Map) resolvedInputs.currentBusinessObjects).containsKey(inputName)) {
+                        resolvedValue = ((Map) resolvedInputs.currentBusinessObjects)[inputName]
+                        resolvedInputs[inputName] = resolvedValue
+                    }
+
+                    List<String> resolutionModes = (spec.resolution instanceof List) ? (List<String>) spec.resolution :
+                            (spec.resolution ? [spec.resolution.toString()] : [])
+                    boolean allowUniqueLookup = resolutionModes.contains('uniqueLookup')
+                    if ((resolvedValue == null || (resolvedValue instanceof CharSequence && !resolvedValue.toString().trim())) && allowUniqueLookup && queryText) {
+                        String lookupKey = null
+                        String lookupText = null
+
+                        if (inputName == 'budgetTypeEnumId') {
+                            lookupKey = 'budgetType'
+                            lookupText = queryText
+                        } else if (inputName == 'timePeriodId') {
+                            def yearMatcher = (queryText =~ /\b(20\d{2})\b/)
+                            if (yearMatcher.find()) {
+                                lookupKey = 'fiscalYearTimePeriod'
+                                lookupText = yearMatcher.group(1)
+                            }
+                        } else if (inputName == 'organizationPartyId') {
+                            def orgMatcher = (queryText =~ /(?i)\b(?:azienda|company|organization|organizzazione)\s+([^,.\n]+?)(?=(?:\s+con\b|\s+for\b|,|\.|$))/)
+                            if (orgMatcher.find()) {
+                                lookupKey = 'party'
+                                lookupText = orgMatcher.group(1)?.trim()
+                            }
+                        }
+
+                        if (lookupKey && lookupText) {
+                            Map lookupResult = ec.service.sync().name('org.moqui.agent.AgentExecutionServices.find#LookupRecord')
+                                    .parameters([
+                                            lookupKey: lookupKey,
+                                            lookupText: lookupText,
+                                            organizationPartyId: resolvedInputs.organizationPartyId
+                                    ]).call()
+                            if (!ec.message.hasError() && lookupResult?.uniqueMatch && lookupResult?.recordId) {
+                                resolvedValue = lookupResult.recordId
+                                resolvedInputs[inputName] = resolvedValue
+                            } else if (ec.message.hasError()) {
+                                ec.message.clearErrors()
+                            }
+                        }
+                    }
+
+                    boolean missing = (resolvedValue == null || (resolvedValue instanceof CharSequence && !resolvedValue.toString().trim()))
+                    if (missing) {
+                        missingInputs << [
+                                name: inputName,
+                                requiredFor: spec.requiredFor ?: 'execute',
+                                missingPolicy: spec.missingPolicy ?: 'ask_user',
+                                resolution: spec.resolution ?: 'explicitParameter'
+                        ]
+                    }
+                }
+
+                if (missingServiceList) {
+                    state = 'refused'
+                } else if (missingInputs) {
+                    state = 'needsMoreContext'
+                } else {
+                    state = 'ready'
+                }
+
+                fallbackRecommended = ((executionPolicy.fallbackMode ?: '') == 'prompt_search') && state != 'ready'
             ]]></script>
         </actions>
     </service>
@@ -203,6 +555,9 @@
         </out-parameters>
         <actions>
             <script><![CDATA[
+                import org.moqui.agent.AgentSkillSupport
+                import org.moqui.agent.AgentToolSupport
+
                 int effectiveLimit = Math.max(1, (limit ?: 5) as Integer)
                 Map searchResult = ec.service.sync().name('org.moqui.agent.AgentSkillServices.search#AgentSkills')
                         .parameters([
@@ -220,9 +575,42 @@
                                     queryText: queryText,
                                     domainName: domainName,
                                     skillTypeEnumId: skillTypeEnumId,
-                                    limit: effectiveLimit
+                                    limit: Math.max(effectiveLimit * 10, 100)
                             ]).call()
                     candidates = (listResult?.skillList instanceof List) ? (List<Map>) listResult.skillList : []
+                }
+
+                String preferredSkillId = AgentSkillSupport.preferredSkillIdForPrompt(queryText)
+                if (preferredSkillId) {
+                    Map preferredSkill = candidates.find { Map row -> preferredSkillId == (row?.skillId as String) } as Map
+                    if (!preferredSkill) {
+                        def preferredValue = ec.entity.find('moqui.agent.AgentSkillRegister')
+                                .condition('skillId', preferredSkillId)
+                                .useCache(true)
+                                .one()
+                        if (preferredValue && AgentToolSupport.checkArtifactAccess(ec,
+                                preferredValue.artifactTypeEnumId as String ?: 'AT_AGENT_SKILL',
+                                'AUTHZA_VIEW',
+                                preferredValue.artifactName as String ?: '')) {
+                            preferredSkill = preferredValue.getPlainValueMap(0)
+                            candidates.add(preferredSkill)
+                        }
+                    }
+                }
+
+                candidates = AgentSkillSupport.rerankSkillCandidates(candidates, queryText, domainName)
+                if (preferredSkillId) {
+                    Map preferredCandidate = candidates.find { Map row -> preferredSkillId == (row?.skillId as String) } as Map
+                    if (preferredCandidate) {
+                        candidates.remove(preferredCandidate)
+                        candidates.add(0, preferredCandidate)
+                    }
+                }
+                candidates = candidates.take(effectiveLimit).collect { Map row ->
+                    Map copy = [:]
+                    copy.putAll(row)
+                    copy.remove('_skillScore')
+                    return copy
                 }
 
                 candidateSkillList = candidates
@@ -280,7 +668,7 @@
                 docs.each { Map doc ->
                     if (domainName && (doc.domainName ?: '') != domainName) return
                     if (skillTypeEnumId && (doc.skillTypeEnumId ?: '') != skillTypeEnumId) return
-                    if (AgentToolSupport.checkArtifactAccess(ec, doc.artifactTypeEnumId as String ?: 'AT_OTHER', 'AUTHZA_VIEW', doc.artifactName as String ?: '')) {
+                    if (AgentToolSupport.checkArtifactAccess(ec, doc.artifactTypeEnumId as String ?: 'AT_AGENT_SKILL', 'AUTHZA_VIEW', doc.artifactName as String ?: '')) {
                         skillList << doc
                     }
                 }
@@ -292,7 +680,7 @@
     <service verb="index" noun="AgentSkillDocuments" authenticate="true" allow-remote="true" transaction-timeout="3600">
         <description>Index the AgentSkillDocument DataFeed with the standard Moqui SearchServices path.</description>
         <in-parameters>
-            <parameter name="dataFeedId" default="AgentSkillFeed"/>
+            <parameter name="dataFeedId" default-value="AgentSkillFeed"/>
             <parameter name="clusterName" default-value="default"/>
         </in-parameters>
         <out-parameters>

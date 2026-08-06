@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- This software is in the public domain under CC0 1.0 Universal plus a
+     Grant of Patent License. -->
+<entity-facade-xml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-facade-3.xsd" type="seed-initial">
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="AgentSkillDocument"
+            documentName="Agent Skill Document"
+            documentTitle="${title}"
+            primaryEntityName="moqui.agent.AgentSkillRegister"
+            indexName="moqui_agent_skills_v1">
+        <fields fieldSeqId="01" fieldPath="agentSkillRegisterId"/>
+        <fields fieldSeqId="02" fieldPath="skillId"/>
+        <fields fieldSeqId="03" fieldPath="artifactName"/>
+        <fields fieldSeqId="04" fieldPath="artifactTypeEnumId"/>
+        <fields fieldSeqId="05" fieldPath="artifactGroupId"/>
+        <fields fieldSeqId="06" fieldPath="skillTypeEnumId"/>
+        <fields fieldSeqId="07" fieldPath="domainName"/>
+        <fields fieldSeqId="08" fieldPath="title"/>
+        <fields fieldSeqId="09" fieldPath="description"/>
+        <fields fieldSeqId="10" fieldPath="componentName"/>
+        <fields fieldSeqId="11" fieldPath="skillLocation"/>
+        <fields fieldSeqId="12" fieldPath="skillPath"/>
+        <fields fieldSeqId="13" fieldPath="statusId"/>
+        <fields fieldSeqId="14" fieldPath="frontmatterJson"/>
+        <fields fieldSeqId="15" fieldPath="bodyText"/>
+        <fields fieldSeqId="16" fieldPath="searchText"/>
+        <fields fieldSeqId="17" fieldPath="contentHash"/>
+        <fields fieldSeqId="18" fieldPath="lastIndexedDate"/>
+    </moqui.entity.document.DataDocument>
+
+    <moqui.entity.feed.DataFeed
+            dataFeedId="AgentSkillFeed"
+            dataFeedTypeEnumId="DTFDTP_MAN_PULL"
+            indexOnStartEmpty="N"
+            feedName="Agent Skill Feed"
+            feedReceiveServiceName="org.moqui.search.SearchServices.index#DataDocuments"/>
+
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentSkillFeed" dataDocumentId="AgentSkillDocument"/>
+
+</entity-facade-xml>

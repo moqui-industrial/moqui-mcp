@@ -118,7 +118,7 @@ should normally be configured in runtime environment files such as `runtime/conf
 
 For local development, both of these patterns are acceptable:
 
-- direct local runtime endpoint such as `http://127.0.0.1:9200`
+- direct local runtime endpoint such as `http://127.0.0.1:9202`
 - containerized endpoint exposed by the AI deploy profile
 
 The important rule is that the OpenSearch endpoint, credentials, and security mode belong to deployment configuration, not to the component source itself.

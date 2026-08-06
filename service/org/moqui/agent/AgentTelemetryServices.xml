@@ -122,7 +122,48 @@
                 if (binValue.maxTimeMillis == null || rt > (binValue.maxTimeMillis as BigDecimal)) binValue.maxTimeMillis = rt
                 binValue.lastLogDate = effectiveLogDate
 
-                if (exists) binValue.update() else binValue.create()
+                if (exists) {
+                    binValue.update()
+                } else {
+                    try {
+                        binValue.create()
+                    } catch (Throwable createFailure) {
+                        ec.message.clearErrors()
+                        def existingBin = ec.entity.find('moqui.agent.AgentToolExecutionBin')
+                                .condition('binStartDateTime', binStartDateTime)
+                                .condition('binKey', binKey)
+                                .forUpdate(true)
+                                .one()
+                        if (!existingBin) throw createFailure
+
+                        BigDecimal existingRt = (existingBin.runningTimeMillis ?: 0) as BigDecimal
+                        existingBin = existingBin.cloneValue()
+                        existingBin.executionCount = (existingBin.executionCount ?: 0) + 1
+                        if (Boolean.TRUE.equals(success) || success == 'Y') {
+                            existingBin.successCount = (existingBin.successCount ?: 0) + 1
+                        } else {
+                            existingBin.errorCount = (existingBin.errorCount ?: 0) + 1
+                        }
+                        if ((resultStatus ?: '') == 'denied') existingBin.deniedCount = (existingBin.deniedCount ?: 0) + 1
+                        if ((confirmed == 'N' || Boolean.FALSE.equals(confirmed)) && riskLevelEnumId) {
+                            existingBin.confirmationRequiredCount = (existingBin.confirmationRequiredCount ?: 0) + 1
+                        }
+                        if ((searchMode ?: '') == 'hybrid_llm_rerank') {
+                            existingBin.hybridLlmRerankCount = (existingBin.hybridLlmRerankCount ?: 0) + 1
+                        }
+                        if (rerankerFallbackUsed == 'Y' || Boolean.TRUE.equals(rerankerFallbackUsed)) {
+                            existingBin.rerankerFallbackCount = (existingBin.rerankerFallbackCount ?: 0) + 1
+                        }
+
+                        existingBin.totalTimeMillis = (existingBin.totalTimeMillis ?: 0) + rt
+                        existingBin.totalSquaredTime = (existingBin.totalSquaredTime ?: 0) + (rt * rt)
+                        if (existingBin.minTimeMillis == null || rt < (existingBin.minTimeMillis as BigDecimal)) existingBin.minTimeMillis = rt
+                        if (existingBin.maxTimeMillis == null || rt > (existingBin.maxTimeMillis as BigDecimal)) existingBin.maxTimeMillis = rt
+                        existingBin.lastLogDate = effectiveLogDate
+                        agentToolExecutionBinId = existingBin.agentToolExecutionBinId
+                        existingBin.update()
+                    }
+                }
             ]]></script>
         </actions>
     </service>
@@ -265,6 +306,99 @@
         </actions>
     </service>
 
+    <service verb="index" noun="ToolExecutionLogs" authenticate="true">
+        <description>Backfill AgentToolExecutionElasticLog rows into the OpenSearch telemetry index.</description>
+        <in-parameters>
+            <parameter name="indexName"/>
+            <parameter name="limit" type="Integer"/>
+            <parameter name="visitId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="documentsIndexed" type="Integer"/>
+            <parameter name="indexNameUsed"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.agent.AgentConfigUtil
+                import org.moqui.agent.search.ElasticBackendAdapter
+
+                Closure<List<String>> resolveTelemetryIndexCandidates = { String explicitName ->
+                    LinkedHashSet<String> names = new LinkedHashSet<String>()
+                    if (explicitName) names.add(explicitName)
+                    String configured = AgentConfigUtil.getString('moqui.agent.telemetry.indexName', null)
+                    if (configured) names.add(configured)
+                    def dataDocument = ec.entity.find('moqui.entity.document.DataDocument')
+                            .disableAuthz()
+                            .condition('dataDocumentId', 'AgentToolExecLog')
+                            .one()
+                    if (dataDocument?.indexName) names.add(dataDocument.indexName as String)
+                    names.add('moqui_agent_telemetry_v1')
+                    names.add('agent_tool_exec_log')
+                    return names.findAll { it } as List<String>
+                }
+
+                List<String> indexCandidates = resolveTelemetryIndexCandidates(indexName as String)
+                String effectiveIndexName = indexCandidates.first()
+                int effectiveLimit = Math.min(Math.max(limit ?: 500, 1), 5000)
+
+                def find = ec.entity.find('moqui.agent.AgentToolExecutionElasticLog').orderBy('-logDate').limit(effectiveLimit)
+                if (visitId) find.condition('visitId', visitId)
+                List<Map> docs = (find.list() ?: []).collect { ev ->
+                    Map row = [:]
+                    ev.getMap().each { k, v -> row[k] = v }
+                    row.doc_id = row.agentToolExecutionElasticLogId
+                    row
+                }
+
+                def adapter = new ElasticBackendAdapter(ec)
+                if (!adapter.indexExists(effectiveIndexName)) {
+                    adapter.createIndex(effectiveIndexName, [
+                            mappings: [
+                                    properties: [
+                                            agentToolExecutionElasticLogId: [type:'keyword'],
+                                            agentToolExecutionLogId: [type:'keyword'],
+                                            logDate: [type:'date'],
+                                            userId: [type:'keyword'],
+                                            visitId: [type:'keyword'],
+                                            mcpSessionId: [type:'keyword'],
+                                            toolName: [type:'keyword'],
+                                            documentId: [type:'keyword'],
+                                            documentKind: [type:'keyword'],
+                                            area: [type:'keyword'],
+                                            subArea: [type:'keyword'],
+                                            domainObject: [type:'keyword'],
+                                            actionKind: [type:'keyword'],
+                                            operationEffect: [type:'keyword'],
+                                            executionChannel: [type:'keyword'],
+                                            artifactTypeEnumId: [type:'keyword'],
+                                            artifactName: [type:'keyword'],
+                                            serviceName: [type:'keyword'],
+                                            riskLevelEnumId: [type:'keyword'],
+                                            confirmed: [type:'keyword'],
+                                            success: [type:'keyword'],
+                                            errorType: [type:'keyword'],
+                                            errorMessage: [type:'text'],
+                                            runningTimeMillis: [type:'double'],
+                                            resultStatus: [type:'keyword'],
+                                            parameterSummary: [type:'text'],
+                                            resultSummary: [type:'text'],
+                                            searchMode: [type:'keyword'],
+                                            resultCount: [type:'integer'],
+                                            topDocumentId: [type:'keyword'],
+                                            topScore: [type:'double'],
+                                            indexName: [type:'keyword']
+                                    ]
+                            ]
+                    ])
+                }
+                if (docs) adapter.bulkIndex(effectiveIndexName, docs)
+
+                documentsIndexed = docs.size()
+                indexNameUsed = effectiveIndexName
+            ]]></script>
+        </actions>
+    </service>
+
     <service verb="search" noun="ToolExecutionLogs" authenticate="true">
         <description>Search recent agent tool execution telemetry stored in OpenSearch, with logging-entity fallback when needed.</description>
         <in-parameters>
@@ -287,11 +421,57 @@
         <actions>
             <script><![CDATA[
                 import org.moqui.agent.AgentConfigUtil
+                import org.moqui.agent.AgentToolSupport
                 import org.moqui.agent.search.ElasticBackendAdapter
 
                 int effectiveLimit = Math.min(Math.max(limit ?: 10, 1), 50)
                 String effectiveVisitId = (visitId ?: sessionId ?: ec.user.visitId) as String
-                String effectiveIndexName = (indexName ?: AgentConfigUtil.getString('moqui.agent.telemetry.indexName', 'moqui_agent_telemetry_v1')) as String
+                Closure<List<String>> resolveTelemetryIndexCandidates = { String explicitName ->
+                    LinkedHashSet<String> names = new LinkedHashSet<String>()
+                    if (explicitName) names.add(explicitName)
+                    String configured = AgentConfigUtil.getString('moqui.agent.telemetry.indexName', null)
+                    if (configured) names.add(configured)
+                    def dataDocument = ec.entity.find('moqui.entity.document.DataDocument')
+                            .disableAuthz()
+                            .condition('dataDocumentId', 'AgentToolExecLog')
+                            .one()
+                    if (dataDocument?.indexName) names.add(dataDocument.indexName as String)
+                    names.add('moqui_agent_telemetry_v1')
+                    names.add('agent_tool_exec_log')
+                    return names.findAll { it } as List<String>
+                }
+
+                List<String> indexCandidates = resolveTelemetryIndexCandidates(indexName as String)
+                String effectiveIndexName = indexCandidates.first()
+
+                Closure enrichBusinessSummary = { Map row ->
+                    if (!row) return row
+                    boolean needsSummary = !row.resultSummary || row.resultSummary == 'resultKeys='
+                    if (!needsSummary && row.businessResultSummary) return row
+                    String txLogId = row.agentToolExecutionLogId as String
+                    if (!txLogId) return row
+                    try {
+                        def txLog = ec.entity.find('moqui.agent.AgentToolExecutionLog')
+                                .disableAuthz()
+                                .condition('agentToolExecutionLogId', txLogId)
+                                .one()
+                        Object parsedResult = AgentToolSupport.fromJson(txLog?.resultJson as String)
+                        if (parsedResult instanceof Map) {
+                            Map parsedMap = parsedResult as Map
+                            Map businessSummary =
+                                    ((parsedMap.businessObjects instanceof Map) || (parsedMap.actions instanceof Collection) || parsedMap.operation || parsedMap.planType) ?
+                                            parsedMap :
+                                            AgentToolSupport.buildBusinessResultSummary(parsedMap)
+                            if (businessSummary) {
+                                row.businessResultSummary = businessSummary
+                                if (!row.resultSummary || row.resultSummary == 'resultKeys=') {
+                                    row.resultSummary = AgentToolSupport.toJson(businessSummary)
+                                }
+                            }
+                        }
+                    } catch (Throwable ignored) { }
+                    return row
+                }
 
                 Map boolQuery = [filter: []]
                 if (effectiveVisitId) boolQuery.filter.add([term: [visitId: effectiveVisitId]])
@@ -317,8 +497,15 @@
 
                 try {
                     def adapter = new ElasticBackendAdapter(ec)
-                    if (adapter.indexExists(effectiveIndexName)) {
-                        searchRaw = adapter.search(effectiveIndexName, querySpec) ?: [:]
+                    try {
+                        ec.service.sync().name('org.moqui.agent.AgentTelemetryServices.index#ToolExecutionLogs')
+                                .disableAuthz()
+                                .parameters([indexName: effectiveIndexName, limit: 500, visitId: effectiveVisitId]).call()
+                    } catch (Throwable ignored) { }
+                    for (String candidateIndexName in indexCandidates) {
+                        if (!adapter.indexExists(candidateIndexName)) continue
+                        effectiveIndexName = candidateIndexName
+                        searchRaw = adapter.search(candidateIndexName, querySpec) ?: [:]
                         List hits = (((searchRaw.hits ?: [:]).hits ?: []) as List)
                         normalizedResultList = hits.collect { Map hit ->
                             Map src = (hit._source ?: [:]) as Map
@@ -326,32 +513,61 @@
                             row._score = hit._score
                             row._id = hit._id
                             row.logSource = 'opensearch'
-                            row
+                            enrichBusinessSummary(row)
                         }
                         sourceMode = 'opensearch'
+                        if (normalizedResultList) break
                     }
                 } catch (Throwable t) {
                     ec.logger.warn("search#ToolExecutionLogs OpenSearch lookup failed: ${t.message}")
                 }
 
                 if (!normalizedResultList) {
-                    def find = ec.entity.find('moqui.agent.AgentToolExecutionElasticLog')
+                    try {
+                        def find = ec.entity.find('moqui.agent.AgentToolExecutionElasticLog')
+                        if (effectiveVisitId) find.condition('visitId', effectiveVisitId)
+                        if (toolName) find.condition('toolName', toolName)
+                        if (documentId) find.condition('documentId', documentId)
+                        if (serviceName) find.condition('serviceName', serviceName)
+                        if (artifactName) find.condition('artifactName', artifactName)
+                        if (Boolean.TRUE.equals(errorsOnly)) {
+                            find.condition('success', 'N')
+                        } else if (success != null) {
+                            find.condition('success', Boolean.TRUE.equals(success) ? 'Y' : 'N')
+                        }
+                        normalizedResultList = (find.orderBy('-logDate').limit(effectiveLimit).list() ?: []).collect { ev ->
+                            Map row = [:]
+                            ev.getMap().each { k, v -> row[k] = v }
+                            row.logSource = 'entity'
+                            enrichBusinessSummary(row)
+                        }
+                    } catch (Throwable t) {
+                        ec.logger.warn("search#ToolExecutionLogs logging-entity fallback failed: ${t.message}")
+                    }
+                }
+
+                if (!normalizedResultList) {
+                    def find = ec.entity.find('moqui.agent.AgentToolExecutionLog')
                     if (effectiveVisitId) find.condition('visitId', effectiveVisitId)
                     if (toolName) find.condition('toolName', toolName)
                     if (documentId) find.condition('documentId', documentId)
-                    if (serviceName) find.condition('serviceName', serviceName)
+                    if (serviceName) find.condition('artifactName', serviceName)
                     if (artifactName) find.condition('artifactName', artifactName)
                     if (Boolean.TRUE.equals(errorsOnly)) {
                         find.condition('success', 'N')
                     } else if (success != null) {
                         find.condition('success', Boolean.TRUE.equals(success) ? 'Y' : 'N')
                     }
-                    normalizedResultList = (find.orderBy('-logDate').limit(effectiveLimit).list() ?: []).collect { ev ->
+                    normalizedResultList = (find.orderBy('-endDate').limit(effectiveLimit).list() ?: []).collect { ev ->
                         Map row = [:]
                         ev.getMap().each { k, v -> row[k] = v }
-                        row.logSource = 'entity'
-                        row
+                        row.logDate = row.endDate ?: row.startDate
+                        row.serviceName = row.artifactTypeEnumId == 'AT_SERVICE' ? row.artifactName : null
+                        row.resultStatus = row.success == 'Y' ? 'ok' : 'error'
+                        row.logSource = 'transactional_entity'
+                        enrichBusinessSummary(row)
                     }
+                    if (normalizedResultList) sourceMode = 'transactional_entity_fallback'
                 }
 
                 resultList = normalizedResultList
@@ -359,6 +575,7 @@
                 searchDebug = [
                     modeUsed : sourceMode,
                     indexName: effectiveIndexName,
+                    indexCandidates: indexCandidates,
                     visitId  : effectiveVisitId,
                     resultCount: normalizedResultList.size()
                 ]

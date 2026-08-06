@@ -809,6 +809,7 @@ class EnhancedMcpServlet extends HttpServlet {
         logger.debug("Calling MCP service: ${serviceName}")
 
         try {
+            ec.message.clearAll()
             def result = ec.service.sync().name("org.moqui.mcp.McpServices.${serviceName}")
                 .parameters(params ?: [:])
                 .call()

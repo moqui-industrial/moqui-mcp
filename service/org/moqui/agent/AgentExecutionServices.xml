@@ -12,6 +12,152 @@
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
           xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
+    <service verb="find" noun="LookupRecord" authenticate="true" allow-remote="true">
+        <description>Generic runtime lookup helper for AgentSkills. Resolves a business token to a unique Moqui identifier when possible.</description>
+        <in-parameters>
+            <parameter name="lookupKey" required="true"/>
+            <parameter name="lookupText" required="true"/>
+            <parameter name="organizationPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="success" type="Boolean"/>
+            <parameter name="recordId"/>
+            <parameter name="record" type="Map"/>
+            <parameter name="uniqueMatch" type="Boolean"/>
+            <parameter name="lookupKey"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import java.util.Calendar
+
+                success = false
+                uniqueMatch = false
+                record = [:]
+                recordId = null
+                String key = (lookupKey ?: '').toString().trim()
+                String text = (lookupText ?: '').toString().trim()
+                if (!key || !text) return
+
+                Closure<String> normalize = { String raw ->
+                    raw ? raw.trim().replaceAll(/\s+/, ' ') : null
+                }
+                Closure<String> canonical = { String raw ->
+                    String normalized = normalize(raw)?.toLowerCase()
+                    normalized ? normalized.replaceAll(/[^a-z0-9]+/, '') : null
+                }
+                Closure<Map> makeRecord = { String idField, Object idValue, Map source ->
+                    if (!idField || idValue == null) return [:]
+                    Map result = [idField: idField, recordId: idValue.toString()]
+                    if (source instanceof Map) result.putAll(source)
+                    return result
+                }
+                Closure<Map> entityExactLookup = { String entityName, String idField, List<String> exactFields ->
+                    if (!entityName || !idField || !exactFields) return [:]
+                    List<String> variants = [normalize(text), canonical(text)].findAll { it }?.unique() ?: []
+                    for (String fieldName in exactFields) {
+                        for (String value in variants) {
+                            try {
+                                def ev = ec.entity.find(entityName).disableAuthz()
+                                        .condition(fieldName, value)
+                                        .one()
+                                if (ev?.get(idField) != null) {
+                                    return makeRecord(idField, ev.get(idField), ev.getPlainValueMap(0))
+                                }
+                            } catch (Throwable ignored) { }
+                        }
+                    }
+                    return [:]
+                }
+
+                if (key == 'budgetType') {
+                    String normalized = normalize(text)?.toLowerCase()
+                    if (normalized?.contains('operativ') || normalized?.contains('operating') || normalized == 'budgetoperating' || normalized == 'budtypeoperating') {
+                        recordId = 'BudgetOperating'
+                    } else if (normalized?.contains('capital') || normalized == 'budgetcapital' || normalized == 'budtypecapital') {
+                        recordId = 'BudgetCapital'
+                    } else {
+                        Map exact = entityExactLookup('moqui.basic.Enumeration', 'enumId', ['enumId', 'description'])
+                        if (exact.recordId) {
+                            recordId = exact.recordId
+                            record = exact
+                        }
+                    }
+                    if (recordId) {
+                        success = true
+                        uniqueMatch = true
+                        if (!record) record = [enumId: recordId]
+                    }
+                    return
+                }
+
+                if (key == 'fiscalYearTimePeriod') {
+                    Integer yearNumber = null
+                    def yearMatcher = (text =~ /\b(20\d{2})\b/)
+                    if (yearMatcher.find()) yearNumber = Integer.valueOf(yearMatcher.group(1))
+                    if (!yearNumber) return
+
+                    try {
+                        def find = ec.entity.find('mantle.party.time.TimePeriod').disableAuthz()
+                                .condition('timePeriodTypeId', 'FiscalYear')
+                        if (organizationPartyId) find.condition('partyId', organizationPartyId)
+                        List periods = find.list()
+                        def exact = periods.find { ev ->
+                            String periodName = (ev.periodName ?: '') as String
+                            Integer fromYear = ev.fromDate ? ev.fromDate.toCalendar().get(Calendar.YEAR) : null
+                            Integer thruYear = ev.thruDate ? ev.thruDate.toCalendar().get(Calendar.YEAR) : null
+                            periodName.contains(yearNumber.toString()) || fromYear == yearNumber || thruYear == yearNumber
+                        }
+                        if (!exact && organizationPartyId) {
+                            periods = ec.entity.find('mantle.party.time.TimePeriod').disableAuthz()
+                                    .condition('timePeriodTypeId', 'FiscalYear')
+                                    .list()
+                            exact = periods.find { ev ->
+                                String periodName = (ev.periodName ?: '') as String
+                                Integer fromYear = ev.fromDate ? ev.fromDate.toCalendar().get(Calendar.YEAR) : null
+                                Integer thruYear = ev.thruDate ? ev.thruDate.toCalendar().get(Calendar.YEAR) : null
+                                periodName.contains(yearNumber.toString()) || fromYear == yearNumber || thruYear == yearNumber
+                            }
+                        }
+                        if (exact?.timePeriodId) {
+                            recordId = exact.timePeriodId as String
+                            record = exact.getPlainValueMap(0)
+                            success = true
+                            uniqueMatch = true
+                        }
+                    } catch (Throwable ignored) { }
+                    return
+                }
+
+                if (key == 'party') {
+                    Map exact = entityExactLookup('mantle.party.Party', 'partyId', ['partyId', 'pseudoId'])
+                    if (!exact.recordId) {
+                        try {
+                            List partyList = ec.entity.find('mantle.party.PartyDetail').disableAuthz().list()
+                            String wanted = canonical(text)
+                            List<Map> matches = partyList.findAll { ev ->
+                                List<String> candidates = [
+                                        ev.partyId as String,
+                                        ev.pseudoId as String,
+                                        ev.partyFullName as String,
+                                        ev.organizationName as String
+                                ].findAll { it }.collect { canonical(it) }
+                                candidates.contains(wanted)
+                            }.collect { it.getPlainValueMap(0) } as List<Map>
+                            if (matches.size() == 1) exact = makeRecord('partyId', matches[0].partyId, matches[0])
+                        } catch (Throwable ignored) { }
+                    }
+                    if (exact.recordId) {
+                        recordId = exact.recordId
+                        record = exact
+                        success = true
+                        uniqueMatch = true
+                    }
+                    return
+                }
+            ]]></script>
+        </actions>
+    </service>
+
     <service verb="log" noun="ToolExecution" authenticate="true">
         <in-parameters>
             <parameter name="visitId"/>
@@ -21,7 +167,7 @@
             <parameter name="artifactName"/>
             <parameter name="authzActionEnumId"/>
             <parameter name="parameters" type="Map"/>
-            <parameter name="result" type="Map"/>
+            <parameter name="toolResult" type="Map"/>
             <parameter name="success" type="Boolean"/>
             <parameter name="errorMessage"/>
             <parameter name="confirmed" type="Boolean"/>
@@ -38,6 +184,12 @@
                 def effectiveEnd = endDate ?: ec.user.nowTimestamp
                 String parameterLogMode = AgentConfigUtil.getString('moqui.agent.log.parameters', 'masked')
                 String resultLogMode = AgentConfigUtil.getString('moqui.agent.log.results', 'summary')
+                Map sanitizedParameters = AgentToolSupport.sanitizeForLogging(parameters ?: [:], parameterLogMode, false)
+                Map sanitizedResult = AgentToolSupport.sanitizeForLogging(toolResult ?: [:], resultLogMode, 'summary'.equalsIgnoreCase(resultLogMode))
+                Map businessResultSummary = AgentToolSupport.buildBusinessResultSummary(toolResult ?: [:])
+                Object storedResult = 'summary'.equalsIgnoreCase(resultLogMode) ?
+                        (businessResultSummary ?: sanitizedResult) : sanitizedResult
+
                 def logValue = ec.entity.makeValue('moqui.agent.AgentToolExecutionLog')
                 logValue.setSequencedIdPrimary()
                 String logId = logValue.getPrimaryKeys().values().first()
@@ -50,8 +202,8 @@
                         artifactTypeEnumId : artifactTypeEnumId,
                         artifactName : artifactName,
                         authzActionEnumId : authzActionEnumId,
-                        parametersJson : AgentToolSupport.toJson(AgentToolSupport.sanitizeForLogging(parameters ?: [:], parameterLogMode, false)),
-                        resultJson : AgentToolSupport.toJson(AgentToolSupport.sanitizeForLogging(result ?: [:], resultLogMode, 'summary'.equalsIgnoreCase(resultLogMode))),
+                        parametersJson : AgentToolSupport.toJson(sanitizedParameters),
+                        resultJson : AgentToolSupport.toJson(storedResult),
                         success : Boolean.TRUE.equals(success) ? 'Y' : 'N',
                         errorMessage : errorMessage,
                         startDate : effectiveStart,
@@ -67,13 +219,12 @@
                     boolean includeParameters = AgentConfigUtil.getBoolean('moqui.agent.elasticTelemetry.includeParameters', false)
                     boolean includeResults = AgentConfigUtil.getBoolean('moqui.agent.elasticTelemetry.includeResults', false)
                     int maxSummaryLength = AgentConfigUtil.getInt('moqui.agent.elasticTelemetry.maxSummaryLength', 2000, 1)
-                    Map sanitizedParameters = AgentToolSupport.sanitizeForLogging(parameters ?: [:], parameterLogMode, false)
-                    Map sanitizedResult = AgentToolSupport.sanitizeForLogging(result ?: [:], resultLogMode, 'summary'.equalsIgnoreCase(resultLogMode))
                     String parameterSummary = includeParameters ? AgentToolSupport.toJson(sanitizedParameters) : "parameterKeys=" + ((parameters ?: [:]).keySet() as List).join(',')
-                    String resultSummary = includeResults ? AgentToolSupport.toJson(sanitizedResult) : "resultKeys=" + ((result ?: [:]).keySet() as List).join(',')
+                    String resultSummary = includeResults ? AgentToolSupport.toJson(sanitizedResult) :
+                            (businessResultSummary ? AgentToolSupport.toJson(businessResultSummary) : "resultKeys=" + ((toolResult ?: [:]).keySet() as List).join(','))
                     if (parameterSummary?.length() > maxSummaryLength) parameterSummary = parameterSummary.substring(0, maxSummaryLength)
                     if (resultSummary?.length() > maxSummaryLength) resultSummary = resultSummary.substring(0, maxSummaryLength)
-                    Map resultMap = (result instanceof Map) ? (result as Map) : [:]
+                    Map resultMap = (toolResult instanceof Map) ? (toolResult as Map) : [:]
                     try {
                         ec.service.sync().name('org.moqui.agent.AgentTelemetryServices.create#AgentToolExecutionElasticLog')
                             .disableAuthz()
@@ -186,6 +337,44 @@
                 Map directParameters = (parameters instanceof Map) ? (parameters as Map) : [:]
                 Map inferredContextDefaults = [:]
                 String riskLevelEnumId = 'normal'
+                Closure normalizePromptOutcome = {
+                    List<String> normalizedErrors = []
+                    if (serviceResult instanceof Map) {
+                        Object resultErrors = (serviceResult as Map).get('errors')
+                        if (resultErrors instanceof Collection) {
+                            (resultErrors as Collection).each { Object err ->
+                                String text = err != null ? err.toString().trim() : ''
+                                if (text && !normalizedErrors.contains(text)) normalizedErrors.add(text)
+                            }
+                        }
+                        String resultErrorMessage = ((serviceResult as Map).get('errorMessage') ?: '').toString().trim()
+                        if (resultErrorMessage && !normalizedErrors.contains(resultErrorMessage)) normalizedErrors.add(resultErrorMessage)
+                    }
+                    if (errors instanceof Collection) {
+                        (errors as Collection).each { Object err ->
+                            String text = err != null ? err.toString().trim() : ''
+                            if (text && !normalizedErrors.contains(text)) normalizedErrors.add(text)
+                        }
+                    }
+                    if (ec.message.hasError()) {
+                        String facadeErrors = ec.message.errorsString
+                        ec.message.clearErrors()
+                        if (facadeErrors) {
+                            facadeErrors.split(/;\s*/).each { String err ->
+                                String text = err != null ? err.toString().trim() : ''
+                                if (text && !normalizedErrors.contains(text)) normalizedErrors.add(text)
+                            }
+                        }
+                    }
+                    errors = normalizedErrors
+                    success = Boolean.TRUE.equals(success) && normalizedErrors.isEmpty()
+                    if (serviceResult instanceof Map) {
+                        Map normalizedServiceResult = new LinkedHashMap(serviceResult as Map)
+                        normalizedServiceResult.success = Boolean.TRUE.equals(success)
+                        if (normalizedErrors) normalizedServiceResult.errors = normalizedErrors
+                        serviceResult = normalizedServiceResult
+                    }
+                }
                 try {
                     if (!document) {
                         success = false
@@ -534,6 +723,7 @@
                             } catch (Throwable serviceFailure) {
                                 success = false
                                 String failureMessage = serviceFailure.message ?: serviceFailure.toString()
+                                ec.message.clearErrors()
                                 errors.add(failureMessage)
                                 validationHints = buildValidationHints(executedArtifact?.artifactName as String, serviceFailure, document)
                                 serviceResult = [
@@ -744,7 +934,11 @@
                         ]
                     }
                 } finally {
-                    ec.service.sync().name('org.moqui.agent.AgentExecutionServices.log#ToolExecution').parameters([
+                    normalizePromptOutcome()
+                    ec.message.pushErrors()
+                    try {
+                        ec.service.sync().name('org.moqui.agent.AgentExecutionServices.log#ToolExecution')
+                            .requireNewTransaction(true).parameters([
                         visitId : sessionId ?: ec.user.visitId,
                         toolName : 'moqui_execute_agent_prompt',
                         documentId : documentId,
@@ -752,7 +946,7 @@
                         artifactName : executedArtifact?.artifactName,
                         authzActionEnumId : executedArtifact?.authzActionEnumId,
                         parameters : mergedParameters,
-                        result : serviceResult ?: [messages: messages, errors: errors],
+                        toolResult : serviceResult ?: [messages: messages, errors: errors],
                         success : success,
                         errorMessage : errors ? errors.join('; ') : null,
                         confirmed : confirmed,
@@ -760,6 +954,9 @@
                         startDate : startTs,
                         endDate : ec.user.nowTimestamp
                     ]).call()
+                    } finally {
+                        ec.message.popErrors()
+                    }
                 }
             ]]></script>
         </actions>

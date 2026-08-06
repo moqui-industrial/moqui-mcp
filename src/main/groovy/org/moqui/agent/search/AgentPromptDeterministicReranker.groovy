@@ -105,7 +105,6 @@ class AgentPromptDeterministicReranker {
         String domainObject = baseContext.domainObject as String
         String actionKind = baseContext.actionKind as String
         String operationEffect = baseContext.operationEffect as String
-        String currentScreen = baseContext.currentScreen as String
         List currentKeys = ((baseContext.currentBusinessObjectKeys ?: []) as List).findAll { it } as List
         List nonPrimaryChannels = (baseContext.nonPrimaryChannels ?: []) as List
         List hardExcludedChannels = (baseContext.hardExcludedChannels ?: []) as List
@@ -118,7 +117,6 @@ class AgentPromptDeterministicReranker {
         if (domainObject && domainObject == source.domainObject) structuredBoost += 0.10d
         if (actionKind && actionKind == source.actionKind) structuredBoost += 0.08d
         if (operationEffect && operationEffect == source.operationEffect) structuredBoost += 0.08d
-        if (currentScreen && currentScreen == source.sourceScreenPath) structuredBoost += 0.15d
         if (Boolean.TRUE.equals(source.runtimeExecutable)) structuredBoost += hybridMode ? 0.05d : 0.04d
 
         List reqCtx = (source.executionRequiredContext instanceof List) ? source.executionRequiredContext as List : []
@@ -220,7 +218,7 @@ class AgentPromptDeterministicReranker {
             if (!includeNonExecutable && executionChannel == 'unsupported') structuredBoost -= 0.50d
             if (queryProfile.intentType == 'knowledge') {
                 if (knowledgeOnly) structuredBoost += 0.28d
-                if (!knowledgeOnly && documentKind == 'screen_query_prompt') structuredBoost -= 0.14d
+                if (!knowledgeOnly && documentKind == 'screen_query_prompt') structuredBoost -= 0.04d
             } else if (queryProfile.intentType == 'ui_action') {
                 if (knowledgeOnly) structuredBoost -= 0.30d
                 if (!knowledgeOnly) structuredBoost += 0.12d
@@ -234,7 +232,7 @@ class AgentPromptDeterministicReranker {
             }
             if (Boolean.TRUE.equals(queryProfile.workflowIntent)) {
                 if (documentKind == 'test_workflow_story') structuredBoost += 0.20d
-                if (documentKind == 'screen_query_prompt') structuredBoost -= 0.06d
+                if (documentKind == 'screen_query_prompt') structuredBoost -= 0.02d
             }
             if (Boolean.TRUE.equals(queryProfile.configurationIntent)) {
                 if (knowledgeCategory == 'business_configuration') structuredBoost += 0.12d
@@ -274,7 +272,6 @@ class AgentPromptDeterministicReranker {
                 if (candidateDomainPhraseMatch) structuredBoost += 0.08d
                 if (domainBigramMatches > 0) structuredBoost += Math.min(domainBigramMatches * 0.12d, 0.16d)
             }
-            if (readIntent && documentKind == 'screen_query_prompt') structuredBoost += 0.12d
             if (readIntent && ['read_query', 'read_detail', 'navigation'].contains(sourceOperationEffect)) structuredBoost += 0.12d
             if (readIntent && ['create','update','delete','status_transition','batch_update','financial_posting','cancellation'].contains(sourceOperationEffect)) structuredBoost -= 0.20d
             if (mutateIntent && ['create','update','delete','status_transition','batch_update'].contains(sourceOperationEffect)) structuredBoost += 0.12d
@@ -315,7 +312,7 @@ class AgentPromptDeterministicReranker {
             if (!includeNonExecutable && nonPrimaryChannels.contains(executionChannel)) structuredBoost -= 0.35d
             if (queryProfile.intentType == 'knowledge') {
                 if (knowledgeOnly) structuredBoost += 0.24d
-                if (!knowledgeOnly && documentKind == 'screen_query_prompt') structuredBoost -= 0.12d
+                if (!knowledgeOnly && documentKind == 'screen_query_prompt') structuredBoost -= 0.04d
             } else if (queryProfile.intentType == 'ui_action') {
                 if (knowledgeOnly) structuredBoost -= 0.24d
                 else structuredBoost += 0.10d

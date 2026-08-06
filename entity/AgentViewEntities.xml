@@ -13,48 +13,37 @@ along with this software (see the LICENSE.md file). If not, see
 <https://creativecommons.org/publicdomain/zero/1.0/>.
 -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+          xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
 
-    <!--
-        Keep GraphVertex/GraphEdge generic and attach artifact semantics through Parameter.
-        The graph stores topology; Parameter stores flexible metadata keyed by ParameterDef.
-    -->
-    <extend-entity entity-name="Parameter" package="moqui.math" enable-audit-log="update" use="configuration" cache="true" short-alias="parameters">
-        <field name="graphId" type="id"/>
-        <field name="graphVertexId" type="id"/>
-        <field name="graphEdgeId" type="id"/>
-        <field name="textValue" type="text-long"/>
-
-        <relationship type="one" related="moqui.math.Graph" short-alias="graph"/>
-        <relationship type="one" related="moqui.math.GraphVertex" short-alias="graphVertex">
-            <key-map field-name="graphVertexId" related="graphVertexId"/>
-        </relationship>
-        <relationship type="one" related="moqui.math.GraphEdge" short-alias="graphEdge">
-            <key-map field-name="graphEdgeId" related="graphEdgeId"/>
-        </relationship>
-    </extend-entity>
-
-    <extend-entity entity-name="GraphVertex" package="moqui.math">
-        <relationship type="many" title="OutgoingEdge" related="moqui.math.GraphEdge" short-alias="outgoingEdges">
-            <key-map field-name="graphId"/>
-            <key-map field-name="graphVertexId" related="fromVertexId"/>
-        </relationship>
-        <relationship type="many" title="IncomingEdge" related="moqui.math.GraphEdge" short-alias="incomingEdges">
-            <key-map field-name="graphId"/>
-            <key-map field-name="graphVertexId" related="toVertexId"/>
-        </relationship>
-        <relationship type="many" title="GraphParameter" related="moqui.math.Parameter" short-alias="parameters">
-            <key-map field-name="graphId"/>
-            <key-map field-name="graphVertexId"/>
-        </relationship>
-    </extend-entity>
-
-    <extend-entity entity-name="GraphEdge" package="moqui.math">
-        <relationship type="many" title="GraphParameter" related="moqui.math.Parameter" short-alias="parameters">
-            <key-map field-name="graphId"/>
-            <key-map field-name="graphEdgeId"/>
-        </relationship>
-    </extend-entity>
+    <view-entity entity-name="AgentToolExecutionBinReport" package="moqui.agent" cache="never">
+        <member-entity entity-alias="ATEB" entity-name="moqui.agent.AgentToolExecutionBin"/>
+        <alias entity-alias="ATEB" name="toolName"/>
+        <alias entity-alias="ATEB" name="documentKind"/>
+        <alias entity-alias="ATEB" name="area"/>
+        <alias entity-alias="ATEB" name="subArea"/>
+        <alias entity-alias="ATEB" name="domainObject"/>
+        <alias entity-alias="ATEB" name="actionKind"/>
+        <alias entity-alias="ATEB" name="operationEffect"/>
+        <alias entity-alias="ATEB" name="executionChannel"/>
+        <alias entity-alias="ATEB" name="serviceName"/>
+        <alias entity-alias="ATEB" name="searchMode"/>
+        <alias entity-alias="ATEB" name="indexName"/>
+        <alias entity-alias="ATEB" name="executionCount" function="sum"/>
+        <alias entity-alias="ATEB" name="successCount" function="sum"/>
+        <alias entity-alias="ATEB" name="errorCount" function="sum"/>
+        <alias entity-alias="ATEB" name="deniedCount" function="sum"/>
+        <alias entity-alias="ATEB" name="confirmationRequiredCount" function="sum"/>
+        <alias entity-alias="ATEB" name="hybridLlmRerankCount" function="sum"/>
+        <alias entity-alias="ATEB" name="rerankerFallbackCount" function="sum"/>
+        <alias entity-alias="ATEB" name="totalTimeMillis" function="sum"/>
+        <alias entity-alias="ATEB" name="totalSquaredTime" function="sum"/>
+        <alias entity-alias="ATEB" name="minTimeMillis" function="min"/>
+        <alias entity-alias="ATEB" name="maxTimeMillis" function="max"/>
+        <alias entity-alias="ATEB" name="firstBinStartDateTime" field="binStartDateTime" function="min"/>
+        <alias entity-alias="ATEB" name="lastBinEndDateTime" field="binEndDateTime" function="max"/>
+        <alias entity-alias="ATEB" name="binStartDateTime"/>
+        <alias entity-alias="ATEB" name="binEndDateTime"/>
+    </view-entity>
 
     <view-entity entity-name="AgentArtifactVertexMeta" package="moqui.agent.graph">
         <member-entity entity-alias="GV" entity-name="moqui.math.GraphVertex"/>
@@ -142,6 +131,26 @@ along with this software (see the LICENSE.md file). If not, see
             <key-map field-name="graphId"/>
             <key-map field-name="graphVertexId"/>
             <entity-condition><econdition entity-alias="PDO" field-name="parameterDefId" value="AgGraphDomainObjectParam"/></entity-condition>
+        </member-entity>
+        <member-entity entity-alias="PCN" entity-name="moqui.math.Parameter" join-from-alias="GV" join-optional="true">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+            <entity-condition><econdition entity-alias="PCN" field-name="parameterDefId" value="AgGraphComponentNameParam"/></entity-condition>
+        </member-entity>
+        <member-entity entity-alias="PPN" entity-name="moqui.math.Parameter" join-from-alias="GV" join-optional="true">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+            <entity-condition><econdition entity-alias="PPN" field-name="parameterDefId" value="AgGraphPackageNameParam"/></entity-condition>
+        </member-entity>
+        <member-entity entity-alias="PDN" entity-name="moqui.math.Parameter" join-from-alias="GV" join-optional="true">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+            <entity-condition><econdition entity-alias="PDN" field-name="parameterDefId" value="AgGraphDomainNameParam"/></entity-condition>
+        </member-entity>
+        <member-entity entity-alias="PSDN" entity-name="moqui.math.Parameter" join-from-alias="GV" join-optional="true">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+            <entity-condition><econdition entity-alias="PSDN" field-name="parameterDefId" value="AgGraphSubdomainNameParam"/></entity-condition>
         </member-entity>
         <member-entity entity-alias="PSB" entity-name="moqui.math.Parameter" join-from-alias="GV" join-optional="true">
             <key-map field-name="graphId"/>
@@ -268,7 +277,6 @@ along with this software (see the LICENSE.md file). If not, see
             <key-map field-name="graphVertexId"/>
             <entity-condition><econdition entity-alias="PTPD" field-name="parameterDefId" value="AgGraphTarpitDurationParam"/></entity-condition>
         </member-entity>
-
         <alias entity-alias="GV" name="graphId"/>
         <alias entity-alias="GV" name="graphVertexId"/>
         <alias entity-alias="GV" name="label"/>
@@ -290,6 +298,10 @@ along with this software (see the LICENSE.md file). If not, see
         <alias entity-alias="PGC" name="grammarChildren" field="textValue"/>
         <alias entity-alias="PGS" name="grammarSubstitutionGroup" field="textValue"/>
         <alias entity-alias="PDO" name="domainObject" field="textValue"/>
+        <alias entity-alias="PCN" name="componentName" field="textValue"/>
+        <alias entity-alias="PPN" name="packageName" field="textValue"/>
+        <alias entity-alias="PDN" name="domainName" field="textValue"/>
+        <alias entity-alias="PSDN" name="subdomainName" field="textValue"/>
         <alias entity-alias="PSB" name="subject" field="textValue"/>
         <alias entity-alias="POP" name="operation" field="textValue"/>
         <alias entity-alias="PCS" name="calledService" field="textValue"/>
@@ -316,5 +328,4 @@ along with this software (see the LICENSE.md file). If not, see
         <alias entity-alias="PMHD" name="maxHitsDuration" field="textValue"/>
         <alias entity-alias="PTPD" name="tarpitDuration" field="textValue"/>
     </view-entity>
-
 </entities>

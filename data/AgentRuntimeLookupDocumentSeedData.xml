@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- This software is in the public domain under CC0 1.0 Universal plus a
+     Grant of Patent License.
+
+     To the extent possible under law, the author(s) have dedicated all
+     copyright and related and neighboring rights to this software to the
+     public domain worldwide. This software is distributed without any warranty.
+
+     You should have received a copy of the CC0 Public Domain Dedication
+     along with this software (see the LICENSE.md file). If not, see
+     <https://creativecommons.org/publicdomain/zero/1.0/>. -->
+<entity-facade-xml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-facade-3.xsd" type="seed-initial">
+
+    <!--
+        Runtime lookup documents used by moqui-mcp for entity resolution.
+        These fill concrete OpenSearch gaps found during end-to-end prompt tests:
+        - budget_and_time_period
+        - empl_position_class
+        - empl_position
+        - budget_type_lookup
+        - role_type_lookup
+        - status_item_lookup
+        - fiscal_year_time_period
+    -->
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="BudgetAndTimePeriod"
+            documentName="Budget And Time Period"
+            documentTitle="${description ?: budgetId}"
+            primaryEntityName="mantle.other.budget.Budget"
+            indexName="mantle"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="BudgetAndTimePeriod" fieldSeqId="01" fieldPath="budgetId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="BudgetAndTimePeriod" fieldSeqId="02" fieldPath="description"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="BudgetAndTimePeriod" fieldSeqId="03" fieldPath="budgetTypeEnumId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="BudgetAndTimePeriod" fieldSeqId="04" fieldPath="timePeriodId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="BudgetAndTimePeriod" fieldSeqId="05" fieldPath="subTimePeriodTypeId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="BudgetAndTimePeriod" fieldSeqId="06" fieldPath="statusId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="BudgetAndTimePeriod" fieldSeqId="07" fieldPath="currencyUomId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="BudgetAndTimePeriod" fieldSeqId="08" fieldPath="timePeriod:partyId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="BudgetAndTimePeriod" fieldSeqId="09" fieldPath="timePeriod:timePeriodTypeId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="BudgetAndTimePeriod" fieldSeqId="10" fieldPath="timePeriod:periodName"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="BudgetAndTimePeriod" fieldSeqId="11" fieldPath="timePeriod:periodNum"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="BudgetAndTimePeriod" fieldSeqId="12" fieldPath="timePeriod:fromDate"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="BudgetAndTimePeriod" fieldSeqId="13" fieldPath="timePeriod:thruDate"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="BudgetAndTimePeriod" fieldSeqId="14" fieldPath="timePeriod:parentPeriodId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="BudgetAndTimePeriod" fieldSeqId="15" fieldPath="timePeriod:previousPeriodId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="BudgetAndTimePeriod" fieldSeqId="16" fieldPath="(description ? description.toLowerCase() : null)"
+            fieldNameAlias="descriptionNormalized" fieldType="text"/>
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="BudgetTypeLookup"
+            documentName="Budget Type Lookup"
+            documentTitle="${description ?: enumId}"
+            primaryEntityName="moqui.basic.Enumeration"
+            indexName="mantle"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="BudgetTypeLookup" fieldSeqId="01" fieldPath="enumId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="BudgetTypeLookup" fieldSeqId="02" fieldPath="enumTypeId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="BudgetTypeLookup" fieldSeqId="03" fieldPath="description"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="BudgetTypeLookup" fieldSeqId="04" fieldPath="parentEnumId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="BudgetTypeLookup" fieldSeqId="05" fieldPath="(description ? description.toLowerCase() : null)"
+            fieldNameAlias="descriptionNormalized" fieldType="text"/>
+    <moqui.entity.document.DataDocumentCondition dataDocumentId="BudgetTypeLookup" conditionSeqNum="01"
+            fieldNameAlias="enumTypeId" fieldValue="BudgetType"/>
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="RoleTypeLookup"
+            documentName="Role Type Lookup"
+            documentTitle="${description ?: roleTypeId}"
+            primaryEntityName="mantle.party.RoleType"
+            indexName="mantle"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="RoleTypeLookup" fieldSeqId="01" fieldPath="roleTypeId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="RoleTypeLookup" fieldSeqId="02" fieldPath="description"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="RoleTypeLookup" fieldSeqId="03" fieldPath="parentTypeId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="RoleTypeLookup" fieldSeqId="04" fieldPath="(description ? description.toLowerCase() : null)"
+            fieldNameAlias="descriptionNormalized" fieldType="text"/>
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="StatusItemLookup"
+            documentName="Status Item Lookup"
+            documentTitle="${description ?: statusId}"
+            primaryEntityName="moqui.basic.StatusItem"
+            indexName="mantle"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="StatusItemLookup" fieldSeqId="01" fieldPath="statusId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="StatusItemLookup" fieldSeqId="02" fieldPath="statusTypeId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="StatusItemLookup" fieldSeqId="03" fieldPath="description"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="StatusItemLookup" fieldSeqId="04" fieldPath="(description ? description.toLowerCase() : null)"
+            fieldNameAlias="descriptionNormalized" fieldType="text"/>
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="FiscalYearTimePeriod"
+            documentName="Fiscal Year Time Period"
+            documentTitle="${periodName ?: timePeriodId}"
+            primaryEntityName="mantle.party.time.TimePeriod"
+            indexName="mantle"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="FiscalYearTimePeriod" fieldSeqId="01" fieldPath="timePeriodId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="FiscalYearTimePeriod" fieldSeqId="02" fieldPath="partyId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="FiscalYearTimePeriod" fieldSeqId="03" fieldPath="timePeriodTypeId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="FiscalYearTimePeriod" fieldSeqId="04" fieldPath="periodName"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="FiscalYearTimePeriod" fieldSeqId="05" fieldPath="periodNum"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="FiscalYearTimePeriod" fieldSeqId="06" fieldPath="fromDate"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="FiscalYearTimePeriod" fieldSeqId="07" fieldPath="thruDate"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="FiscalYearTimePeriod" fieldSeqId="08" fieldPath="parentPeriodId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="FiscalYearTimePeriod" fieldSeqId="09" fieldPath="previousPeriodId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="FiscalYearTimePeriod" fieldSeqId="10" fieldPath="(periodName ? periodName.toLowerCase() : null)"
+            fieldNameAlias="periodNameNormalized" fieldType="text"/>
+    <moqui.entity.document.DataDocumentCondition dataDocumentId="FiscalYearTimePeriod" conditionSeqNum="01"
+            fieldNameAlias="timePeriodTypeId" fieldValue="FiscalYear"/>
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="EmplPositionClass"
+            documentName="Empl Position Class"
+            documentTitle="${title ?: emplPositionClassId}"
+            primaryEntityName="mantle.humanres.position.EmplPositionClass"
+            indexName="mantle"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="EmplPositionClass" fieldSeqId="01" fieldPath="emplPositionClassId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="EmplPositionClass" fieldSeqId="02" fieldPath="title"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="EmplPositionClass" fieldSeqId="03" fieldPath="description"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="EmplPositionClass" fieldSeqId="04" fieldPath="(title ? title.toLowerCase() : null)"
+            fieldNameAlias="titleNormalized" fieldType="text"/>
+
+    <moqui.entity.document.DataDocument
+            dataDocumentId="EmplPosition"
+            documentName="Empl Position"
+            documentTitle="${description ?: emplPositionId}"
+            primaryEntityName="mantle.humanres.position.EmplPosition"
+            indexName="mantle"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="EmplPosition" fieldSeqId="01" fieldPath="emplPositionId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="EmplPosition" fieldSeqId="02" fieldPath="pseudoId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="EmplPosition" fieldSeqId="03" fieldPath="organizationPartyId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="EmplPosition" fieldSeqId="04" fieldPath="emplPositionClassId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="EmplPosition" fieldSeqId="05" fieldPath="description"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="EmplPosition" fieldSeqId="06" fieldPath="statusId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="EmplPosition" fieldSeqId="07" fieldPath="budgetId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="EmplPosition" fieldSeqId="08" fieldPath="budgetItemSeqId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="EmplPosition" fieldSeqId="09" fieldPath="salaryFlag"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="EmplPosition" fieldSeqId="10" fieldPath="fullTimeFlag"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="EmplPosition" fieldSeqId="11" fieldPath="temporaryFlag"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="EmplPosition" fieldSeqId="12" fieldPath="overtimeFlag"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="EmplPosition" fieldSeqId="13" fieldPath="standardHoursPerWeek"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="EmplPosition" fieldSeqId="14" fieldPath="fromDate"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="EmplPosition" fieldSeqId="15" fieldPath="thruDate"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="EmplPosition" fieldSeqId="16" fieldPath="status:description"
+            fieldNameAlias="status"/>
+
+    <moqui.entity.feed.DataFeed
+            dataFeedId="AgentRuntimeLookupFeed"
+            dataFeedTypeEnumId="DTFDTP_RT_PUSH"
+            indexOnStartEmpty="N"
+            feedName="Agent Runtime Lookup Feed"
+            feedReceiveServiceName="org.moqui.search.SearchServices.index#DataDocuments"
+            feedDeleteServiceName="org.moqui.search.SearchServices.delete#DataDocument"/>
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentRuntimeLookupFeed" dataDocumentId="BudgetAndTimePeriod"/>
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentRuntimeLookupFeed" dataDocumentId="BudgetTypeLookup"/>
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentRuntimeLookupFeed" dataDocumentId="RoleTypeLookup"/>
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentRuntimeLookupFeed" dataDocumentId="StatusItemLookup"/>
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentRuntimeLookupFeed" dataDocumentId="FiscalYearTimePeriod"/>
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentRuntimeLookupFeed" dataDocumentId="EmplPositionClass"/>
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentRuntimeLookupFeed" dataDocumentId="EmplPosition"/>
+
+</entity-facade-xml>

@@ -46,9 +46,16 @@
     <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.update#AgentSessionExternalContext" artifactTypeEnumId="AT_SERVICE"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.find#AgentSessionsForUser" artifactTypeEnumId="AT_SERVICE"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.close#AgentSessionContext" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="mantle\\.other\\.BudgetServices\\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="create#mantle\\.other\\.budget\\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="store#mantle\\.other\\.budget\\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="delete#mantle\\.other\\.budget\\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="mantle\\.ledger\\.LedgerServices\\.find#PartyAcctgPreference" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="mantle\\.party\\.TimeServices\\.get#DescendantPeriods" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y"/>
 
     <moqui.security.ArtifactGroupMember artifactGroupId="McpIndexingServices" artifactName="org.moqui.agent.AgentDocumentServices.add#AgentPromptManualDocumentData" artifactTypeEnumId="AT_SERVICE"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="McpIndexingServices" artifactName="org.moqui.agent.AgentDocumentServices.load#ArtifactGraphChunked" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpIndexingServices" artifactName="org.moqui.agent.AgentDocumentServices.derive#ArtifactDomainGraphs" artifactTypeEnumId="AT_SERVICE"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="McpIndexingServices" artifactName="org.moqui.agent.AgentDocumentServices.reload#ArtifactGraphDocumentDefinitions" artifactTypeEnumId="AT_SERVICE"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="McpIndexingServices" artifactName="org.moqui.agent.AgentDocumentServices.index#ArtifactGraphDataDocuments" artifactTypeEnumId="AT_SERVICE"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentDocumentServices.get#QueryEmbedding" artifactTypeEnumId="AT_SERVICE"/>
@@ -70,7 +77,7 @@
     <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeEntities" artifactName="moqui.agent.AgentSessionContext" artifactTypeEnumId="AT_ENTITY"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeEntities" artifactName="moqui.agent.AgentToolExecutionLog" artifactTypeEnumId="AT_ENTITY"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeEntities" artifactName="moqui.agent.AgentDocumentIndexRun" artifactTypeEnumId="AT_ENTITY"/>
-    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeEntities" artifactName="moqui.rag.ArtifactQueryEmbeddingCache" artifactTypeEnumId="AT_ENTITY"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeEntities" artifactName="moqui.rag.AgentQueryEmbeddingCache" artifactTypeEnumId="AT_ENTITY"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeEntities" artifactName="moqui.security.UserAccount" artifactTypeEnumId="AT_ENTITY"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="McpRestPaths" artifactName="/mcp" artifactTypeEnumId="AT_REST_PATH"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="McpRestPaths" artifactName="/mcp/.*" artifactTypeEnumId="AT_REST_PATH" nameIsPattern="Y"/>

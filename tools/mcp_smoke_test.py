@@ -120,7 +120,7 @@ DEBUG_TOOLS = {
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Run MCP smoke tests against moqui-mcp endpoint")
-    ap.add_argument("--endpoint", required=True, help="MCP endpoint, for example http://localhost:8080/mcp/message")
+    ap.add_argument("--endpoint", required=True, help="MCP endpoint, for example http://localhost:8081/mcp/message")
     ap.add_argument("--session-id", default="smoke-session")
     ap.add_argument("--auth-header", default=None, help="Optional Authorization header value")
     ap.add_argument("--profile", choices=["runtime", "debug"], default="runtime",

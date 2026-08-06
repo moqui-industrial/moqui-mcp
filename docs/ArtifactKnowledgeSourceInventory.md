@@ -12,7 +12,7 @@ Priority order:
 2. Moqui XSD language definitions
 3. seed data and test suites
 4. standard `DataDocument` / `DataFeed` recipes
-5. books and supporting documentation
+5. external reference corpus and supporting documentation
 
 Support sources help with interpretation and naming.
 They do not override live artifact structure.
@@ -42,7 +42,7 @@ Representative entity sources:
 - `moqui-framework/runtime/component/mantle-udm/entity/ShipmentEntities.xml`
 - `moqui-framework/runtime/component/mantle-udm/entity/WorkEffortEntities.xml`
 - `moqui-framework/runtime/component/moqui-mcp/entity/AgentEntities.xml`
-- `moqui-framework/runtime/component/moqui-mcp/entity/AgentAggregatePatternEntities.xml`
+- `moqui-framework/runtime/component/moqui-mcp/entity/AgentEntities.xml`
 - `moqui-framework/runtime/component/moqui-math/entity/MathEntities.xml`
 
 Representative service sources:
@@ -104,7 +104,7 @@ This is intentionally broad and should be refined in the next pass into:
 
 ## Added Support Sources
 
-### Making Apps with Moqui
+### Application Development Guide
 
 Path:
 
@@ -116,13 +116,13 @@ Use for:
 - developer-oriented language grounding
 - examples of artifact composition
 
-### Len Silverstone books
+### External Data Modeling Reference Corpus
 
 Paths:
 
-- `The Data Model Resource Book, Vol. 1 A Library of Universal Data Models for All Enterprises by Len Silverston (z-lib.org).pdf`
-- `The Data Model Resource Book, Vol. 2 A Library of Data Models by Industry Types (Len Silverston) (z-library.sk, 1lib.sk, z-lib.sk).pdf`
-- `The Data Model Resource Book VOLume 3 Universal Patterns for Data Modeling by Silverston, LenAgnew, PaulPaul Agnew (z-lib.org).epub`
+- local volume 1 enterprise data-model reference
+- local volume 2 industry data-model reference
+- local volume 3 universal-pattern reference
 
 Use for:
 
@@ -130,7 +130,7 @@ Use for:
 - aggregate structure classification
 - planner taxonomy and pattern normalization
 
-Volume 3 is especially relevant for:
+The universal-pattern reference is especially relevant for:
 
 - hierarchy patterns
 - recursive structures

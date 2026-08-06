@@ -1,6 +1,6 @@
 # Agent Aggregate Patterns
 
-This note maps the current Moqui aggregate patterns to the universal pattern vocabulary emphasized in `The Data Model Resource Book, Volume 3`.
+This note maps the current Moqui aggregate patterns to the universal pattern vocabulary emphasized in the local universal-pattern reference corpus.
 
 Volume 3 highlights a small set of reusable pattern families, especially:
 
@@ -31,6 +31,14 @@ Current Moqui-oriented canonical patterns:
   Example: `Budget -> BudgetItem -> BudgetItemDetail`
 - `party_specialization`
   Example: `Party -> Person / Organization`
+- `party_role_context`
+  Example: `Party -> PartyRole -> RoleType`
+- `classification_taxonomy`
+  Example: `EnumerationType -> Enumeration -> EnumGroupMember`
+- `status_lifecycle`
+  Example: `StatusType -> StatusItem -> StatusFlow -> StatusFlowTransition`
+- `party_contact_mechanism`
+  Example: `Party -> PartyContactMech -> ContactMech`
 
 These patterns are now seeded in:
 
@@ -40,4 +48,11 @@ These patterns are now seeded in:
 The purpose is to move orchestration knowledge from hardcoded prompt-specific logic toward declarative, queryable metadata aligned with both:
 
 - Moqui entity relationships and keys
-- Silverston-style universal modeling patterns
+- universal modeling patterns from the reference corpus
+
+Most important current gaps closed by the newer patterns:
+
+- chapter 3 contextual roles now map to a concrete `Party / PartyRole / RoleType` structure
+- chapter 5 classification now maps to reusable `Enumeration` taxonomies and groupings
+- chapter 6 status now maps to explicit lifecycle entities instead of only root `statusId` fields
+- chapter 7 contact mechanisms now map to the actual party-contact link model used by Moqui

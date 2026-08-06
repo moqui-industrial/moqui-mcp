@@ -54,6 +54,9 @@
 
     <service verb="add" noun="AgentArtifactManualDocumentData" authenticate="true" transaction-timeout="300">
         <implements service="org.moqui.EntityServices.add#ManualDocumentData"/>
+        <in-parameters>
+            <parameter name="generateEmbedding" type="Boolean" default="false"/>
+        </in-parameters>
         <out-parameters>
             <parameter name="document" type="Map"/>
         </out-parameters>
@@ -278,6 +281,23 @@
                 List<String> fieldNames = [fieldName].findAll { it != null && it.toString().trim() }.collect { it.toString().trim() }
                 List<String> relatedEntities = [entityName, domainObjectValue].findAll { it != null && it.toString().trim() }.collect { it.toString().trim() }.unique()
                 List<String> boundServices = [serviceName, calledServiceValue].findAll { it != null && it.toString().trim() }.collect { it.toString().trim() }.unique()
+                Map patternEvidence = org.moqui.agent.AgentToolSupport.inferPatternEvidence(ec, [
+                        label : artifactLabel,
+                        vertexType : vertexType,
+                        sourceArtifactUri : sourceArtifactUri,
+                        serviceName : serviceName,
+                        serviceNoun : serviceNoun,
+                        entityName : entityName,
+                        domainObject : businessObject,
+                        xmlActionElement : xmlActionElement
+                ])
+                List<String> aggregatePatternIds = (patternEvidence.aggregatePatternIds ?: []) as List<String>
+                List<String> aggregatePatternNames = (patternEvidence.aggregatePatternNames ?: []) as List<String>
+                List<String> aggregatePatternTypes = (patternEvidence.aggregatePatternTypes ?: []) as List<String>
+                List<String> aggregatePatternRoles = (patternEvidence.aggregatePatternRoles ?: []) as List<String>
+                List<String> universalPatternIds = (patternEvidence.universalPatternIds ?: []) as List<String>
+                List<String> universalPatternFamilies = (patternEvidence.universalPatternFamilies ?: []) as List<String>
+                List<String> universalPatternChapters = (patternEvidence.universalPatternChapters ?: []) as List<String>
 
                 switch (docType) {
                     case 'AgentArtifactVertexDocument':
@@ -535,6 +555,13 @@
                         operationValue,
                         calledServiceValue,
                         humanExplanation,
+                        aggregatePatternIds.join(' '),
+                        aggregatePatternNames.join(' | '),
+                        aggregatePatternTypes.join(' '),
+                        aggregatePatternRoles.join(' '),
+                        universalPatternIds.join(' '),
+                        universalPatternFamilies.join(' '),
+                        universalPatternChapters.join(' '),
                         englishPromptVariants,
                         italianPromptVariants,
                         uiLabelsText,
@@ -586,6 +613,14 @@
                 doc.fieldNames = fieldNames
                 doc.relatedEntities = relatedEntities
                 doc.boundServices = boundServices
+                doc.aggregatePatternIds = aggregatePatternIds
+                doc.aggregatePatternNames = aggregatePatternNames
+                doc.aggregatePatternTypes = aggregatePatternTypes
+                doc.aggregatePatternRoles = aggregatePatternRoles
+                doc.universalPatternIds = universalPatternIds
+                doc.universalPatternFamilies = universalPatternFamilies
+                doc.universalPatternChapters = universalPatternChapters
+                doc.patternEvidenceJson = patternEvidence ? groovy.json.JsonOutput.toJson(patternEvidence) : ''
                 doc.sourceScreenPath = screenPath
                 if (doc.parameters) doc.remove('parameters')
                 doc._type = docType
@@ -594,7 +629,8 @@
                 if (!doc._timestamp) doc._timestamp = ec.l10n.format(ec.user.nowTimestamp, "yyyy-MM-dd'T'HH:mm:ss")
 
                 String provider = AgentConfigUtil.getString('moqui.agent.embedding.provider', 'none')
-                if (embeddingText && provider && provider != 'none') {
+                boolean shouldGenerateEmbedding = (generateEmbedding ?: false) as boolean
+                if (shouldGenerateEmbedding && embeddingText && provider && provider != 'none') {
                     try {
                         Map emb = new AgentModelFacade(ec).embed(embeddingText, [
                                 provider: provider,
@@ -665,7 +701,7 @@
                     return
                 }
 
-                def cacheValue = ec.entity.find('moqui.rag.ArtifactQueryEmbeddingCache')
+                def cacheValue = ec.entity.find('moqui.rag.AgentQueryEmbeddingCache')
                         .condition('cacheKey', cacheKey)
                         .one()
                 if (cacheValue?.embeddingJson) {
@@ -688,7 +724,7 @@
                 if (!embedding) return
                 l1EmbeddingCache.put(cacheKey, new ArrayList(embedding))
 
-                def newCacheValue = ec.entity.makeValue('moqui.rag.ArtifactQueryEmbeddingCache')
+                def newCacheValue = ec.entity.makeValue('moqui.rag.AgentQueryEmbeddingCache')
                 newCacheValue.setAll([
                         cacheKey : cacheKey,
                         queryTextNorm : cacheQueryText ? normalizedText : null,
@@ -766,6 +802,7 @@
             This is a runtime-safe fallback when offline Gradle load tasks are temporarily blocked by local temp/journal locks.</description>
         <in-parameters>
             <parameter name="location" required="true"/>
+            <parameter name="dataTypes"/>
             <parameter name="dummyFks" type="Boolean" default="false"/>
             <parameter name="useTryInsert" type="Boolean" default="false"/>
             <parameter name="disableEntityEca" type="Boolean" default="true"/>
@@ -779,7 +816,12 @@
         </out-parameters>
         <actions>
             <script><![CDATA[
+                Set effectiveDataTypes = (dataTypes ?: 'seed-initial,seed,install,demo').toString()
+                        .split(',')
+                        .collect { it?.trim() }
+                        .findAll { it } as Set
                 def edl = ec.entity.makeDataLoader()
+                        .dataTypes(effectiveDataTypes)
                         .dummyFks(dummyFks)
                         .useTryInsert(useTryInsert)
                         .disableEntityEca(disableEntityEca)
@@ -859,6 +901,65 @@
         </actions>
     </service>
 
+    <service verb="clear" noun="RuntimeLookupDocumentDefinitions" authenticate="true" allow-remote="true" transaction-timeout="3600">
+        <description>Delete runtime lookup DataDocument/DataFeed definitions so they can be reloaded in a separate transaction.</description>
+        <actions>
+            <script><![CDATA[
+                List<String> dataDocumentIds = [
+                        'BudgetAndTimePeriod',
+                        'BudgetTypeLookup',
+                        'RoleTypeLookup',
+                        'StatusItemLookup',
+                        'FiscalYearTimePeriod',
+                        'EmplPositionClass',
+                        'EmplPosition'
+                ]
+                String dataFeedId = 'AgentRuntimeLookupFeed'
+
+                ec.entity.find('moqui.entity.feed.DataFeedDocument')
+                        .condition('dataFeedId', dataFeedId)
+                        .deleteAll()
+                ec.entity.find('moqui.entity.feed.DataFeed')
+                        .condition('dataFeedId', dataFeedId)
+                        .deleteAll()
+
+                dataDocumentIds.each { String dataDocumentId ->
+                    ec.entity.find('moqui.entity.document.DataDocumentField')
+                            .condition('dataDocumentId', dataDocumentId)
+                            .deleteAll()
+                    ec.entity.find('moqui.entity.document.DataDocumentRelAlias')
+                            .condition('dataDocumentId', dataDocumentId)
+                            .deleteAll()
+                    ec.entity.find('moqui.entity.document.DataDocumentCondition')
+                            .condition('dataDocumentId', dataDocumentId)
+                            .deleteAll()
+                    ec.entity.find('moqui.entity.document.DataDocumentLink')
+                            .condition('dataDocumentId', dataDocumentId)
+                            .deleteAll()
+                    ec.entity.find('moqui.entity.document.DataDocumentUserGroup')
+                            .condition('dataDocumentId', dataDocumentId)
+                            .deleteAll()
+                    ec.entity.find('moqui.entity.document.DataDocument')
+                            .condition('dataDocumentId', dataDocumentId)
+                            .deleteAll()
+                }
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="reload" noun="RuntimeLookupDocumentDefinitions" authenticate="true" allow-remote="true" transaction-timeout="3600">
+        <description>Delete and reload runtime lookup DataDocument/DataFeed definitions so lookup index metadata stays in sync.</description>
+        <out-parameters>
+            <parameter name="recordsLoaded" type="Long"/>
+        </out-parameters>
+        <actions>
+            <service-call name="org.moqui.agent.AgentDocumentServices.clear#RuntimeLookupDocumentDefinitions"/>
+            <service-call name="org.moqui.agent.AgentDocumentServices.load#AgentComponentDataFile"
+                    in-map="[location:'component://moqui-mcp/data/AgentRuntimeLookupDocumentSeedData.xml']"
+                    out-map="context"/>
+        </actions>
+    </service>
+
     <service verb="index" noun="ArtifactGraphDataDocuments" authenticate="true" allow-remote="true" transaction-timeout="3600">
         <description>Remote-safe wrapper around standard DataFeed indexing for artifact graph DataDocuments.</description>
         <in-parameters>
@@ -868,6 +969,7 @@
             <parameter name="batchSize" type="Integer" default="1000"/>
             <parameter name="clusterName" default-value="default"/>
             <parameter name="graphId" default="AgentArtifactGraph"/>
+            <parameter name="includeEmbedding" type="Boolean" default="true"/>
         </in-parameters>
         <out-parameters>
             <parameter name="documentsIndexed" type="Integer"/>
@@ -875,7 +977,7 @@
         <actions>
             <if condition="dataDocumentId">
                 <service-call name="org.moqui.agent.AgentDocumentServices.get#ArtifactGraphMaterializedDocuments"
-                        in-map="[dataDocumentId:dataDocumentId, graphId:graphId, limit:batchSize]"
+                        in-map="[dataDocumentId:dataDocumentId, graphId:graphId, limit:batchSize, includeEmbedding:includeEmbedding]"
                         out-map="context"/>
                 <set field="documentsIndexed" from="documentCount ?: 0"/>
                 <if condition="documentList">
@@ -903,7 +1005,7 @@
             ]"/>
             <iterate list="artifactDocIds" entry="artifactDocId">
                 <service-call name="org.moqui.agent.AgentDocumentServices.get#ArtifactGraphMaterializedDocuments"
-                        in-map="[dataDocumentId:artifactDocId, graphId:graphId, limit:batchSize]"
+                        in-map="[dataDocumentId:artifactDocId, graphId:graphId, limit:batchSize, includeEmbedding:includeEmbedding]"
                         out-map="getDocResult"/>
                 <if condition="getDocResult.documentList">
                     <service-call name="org.moqui.search.SearchServices.index#DataDocuments"
@@ -914,6 +1016,32 @@
         </actions>
     </service>
 
+    <service verb="index" noun="RuntimeLookupDataDocuments" authenticate="true" allow-remote="true" transaction-timeout="3600">
+        <description>Remote-safe wrapper around standard DataFeed indexing for runtime lookup DataDocuments.</description>
+        <in-parameters>
+            <parameter name="dataDocumentId"/>
+            <parameter name="fromUpdateStamp" type="Timestamp"/>
+            <parameter name="thruUpdateStamp" type="Timestamp"/>
+            <parameter name="batchSize" type="Integer" default="1000"/>
+            <parameter name="clusterName" default-value="default"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="documentsIndexed" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <service-call name="org.moqui.search.SearchServices.index#DataFeedDocuments"
+                    in-map="[
+                            dataFeedId:'AgentRuntimeLookupFeed',
+                            dataDocumentId:dataDocumentId,
+                            fromUpdateStamp:fromUpdateStamp,
+                            thruUpdateStamp:thruUpdateStamp,
+                            batchSize:batchSize,
+                            clusterName:clusterName
+                    ]"
+                    out-map="context"/>
+        </actions>
+    </service>
+
     <service verb="get" noun="ArtifactGraphMaterializedDocuments" authenticate="true" allow-remote="true" transaction-timeout="3600">
         <description>Materialize graph-backed artifact documents directly from the authoritative Graph view-entity using DataDocument metadata.</description>
         <in-parameters>
@@ -921,6 +1049,7 @@
             <parameter name="graphId" default="AgentArtifactGraph"/>
             <parameter name="graphVertexId"/>
             <parameter name="limit" type="Integer" default="100"/>
+            <parameter name="includeEmbedding" type="Boolean" default="false"/>
         </in-parameters>
         <out-parameters>
             <parameter name="documentList" type="List"/>
@@ -995,7 +1124,7 @@
                     Map baseDoc = new LinkedHashMap(row.getPlainValueMap(0))
                     if (manualDataServiceName) {
                         Map result = ec.service.sync().name(manualDataServiceName)
-                                .parameters([dataDocumentId: dataDocumentId, document: baseDoc])
+                                .parameters([dataDocumentId: dataDocumentId, document: baseDoc, generateEmbedding: includeEmbedding])
                                 .call()
                         Map materialized = (result?.document instanceof Map) ? (Map) result.document : baseDoc
                         documentList.add(new LinkedHashMap(materialized))
@@ -1016,6 +1145,7 @@
             <parameter name="graphId" default="AgentArtifactGraph"/>
             <parameter name="graphVertexId"/>
             <parameter name="skipDocumentCondition" type="Boolean"/>
+            <parameter name="includeEmbedding" type="Boolean" default="false"/>
         </in-parameters>
         <out-parameters>
             <parameter name="documentList" type="List"/>
@@ -1026,7 +1156,7 @@
         </out-parameters>
         <actions>
             <service-call name="org.moqui.agent.AgentDocumentServices.get#ArtifactGraphMaterializedDocuments"
-                    in-map="[dataDocumentId:dataDocumentId, graphId:graphId, graphVertexId:graphVertexId, limit:limit]"
+                    in-map="[dataDocumentId:dataDocumentId, graphId:graphId, graphVertexId:graphVertexId, limit:limit, includeEmbedding:includeEmbedding]"
                     out-map="context"/>
         </actions>
     </service>
@@ -1920,6 +2050,551 @@
                     }
                     if (suspendedTransaction) ec.transaction.resume()
                 }
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="derive" noun="ArtifactDomainGraphs" authenticate="true" allow-remote="true" transaction-timeout="3600">
+        <description>Derive DDD-style domain and subdomain graphs from the canonical artifact graph without introducing parallel entity families.</description>
+        <in-parameters>
+            <parameter name="graphId" default="AgentArtifactGraph"/>
+            <parameter name="clearExisting" type="Boolean"/>
+            <parameter name="includeSubdomains" type="Boolean"/>
+            <parameter name="classifySourceVertices" type="Boolean"/>
+            <parameter name="graphTypeEnumId" default="GtDirectedMulti"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="domainGraphCount" type="Integer"/>
+            <parameter name="subdomainGraphCount" type="Integer"/>
+            <parameter name="copiedVertexCount" type="Integer"/>
+            <parameter name="copiedEdgeCount" type="Integer"/>
+            <parameter name="classifiedSourceVertexCount" type="Integer"/>
+            <parameter name="crossDomainEdgeCount" type="Integer"/>
+            <parameter name="graphSummary" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import groovy.json.JsonOutput
+                import java.security.MessageDigest
+
+                String sourceGraphId = (graphId ?: 'AgentArtifactGraph').toString()
+                boolean shouldClearExisting = (clearExisting == null) ? true : Boolean.TRUE.equals(clearExisting)
+                boolean shouldIncludeSubdomains = (includeSubdomains == null) ? true : Boolean.TRUE.equals(includeSubdomains)
+                boolean shouldClassifySourceVertices = (classifySourceVertices == null) ? true : Boolean.TRUE.equals(classifySourceVertices)
+                String derivedGraphTypeEnumId = (graphTypeEnumId ?: 'GtDirectedMulti').toString()
+                String derivedGraphPrefix = "AgDer"
+                int copiedVertexCounter = 0
+                int copiedEdgeCounter = 0
+                int classifiedSourceVertexCounter = 0
+                int crossDomainEdgeCounter = 0
+
+                Closure<String> sha1 = { String text ->
+                    MessageDigest.getInstance('SHA-1').digest((text ?: '').getBytes('UTF-8')).encodeHex().toString()
+                }
+                Closure<String> normalizeToken = { Object rawValue ->
+                    String text = (rawValue ?: '').toString().trim()
+                    if (!text) return ''
+                    text = text.replaceAll(/([a-z0-9])([A-Z])/, '$1 $2')
+                    text = text.replaceAll(/[^A-Za-z0-9]+/, ' ')
+                    List<String> parts = text.tokenize(' ')
+                    if (!parts) return ''
+                    String normalized = parts.collect { String part ->
+                        if (!part) return ''
+                        part.substring(0, 1).toUpperCase() + (part.length() > 1 ? part.substring(1) : '')
+                    }.join('')
+                    if (normalized && Character.isDigit(normalized.charAt(0))) normalized = 'N' + normalized
+                    return normalized
+                }
+                Closure<String> compactGraphId = { String graphRole, String domainNameValue, String subdomainNameValue ->
+                    String rolePrefix = graphRole == 'subdomain' ? 'AgSub' : 'AgDom'
+                    String domainToken = normalizeToken.call(domainNameValue)
+                    if (domainToken.length() > 10) domainToken = domainToken.substring(0, 10)
+                    String subdomainToken = normalizeToken.call(subdomainNameValue)
+                    if (subdomainToken.length() > 8) subdomainToken = subdomainToken.substring(0, 8)
+                    String hashSource = [sourceGraphId, graphRole, domainNameValue ?: '', subdomainNameValue ?: ''].join('|')
+                    String hashSuffix = sha1(hashSource).substring(0, 12)
+                    String compactId = [rolePrefix, domainToken, subdomainToken, hashSuffix].findAll { it }.join('_')
+                    if (compactId.length() > 40) compactId = "${rolePrefix}_${hashSuffix}"
+                    return compactId
+                }
+                Closure<String> simpleName = { Object rawValue ->
+                    String text = (rawValue ?: '').toString().trim()
+                    if (!text) return ''
+                    if (text.contains('#')) text = text.substring(text.lastIndexOf('#') + 1)
+                    if (text.contains('.')) text = text.tokenize('.').last()
+                    return text
+                }
+                Closure<String> fitShortText = { Object rawValue, int maxLength ->
+                    String text = (rawValue ?: '').toString()
+                    if (!text) return ''
+                    return text.length() > maxLength ? text.substring(0, maxLength) : text
+                }
+                Closure<String> extractComponentName = { String sourceArtifactUri ->
+                    String uri = (sourceArtifactUri ?: '').toString()
+                    if (!uri) return ''
+                    if (uri.startsWith('component://')) return uri.substring('component://'.length()).tokenize('/')[0]
+                    int runtimeIdx = uri.indexOf('/runtime/component/')
+                    if (runtimeIdx >= 0) {
+                        String rest = uri.substring(runtimeIdx + '/runtime/component/'.length())
+                        return rest.tokenize('/')[0]
+                    }
+                    if (uri.contains('/framework/')) return 'framework'
+                    return ''
+                }
+                Closure<String> extractPackageName = { Map row ->
+                    String entityNameValue = (row.entityName ?: '').toString()
+                    if (entityNameValue.contains('.')) return entityNameValue.substring(0, entityNameValue.lastIndexOf('.'))
+                    String serviceNameValue = (row.serviceName ?: '').toString()
+                    if (serviceNameValue) {
+                        String beforeHash = serviceNameValue.contains('#') ? serviceNameValue.substring(0, serviceNameValue.indexOf('#')) : serviceNameValue
+                        String afterHash = serviceNameValue.contains('#') ? serviceNameValue.substring(serviceNameValue.indexOf('#') + 1) : ''
+                        if (beforeHash.contains('.')) return beforeHash.substring(0, beforeHash.lastIndexOf('.'))
+                        if (afterHash.contains('.')) return afterHash.substring(0, afterHash.lastIndexOf('.'))
+                    }
+                    String sourceArtifactUri = (row.sourceArtifactUri ?: '').toString()
+                    if (sourceArtifactUri.contains('/service/')) {
+                        String rest = sourceArtifactUri.substring(sourceArtifactUri.indexOf('/service/') + '/service/'.length())
+                        List<String> parts = rest.tokenize('/')
+                        if (parts.size() > 1) return parts[0..-2].join('.')
+                    }
+                    if (sourceArtifactUri.contains('/entity/')) {
+                        String rest = sourceArtifactUri.substring(sourceArtifactUri.indexOf('/entity/') + '/entity/'.length())
+                        List<String> parts = rest.tokenize('/')
+                        if (parts.size() > 1) return parts[0..-2].join('.')
+                    }
+                    String componentNameValue = extractComponentName(sourceArtifactUri)
+                    return componentNameValue ? "component.${componentNameValue}" : ''
+                }
+                Closure<String> extractScreenArea = { Map row ->
+                    String screenPathValue = (row.screenPath ?: '').toString()
+                    if (screenPathValue) {
+                        List<String> seg = screenPathValue.tokenize('/')
+                        if (seg && seg[0] == 'SimpleScreens' && seg.size() > 1) return seg[1]
+                        if (seg) return seg[0]
+                    }
+                    String sourceArtifactUri = (row.sourceArtifactUri ?: '').toString()
+                    def matcher = sourceArtifactUri =~ /\/screen\/(?:SimpleScreens\/)?([^\/]+)\/([^\/]+)\/[^\/]+\.xml$/
+                    if (matcher.find()) return matcher.group(1)
+                    return ''
+                }
+                Closure<String> extractScreenSubArea = { Map row ->
+                    String screenPathValue = (row.screenPath ?: '').toString()
+                    if (screenPathValue) {
+                        List<String> seg = screenPathValue.tokenize('/')
+                        if (seg && seg[0] == 'SimpleScreens' && seg.size() > 2) return seg[2]
+                        if (seg.size() > 1) return seg[1]
+                    }
+                    String sourceArtifactUri = (row.sourceArtifactUri ?: '').toString()
+                    def matcher = sourceArtifactUri =~ /\/screen\/(?:SimpleScreens\/)?([^\/]+)\/([^\/]+)\/[^\/]+\.xml$/
+                    if (matcher.find()) return matcher.group(2)
+                    return ''
+                }
+                Closure<String> mapPackageToDomain = { String packageNameValue ->
+                    String pkg = (packageNameValue ?: '').toLowerCase()
+                    if (!pkg) return ''
+                    if (pkg.contains('mantle.order')) return 'Order'
+                    if (pkg.contains('mantle.party')) return 'Party'
+                    if (pkg.contains('mantle.product')) return 'Product'
+                    if (pkg.contains('mantle.work')) return 'WorkEffort'
+                    if (pkg.contains('mantle.request')) return 'Request'
+                    if (pkg.contains('mantle.shipment')) return 'Shipment'
+                    if (pkg.contains('mantle.facility')) return 'Facility'
+                    if (pkg.contains('mantle.content')) return 'Content'
+                    if (pkg.contains('mantle.account') || pkg.contains('mantle.ledger')) return 'Accounting'
+                    if (pkg.contains('mantle.other.budget')) return 'Budget'
+                    if (pkg.contains('mantle.other')) return 'Other'
+                    if (pkg.contains('org.moqui.agent') || pkg.contains('moqui.agent')) return 'Agent'
+                    if (pkg.contains('moqui.security')) return 'Security'
+                    if (pkg.contains('moqui.entity')) return 'Entity'
+                    if (pkg.contains('moqui.service')) return 'Service'
+                    return ''
+                }
+                Closure<String> normalizeFileStem = { String sourceArtifactUri ->
+                    String uri = (sourceArtifactUri ?: '').toString()
+                    if (!uri) return ''
+                    String name = uri.tokenize('/').last()
+                    if (name.endsWith('.xml')) name = name.substring(0, name.length() - 4)
+                    name = name.replaceAll(/(Services|Entities|Screens|Screen|Forms|Transitions)$/, '')
+                    normalizeToken(name)
+                }
+                Closure<String> deriveDomainName = { Map row ->
+                    String screenArea = normalizeToken(extractScreenArea(row))
+                    if (screenArea) return screenArea
+                    String mappedPackageDomain = normalizeToken(mapPackageToDomain(extractPackageName(row)))
+                    if (mappedPackageDomain) return mappedPackageDomain
+                    String domainObjectValue = normalizeToken(row.domainObject)
+                    if (domainObjectValue) return domainObjectValue
+                    String entitySimple = normalizeToken(simpleName(row.entityName))
+                    if (entitySimple) return entitySimple
+                    String serviceNounValue = normalizeToken(row.serviceNoun)
+                    if (serviceNounValue) return serviceNounValue
+                    String fileStem = normalizeFileStem((row.sourceArtifactUri ?: '').toString())
+                    if (fileStem) return fileStem
+                    String componentNameValue = normalizeToken(extractComponentName((row.sourceArtifactUri ?: '').toString()))
+                    if (componentNameValue) return componentNameValue
+                    return 'Unclassified'
+                }
+                Closure<String> deriveSubdomainName = { Map row, String domainNameValue ->
+                    String screenSubArea = normalizeToken(extractScreenSubArea(row))
+                    if (screenSubArea && screenSubArea != domainNameValue) return screenSubArea
+                    String domainObjectValue = normalizeToken(row.domainObject)
+                    if (domainObjectValue && domainObjectValue != domainNameValue) return domainObjectValue
+                    String serviceNounValue = normalizeToken(row.serviceNoun)
+                    if (serviceNounValue && serviceNounValue != domainNameValue) return serviceNounValue
+                    String entitySimple = normalizeToken(simpleName(row.entityName))
+                    if (entitySimple && entitySimple != domainNameValue) return entitySimple
+                    String fileStem = normalizeFileStem((row.sourceArtifactUri ?: '').toString())
+                    if (fileStem && fileStem != domainNameValue) return fileStem
+                    return ''
+                }
+
+                Map<String, String> vertexParameterDefByKey = [
+                        vertexType : 'AgGraphVertexTypeParam',
+                        sourceVertexId : 'AgGraphSourceVertexIdParam',
+                        sourceArtifactUri : 'AgGraphSourceArtifactUriParam',
+                        artifactKind : 'AgGraphArtifactKindParam',
+                        screenPath : 'AgGraphScreenPathParam',
+                        serviceName : 'AgGraphServiceNameParam',
+                        serviceVerb : 'AgGraphServiceVerbParam',
+                        serviceNoun : 'AgGraphServiceNounParam',
+                        entityName : 'AgGraphEntityNameParam',
+                        fieldName : 'AgGraphFieldNameParam',
+                        documentType : 'AgGraphDocumentTypeParam',
+                        xmlActionElement : 'AgGraphXmlActionElementParam',
+                        statementClass : 'AgGraphStatementClassParam',
+                        grammarAttributes : 'AgGraphGrammarAttributesParam',
+                        grammarChildren : 'AgGraphGrammarChildrenParam',
+                        grammarSubstitutionGroup : 'AgGraphGrammarSubstitutionGroupParam',
+                        domainObject : 'AgGraphDomainObjectParam',
+                        componentName : 'AgGraphComponentNameParam',
+                        packageName : 'AgGraphPackageNameParam',
+                        domainName : 'AgGraphDomainNameParam',
+                        subdomainName : 'AgGraphSubdomainNameParam',
+                        subject : 'AgGraphSubjectParam',
+                        operation : 'AgGraphOperationParam',
+                        calledService : 'AgGraphCalledServiceParam',
+                        parameterRole : 'AgGraphParameterRoleParam',
+                        securityArtifactName : 'AgGraphSecurityArtifactNameParam',
+                        securityArtifactTypeEnumId : 'AgGraphSecurityArtifactTypeParam',
+                        artifactGroupId : 'AgGraphArtifactGroupIdParam',
+                        artifactGroupDescription : 'AgGraphArtifactGroupDescriptionParam',
+                        artifactAuthzId : 'AgGraphArtifactAuthzIdParam',
+                        userGroupId : 'AgGraphUserGroupIdParam',
+                        authzTypeEnumId : 'AgGraphAuthzTypeEnumIdParam',
+                        authzActionEnumId : 'AgGraphAuthzActionEnumIdParam',
+                        authzServiceName : 'AgGraphAuthzServiceNameParam',
+                        entityFilterSetId : 'AgGraphEntityFilterSetIdParam',
+                        entityFilterId : 'AgGraphEntityFilterIdParam',
+                        comparisonEnumId : 'AgGraphComparisonEnumIdParam',
+                        applyCond : 'AgGraphApplyCondParam',
+                        nameIsPattern : 'AgGraphNameIsPatternParam',
+                        inheritAuthz : 'AgGraphInheritAuthzParam',
+                        filterMap : 'AgGraphFilterMapParam',
+                        allowMissingAlias : 'AgGraphAllowMissingAliasParam',
+                        joinOr : 'AgGraphJoinOrParam',
+                        maxHitsCount : 'AgGraphMaxHitsCountParam',
+                        maxHitsDuration : 'AgGraphMaxHitsDurationParam',
+                        tarpitDuration : 'AgGraphTarpitDurationParam'
+                ]
+
+                Closure<String> makeParameterId = { String effectiveGraphId, String parameterDefId, String graphVertexId, String graphEdgeId ->
+                    sha1("${effectiveGraphId}|${graphVertexId ?: ''}|${graphEdgeId ?: ''}|${parameterDefId}")
+                }
+                Closure<Void> storeParameter = { String effectiveGraphId, String parameterDefId, Object rawValue, String graphVertexId, String graphEdgeId, int sequenceNum ->
+                    String textValue = (rawValue ?: '').toString()
+                    if (!textValue) return
+                    String parameterId = makeParameterId(effectiveGraphId, parameterDefId, graphVertexId, graphEdgeId)
+                    def parameterValue = ec.entity.find('moqui.math.Parameter').condition('parameterId', parameterId).one()
+                    boolean newParameter = parameterValue == null
+                    if (parameterValue) parameterValue = parameterValue.cloneValue()
+                    if (!parameterValue) {
+                        parameterValue = ec.entity.makeValue('moqui.math.Parameter')
+                        parameterValue.parameterId = parameterId
+                    }
+                    parameterValue.graphId = effectiveGraphId
+                    parameterValue.graphVertexId = graphVertexId
+                    parameterValue.graphEdgeId = graphEdgeId
+                    parameterValue.parameterDefId = parameterDefId
+                    parameterValue.sequenceNum = sequenceNum
+                    parameterValue.symbolicValue = textValue.length() <= 63 ? textValue : textValue.substring(0, 63)
+                    parameterValue.textValue = textValue
+                    if (newParameter) parameterValue.create() else parameterValue.update()
+                }
+                Closure<Void> ensureGraph = { String targetGraphId, String parentGraphId, String graphNameValue, String graphDescriptionValue, Map graphTopology ->
+                    def graphValue = ec.entity.find('moqui.math.Graph').condition('graphId', targetGraphId).one()
+                    boolean newGraph = graphValue == null
+                    if (graphValue) graphValue = graphValue.cloneValue()
+                    if (!graphValue) {
+                        graphValue = ec.entity.makeValue('moqui.math.Graph')
+                        graphValue.graphId = targetGraphId
+                    }
+                    graphValue.parentGraphId = parentGraphId
+                    graphValue.graphTypeEnumId = derivedGraphTypeEnumId
+                    graphValue.name = normalizeSizedText(graphNameValue, 63)
+                    graphValue.description = graphDescriptionValue
+                    graphValue.loopsAllowed = 'N'
+                    graphValue.isWeighted = 'N'
+                    graphValue.topology = JsonOutput.toJson(graphTopology ?: [:])
+                    if (newGraph) graphValue.create() else graphValue.update()
+                }
+
+                if (shouldClearExisting) {
+                    List<String> existingDomainGraphIds = ec.entity.find('moqui.math.Graph')
+                            .condition('parentGraphId', sourceGraphId)
+                            .list()
+                            .collect { it.graphId as String }
+                    List<String> existingSubdomainGraphIds = existingDomainGraphIds ?
+                            ec.entity.find('moqui.math.Graph')
+                                    .condition('parentGraphId', 'in', existingDomainGraphIds)
+                                    .list()
+                                    .collect { it.graphId as String } : []
+                    List<String> derivedGraphIdsToDelete = []
+                    derivedGraphIdsToDelete.addAll(existingSubdomainGraphIds)
+                    derivedGraphIdsToDelete.addAll(existingDomainGraphIds)
+                    if (derivedGraphIdsToDelete) {
+                        ec.entity.find('moqui.math.Parameter').condition('graphId', 'in', derivedGraphIdsToDelete).deleteAll()
+                        ec.entity.find('moqui.math.GraphEdge').condition('graphId', 'in', derivedGraphIdsToDelete).deleteAll()
+                        ec.entity.find('moqui.math.GraphVertex').condition('graphId', 'in', derivedGraphIdsToDelete).deleteAll()
+                        ec.entity.find('moqui.math.GraphContent').condition('graphId', 'in', derivedGraphIdsToDelete).deleteAll()
+                        ec.entity.find('moqui.math.Graph').condition('graphId', 'in', derivedGraphIdsToDelete).deleteAll()
+                    }
+                    if (shouldClassifySourceVertices) {
+                        ['AgGraphComponentNameParam', 'AgGraphPackageNameParam', 'AgGraphDomainNameParam', 'AgGraphSubdomainNameParam'].each { String parameterDefId ->
+                            ec.entity.find('moqui.math.Parameter')
+                                    .condition('graphId', sourceGraphId)
+                                    .condition('parameterDefId', parameterDefId)
+                                    .deleteAll()
+                        }
+                    }
+                }
+
+                List<Map> sourceVertexMetaList = ec.entity.find('moqui.agent.graph.AgentArtifactVertexMeta')
+                        .condition('graphId', sourceGraphId)
+                        .list()
+                        .collect { it.getPlainValueMap(0) }
+                if (!sourceVertexMetaList) throw new IllegalArgumentException("No graph-backed artifact vertices found for graphId=${sourceGraphId}")
+
+                Map<String, Map> sourceVertexInfoById = [:]
+                Map<String, Map> graphDescriptorById = [:]
+                Map<String, Map<String, String>> targetVertexIdByGraphId = [:].withDefault { [:] }
+                Map<String, Map<String, Integer>> degreeByGraphId = [:].withDefault { [:].withDefault { 0 } }
+                Map<String, Integer> edgeCountByGraphId = [:].withDefault { 0 }
+                Map<String, Set<String>> componentSetByGraphId = [:].withDefault { [] as Set<String> }
+                Map<String, Set<String>> packageSetByGraphId = [:].withDefault { [] as Set<String> }
+                Map<String, Set<String>> crossDomainTargetsByDomain = [:].withDefault { [] as Set<String> }
+
+                Closure<String> copyVertexToGraph = { String targetGraphId, Map sourceVertexInfo ->
+                    String sourceVertexId = sourceVertexInfo.graphVertexId as String
+                    String targetVertexId = targetVertexIdByGraphId[targetGraphId][sourceVertexId]
+                    if (targetVertexId) return targetVertexId
+                    Map descriptor = graphDescriptorById[targetGraphId] ?: [:]
+                    ensureGraph(targetGraphId,
+                            descriptor.parentGraphId as String,
+                            (descriptor.name ?: targetGraphId) as String,
+                            (descriptor.description ?: "Derived graph ${targetGraphId}") as String,
+                            [:])
+                    targetVertexId = sha1("${targetGraphId}|${sourceVertexId}")
+                    def targetVertex = ec.entity.find('moqui.math.GraphVertex').condition('graphVertexId', targetVertexId).one()
+                    boolean newVertex = targetVertex == null
+                    if (targetVertex) targetVertex = targetVertex.cloneValue()
+                    if (!targetVertex) {
+                        targetVertex = ec.entity.makeValue('moqui.math.GraphVertex')
+                        targetVertex.graphVertexId = targetVertexId
+                    }
+                    targetVertex.graphId = targetGraphId
+                    targetVertex.label = normalizeSizedText((sourceVertexInfo.label ?: sourceVertexId) as String, 63)
+                    targetVertex.degree = 0
+                    targetVertex.isCutVertex = 'N'
+                    targetVertex.notBelongToEdge = 'Y'
+                    if (newVertex) targetVertex.create() else targetVertex.update()
+
+                    int parameterSequence = 1
+                    vertexParameterDefByKey.each { String metadataKey, String parameterDefId ->
+                        storeParameter(targetGraphId, parameterDefId, sourceVertexInfo[metadataKey], targetVertexId, null, parameterSequence)
+                        parameterSequence++
+                    }
+                    targetVertexIdByGraphId[targetGraphId][sourceVertexId] = targetVertexId
+                    if (sourceVertexInfo.componentName) componentSetByGraphId[targetGraphId].add(sourceVertexInfo.componentName as String)
+                    if (sourceVertexInfo.packageName) packageSetByGraphId[targetGraphId].add(sourceVertexInfo.packageName as String)
+                    copiedVertexCounter++
+                    return targetVertexId
+                }
+
+                sourceVertexMetaList.each { Map row ->
+                    String sourceVertexId = (row.graphVertexId ?: '').toString()
+                    if (!sourceVertexId) return
+                    String componentNameValue = extractComponentName((row.sourceArtifactUri ?: '').toString())
+                    String packageNameValue = extractPackageName(row)
+                    String domainNameValue = deriveDomainName(row)
+                    String subdomainNameValue = deriveSubdomainName(row, domainNameValue)
+
+                    Map classifiedVertexInfo = new LinkedHashMap(row)
+                    classifiedVertexInfo.componentName = componentNameValue
+                    classifiedVertexInfo.packageName = packageNameValue
+                    classifiedVertexInfo.domainName = domainNameValue
+                    classifiedVertexInfo.subdomainName = subdomainNameValue
+                    sourceVertexInfoById[sourceVertexId] = classifiedVertexInfo
+
+                    if (shouldClassifySourceVertices) {
+                        storeParameter(sourceGraphId, 'AgGraphComponentNameParam', componentNameValue, sourceVertexId, null, 200)
+                        storeParameter(sourceGraphId, 'AgGraphPackageNameParam', packageNameValue, sourceVertexId, null, 201)
+                        storeParameter(sourceGraphId, 'AgGraphDomainNameParam', domainNameValue, sourceVertexId, null, 202)
+                        storeParameter(sourceGraphId, 'AgGraphSubdomainNameParam', subdomainNameValue, sourceVertexId, null, 203)
+                        classifiedSourceVertexCounter++
+                    }
+
+                    String domainGraphId = compactGraphId('domain', domainNameValue, null)
+                    String subdomainGraphId = subdomainNameValue ? compactGraphId('subdomain', domainNameValue, subdomainNameValue) : null
+
+                    graphDescriptorById[domainGraphId] = [
+                            parentGraphId : sourceGraphId,
+                            name : "${domainNameValue} Domain Graph",
+                            description : "Derived domain graph for ${domainNameValue} materialized from ${sourceGraphId}.",
+                            graphRole : 'domain',
+                            domainName : domainNameValue,
+                            subdomainName : null
+                    ]
+                    copyVertexToGraph(domainGraphId, classifiedVertexInfo)
+
+                    if (shouldIncludeSubdomains && subdomainGraphId) {
+                        graphDescriptorById[subdomainGraphId] = [
+                                parentGraphId : domainGraphId,
+                                name : "${domainNameValue} ${subdomainNameValue} Subdomain Graph",
+                                description : "Derived subdomain graph for ${domainNameValue}/${subdomainNameValue} materialized from ${sourceGraphId}.",
+                                graphRole : 'subdomain',
+                                domainName : domainNameValue,
+                                subdomainName : subdomainNameValue
+                        ]
+                        copyVertexToGraph(subdomainGraphId, classifiedVertexInfo)
+                    }
+                }
+
+                List edgeList = ec.entity.find('moqui.math.GraphEdge')
+                        .condition('graphId', sourceGraphId)
+                        .list()
+                edgeList.each { edge ->
+                    String sourceFromVertexId = edge.fromVertexId as String
+                    String sourceToVertexId = edge.toVertexId as String
+                    Map fromInfo = sourceVertexInfoById[sourceFromVertexId]
+                    Map toInfo = sourceVertexInfoById[sourceToVertexId]
+                    if (!fromInfo || !toInfo) return
+                    String fromDomain = (fromInfo.domainName ?: '') as String
+                    String toDomain = (toInfo.domainName ?: '') as String
+                    if (!fromDomain || !toDomain) return
+
+                    if (fromDomain != toDomain) {
+                        crossDomainEdgeCounter++
+                        crossDomainTargetsByDomain[fromDomain].add(toDomain)
+                        crossDomainTargetsByDomain[toDomain].add(fromDomain)
+                        return
+                    }
+
+                    List<String> targetGraphIds = [compactGraphId('domain', fromDomain, null)]
+                    String fromSubdomain = (fromInfo.subdomainName ?: '') as String
+                    String toSubdomain = (toInfo.subdomainName ?: '') as String
+                    if (shouldIncludeSubdomains && fromSubdomain && fromSubdomain == toSubdomain) {
+                        targetGraphIds.add(compactGraphId('subdomain', fromDomain, fromSubdomain))
+                    }
+
+                    targetGraphIds.each { String targetGraphId ->
+                        String fromTargetVertexId = copyVertexToGraph(targetGraphId, fromInfo)
+                        String toTargetVertexId = copyVertexToGraph(targetGraphId, toInfo)
+                        String targetEdgeId = sha1("${targetGraphId}|${edge.graphEdgeId}")
+                        def targetEdge = ec.entity.find('moqui.math.GraphEdge').condition('graphEdgeId', targetEdgeId).one()
+                        boolean newEdge = targetEdge == null
+                        if (targetEdge) targetEdge = targetEdge.cloneValue()
+                        if (!targetEdge) {
+                            targetEdge = ec.entity.makeValue('moqui.math.GraphEdge')
+                            targetEdge.graphEdgeId = targetEdgeId
+                        }
+                        targetEdge.graphId = targetGraphId
+                        targetEdge.fromVertexId = fromTargetVertexId
+                        targetEdge.toVertexId = toTargetVertexId
+                        targetEdge.edgeTypeEnumId = edge.edgeTypeEnumId ?: 'GetDirected'
+                        targetEdge.isDirected = edge.isDirected ?: 'Y'
+                        targetEdge.isLoop = edge.isLoop ?: (fromTargetVertexId == toTargetVertexId ? 'Y' : 'N')
+                        targetEdge.label = edge.label
+                        targetEdge.weight = edge.weight
+                        targetEdge.length = edge.length
+                        if (newEdge) targetEdge.create() else targetEdge.update()
+
+                        storeParameter(targetGraphId, 'AgGraphSourceEdgeIdParam', edge.graphEdgeId, null, targetEdgeId, 1)
+                        storeParameter(targetGraphId, 'AgGraphEdgeRelationParam', edge.label, null, targetEdgeId, 2)
+
+                        if (fromTargetVertexId == toTargetVertexId) {
+                            degreeByGraphId[targetGraphId][fromTargetVertexId] = (degreeByGraphId[targetGraphId][fromTargetVertexId] ?: 0) + 2
+                        } else {
+                            degreeByGraphId[targetGraphId][fromTargetVertexId] = (degreeByGraphId[targetGraphId][fromTargetVertexId] ?: 0) + 1
+                            degreeByGraphId[targetGraphId][toTargetVertexId] = (degreeByGraphId[targetGraphId][toTargetVertexId] ?: 0) + 1
+                        }
+                        edgeCountByGraphId[targetGraphId] = (edgeCountByGraphId[targetGraphId] ?: 0) + 1
+                        copiedEdgeCounter++
+                    }
+                }
+
+                graphDescriptorById.each { String targetGraphId, Map descriptor ->
+                    Map<String, String> targetVertexMap = targetVertexIdByGraphId[targetGraphId] ?: [:]
+                    int orphanCount = 0
+                    int maxDegree = 0
+                    targetVertexMap.values().each { String targetVertexId ->
+                        def targetVertex = ec.entity.find('moqui.math.GraphVertex').condition('graphVertexId', targetVertexId).one()
+                        if (!targetVertex) return
+                        targetVertex = targetVertex.cloneValue()
+                        int degree = (degreeByGraphId[targetGraphId][targetVertexId] ?: 0) as int
+                        targetVertex.degree = degree
+                        targetVertex.notBelongToEdge = degree > 0 ? 'N' : 'Y'
+                        targetVertex.update()
+                        if (degree == 0) orphanCount++
+                        if (degree > maxDegree) maxDegree = degree
+                    }
+
+                    Map topology = [
+                            sourceGraphId : sourceGraphId,
+                            graphRole : descriptor.graphRole,
+                            domainName : descriptor.domainName,
+                            subdomainName : descriptor.subdomainName,
+                            graphOrder : targetVertexMap.size(),
+                            size : (edgeCountByGraphId[targetGraphId] ?: 0) as int,
+                            maxDegree : maxDegree,
+                            orphanVertexCount : orphanCount,
+                            componentNames : (componentSetByGraphId[targetGraphId] as List).sort(),
+                            packageNames : (packageSetByGraphId[targetGraphId] as List).sort(),
+                            crossDomainDependencies : descriptor.graphRole == 'domain' ? ((crossDomainTargetsByDomain[descriptor.domainName as String] as List).sort()) : []
+                    ]
+                    ensureGraph(targetGraphId, descriptor.parentGraphId as String, descriptor.name as String, descriptor.description as String, topology)
+                    def graphValue = ec.entity.find('moqui.math.Graph').condition('graphId', targetGraphId).one()
+                    if (graphValue) {
+                        graphValue = graphValue.cloneValue()
+                        graphValue.graphOrder = targetVertexMap.size()
+                        graphValue.size = (edgeCountByGraphId[targetGraphId] ?: 0) as int
+                        graphValue.maxDegree = maxDegree
+                        graphValue.isTrivial = (targetVertexMap.size() == 1 && ((edgeCountByGraphId[targetGraphId] ?: 0) as int) == 0) ? 'Y' : 'N'
+                        graphValue.isEdgeless = (targetVertexMap.size() > 0 && ((edgeCountByGraphId[targetGraphId] ?: 0) as int) == 0) ? 'Y' : 'N'
+                        graphValue.isEmpty = (targetVertexMap.isEmpty() && ((edgeCountByGraphId[targetGraphId] ?: 0) as int) == 0) ? 'Y' : 'N'
+                        graphValue.loopsAllowed = 'N'
+                        graphValue.isWeighted = 'N'
+                        graphValue.topology = JsonOutput.toJson(topology)
+                        graphValue.update()
+                    }
+                }
+
+                domainGraphCount = graphDescriptorById.values().count { it.graphRole == 'domain' } as Integer
+                subdomainGraphCount = graphDescriptorById.values().count { it.graphRole == 'subdomain' } as Integer
+                copiedVertexCount = copiedVertexCounter as Integer
+                copiedEdgeCount = copiedEdgeCounter as Integer
+                classifiedSourceVertexCount = classifiedSourceVertexCounter as Integer
+                crossDomainEdgeCount = crossDomainEdgeCounter as Integer
+                graphSummary = [
+                        sourceGraphId : sourceGraphId,
+                        derivedGraphPrefix : derivedGraphPrefix,
+                        domainGraphCount : domainGraphCount,
+                        subdomainGraphCount : subdomainGraphCount,
+                        copiedVertexCount : copiedVertexCount,
+                        copiedEdgeCount : copiedEdgeCount,
+                        classifiedSourceVertexCount : classifiedSourceVertexCount,
+                        crossDomainEdgeCount : crossDomainEdgeCount,
+                        graphIds : graphDescriptorById.keySet().sort()
+                ]
             ]]></script>
         </actions>
     </service>
