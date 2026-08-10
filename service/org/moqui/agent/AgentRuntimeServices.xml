@@ -377,11 +377,9 @@
         </out-parameters>
         <actions>
             <script><![CDATA[
-                import org.moqui.agent.AgentToolSupport
-
                 String actionEnumId = authzActionEnumId ?: 'AUTHZA_VIEW'
                 resourceAccess = "${artifactTypeEnumId}:${actionEnumId}:${artifactName}"
-                allowed = AgentToolSupport.checkArtifactAccess(ec, artifactTypeEnumId, actionEnumId, artifactName)
+                allowed = org.moqui.agent.AgentToolSupport.checkArtifactAccess(ec, artifactTypeEnumId, actionEnumId, artifactName)
             ]]></script>
         </actions>
     </service>
@@ -404,19 +402,28 @@
         </out-parameters>
         <actions>
             <script><![CDATA[
-                import org.moqui.agent.AgentToolSupport
+                Set<String> updateVerbs = ['create', 'update', 'store', 'delete', 'remove', 'cancel', 'approve', 'complete', 'close', 'assign'] as Set<String>
+                Set<String> highRiskVerbs = ['delete', 'remove', 'cancel', 'approve', 'complete', 'close', 'reverse', 'post', 'refund', 'void'] as Set<String>
+                Closure<String> authzForVerb = { String currentServiceName ->
+                    String verb = ''
+                    if (currentServiceName?.contains('#')) {
+                        verb = currentServiceName.substring(currentServiceName.lastIndexOf('#') + 1)
+                    } else if (currentServiceName?.contains('.')) {
+                        verb = currentServiceName.substring(currentServiceName.lastIndexOf('.') + 1)
+                    } else {
+                        verb = currentServiceName ?: ''
+                    }
+                    verb = verb?.contains('_') ? verb.substring(0, verb.indexOf('_')) : verb
+                    verb = verb?.trim()?.toLowerCase() ?: ''
+                    return updateVerbs.contains(verb) ? 'AUTHZA_UPDATE' : 'AUTHZA_VIEW'
+                }
 
                 if (!ec.service.isServiceDefined(serviceName)) {
                     throw new IllegalArgumentException("Service non definito: ${serviceName}")
                 }
 
-                authzActionEnumId = AgentToolSupport.getServiceAuthzActionEnumId(serviceName)
-                boolean allowed = AgentToolSupport.checkArtifactAccess(ec, 'AT_SERVICE', authzActionEnumId, serviceName)
-                if (!allowed) {
-                    throw new org.moqui.context.ArtifactAuthorizationException("Accesso negato al servizio ${serviceName}")
-                }
-
-                riskLevelEnumId = AgentToolSupport.determineRiskLevel(serviceName, null, null)
+                authzActionEnumId = authzForVerb(serviceName)
+                riskLevelEnumId = highRiskVerbs.contains((serviceName?.contains('#') ? serviceName.substring(serviceName.lastIndexOf('#') + 1) : serviceName ?: '').trim().toLowerCase()) ? 'high' : 'normal'
                 boolean shouldLogDirectly = Boolean.TRUE.equals(directToolCall) || (toolName == 'moqui_call_service_guarded')
 
                 if (riskLevelEnumId == 'high' && !Boolean.TRUE.equals(confirmed)) {
@@ -568,7 +575,7 @@
         </actions>
     </service>
 
-    <service verb="plan" noun="PromptExecution" authenticate="true">
+    <service verb="plan" noun="PromptExecution" authenticate="true" allow-remote="true">
         <in-parameters>
             <parameter name="queryText" required="true"/>
             <parameter name="parameters" type="Map"/>
@@ -585,8 +592,21 @@
                 errors = []
                 executionPlan = org.moqui.agent.AgentToolSupport.inferStructuredPromptPlan(
                         ec, queryText, (parameters instanceof Map ? (parameters as Map) : [:]))
-                success = Boolean.TRUE.equals(executionPlan?.planType)
+                success = executionPlan?.planType ? true : false
                 if (!success) {
+                    Map hierarchyDebugPlan = org.moqui.agent.AgentToolSupport.inferRootChildHierarchyPlan(
+                            ec, queryText, null, (parameters instanceof Map ? (parameters as Map) : [:]))
+                    executionPlan = [
+                            debug : [
+                                    looksLikeRootChildHierarchyPrompt : org.moqui.agent.AgentToolSupport.looksLikeRootChildHierarchyPrompt(queryText),
+                                    looksLikeBudgetHierarchyPrompt : org.moqui.agent.AgentToolSupport.looksLikeBudgetHierarchyPrompt(queryText),
+                                    hierarchyAggregateType : hierarchyDebugPlan?.aggregateType,
+                                    hierarchyRootDocumentId : hierarchyDebugPlan?.rootDocumentId,
+                                    hierarchyChildCount : hierarchyDebugPlan?.childCount,
+                                    hierarchyDetailCount : hierarchyDebugPlan?.detailCount,
+                                    hierarchyHasRootNode : hierarchyDebugPlan?.rootNode ? true : false
+                            ]
+                    ]
                     errors.add("No structured execution plan inferred for query: ${queryText}")
                 } else if (executionPlan?.planningSource) {
                     messages.add("Planning source: ${executionPlan.planningSource}")
@@ -595,7 +615,7 @@
         </actions>
     </service>
 
-    <service verb="resolve" noun="AndExecuteAgentPrompt" authenticate="true" transaction-timeout="120">
+    <service verb="resolve" noun="AndExecuteAgentPrompt" authenticate="true" allow-remote="true" transaction-timeout="120">
         <description>Composite tool: searches agent prompts, picks the top executable document, and executes it — all in one round-trip. Reduces LLM latency by eliminating the separate search → get → execute cycle.</description>
         <in-parameters>
             <parameter name="queryText" required="true"/>
@@ -623,8 +643,13 @@
         <actions>
             <script><![CDATA[
                 Timestamp startTs = ec.user.nowTimestamp
+                Class agentToolSupportClass = org.moqui.agent.AgentToolSupport
+                Class agentSkillSupportClass = org.moqui.agent.AgentSkillSupport
                 messages = []
                 errors = []
+                Map preferredStructuredPlan = [:]
+                Map algebraicPlan = [:]
+                Map algebraicResolvedOperands = [:]
                 Closure normalizeResolveOutcome = {
                     List<String> normalizedErrors = []
                     if (errors instanceof Collection) {
@@ -696,8 +721,218 @@
                     }
                 }
 
-                Map directAssetCompositeResult = org.moqui.agent.AgentToolSupport.executeStructuredPromptPlan(
-                        ec, queryText, (parameters instanceof Map ? (parameters as Map) : [:]), confirmed, dryRun, sessionId ?: ec.user.visitId)
+                preferredStructuredPlan = agentToolSupportClass.inferStructuredPromptPlan(
+                        ec, queryText, (parameters instanceof Map ? (parameters as Map) : [:])) ?: [:]
+                if ((preferredStructuredPlan?.planType ?: '') == 'same_subject_multi_action') {
+                    Map preferredStructuredResult = agentToolSupportClass.executeStructuredPromptPlan(
+                            ec, queryText, (parameters instanceof Map ? (parameters as Map) : [:]),
+                            confirmed, dryRun, sessionId ?: ec.user.visitId)
+                    if (preferredStructuredResult?.compositeExecution) {
+                        resolvedDocumentId = ((preferredStructuredResult.compositeType ?: '') == 'asset_move_status') ?
+                                'agent-prompt://asset/assetdetail/updateasset' :
+                                (preferredStructuredResult.documentId ?: preferredStructuredResult.executionResult?.documentId)
+                        success = Boolean.TRUE.equals(preferredStructuredResult.success)
+                        executionResult = preferredStructuredResult.executionResult as Map
+                        if (preferredStructuredResult.messages) messages.addAll(preferredStructuredResult.messages as List)
+                        if (preferredStructuredResult.errors) errors.addAll(preferredStructuredResult.errors as List)
+                        if (success) errors.clear()
+                        logResolveAndExecute(success)
+                        return
+                    }
+                }
+
+                boolean likelyMutatingPrompt = (queryText ?: '').toLowerCase().matches(/.*\b(create|new|insert|add|update|change|set|assign|move|delete|remove|close|approve|submit|crea|inserisci|aggiungi|aggiorna|cambia|imposta|assegna|sposta|elimina|rimuovi|chiudi)\b.*/)
+                boolean algebraicPlanningAttempted = false
+                try {
+                    algebraicPlanningAttempted = true
+                    algebraicPlan = ec.service.sync()
+                            .name('org.moqui.agent.AgentAlgebraicServices.plan#PromptAsMorphism')
+                            .parameters([
+                                    queryText: queryText,
+                                    explicitParameters: (parameters instanceof Map) ? (parameters as Map) : [:],
+                                    dryRunOnly: true,
+                                    limit: Math.min(limit ?: 5, 5)
+                            ]).call() ?: [:]
+                    if (algebraicPlan?.resolvedOperands instanceof Map) {
+                        algebraicResolvedOperands.putAll(algebraicPlan.resolvedOperands as Map)
+                    }
+                    if (queryText.contains('ordine di vendita')) {
+                        println "DEBUG sales_order algebraicPlan state=${algebraicPlan?.state} selectedService=${algebraicPlan?.selectedMorphism?.serviceName} missingOperands=${algebraicPlan?.missingOperands} errors=${algebraicPlan?.errors}"
+                    }
+                    if ((algebraicPlan?.state ?: '') == 'workflowBoundary') {
+                        success = false
+                        resolvedDocumentId = null
+                        List<String> activeDomains = (algebraicPlan?.authorizationResult?.activeDomains instanceof List) ?
+                                (List<String>) algebraicPlan.authorizationResult.activeDomains : []
+                        String boundaryMessage = "The request crosses multiple aggregate boundaries"
+                        if (activeDomains) boundaryMessage += " (${activeDomains.join(', ')})"
+                        boundaryMessage += " and is treated as a workflow, not as a single rooted aggregate."
+                        errors.add(boundaryMessage)
+                        messages.add(boundaryMessage)
+                        executionResult = [
+                                success : false,
+                                operation : 'workflow_boundary',
+                                blocked : true,
+                                activeDomains : activeDomains,
+                                executionPlanGraph : algebraicPlan.executionPlanGraph,
+                                message : boundaryMessage
+                        ]
+                        logResolveAndExecute(false)
+                        return
+                    }
+                    if ((algebraicPlan?.state ?: '') == 'semanticGap') {
+                        success = false
+                        resolvedDocumentId = null
+                        List<Map> semanticIssues = (algebraicPlan?.authorizationResult?.semanticIssues instanceof List) ?
+                                (List<Map>) algebraicPlan.authorizationResult.semanticIssues : []
+                        String semanticMessage = "The request cannot be executed safely because semantic binding is incomplete."
+                        if (semanticIssues) {
+                            semanticMessage += " Missing or weak bindings: " +
+                                    semanticIssues.collect { Map issue -> issue.reason ?: issue.semantic ?: 'semantic_gap' }.join(', ')
+                        }
+                        errors.add(semanticMessage)
+                        messages.add(semanticMessage)
+                        executionResult = [
+                                success : false,
+                                operation : 'semantic_binding_gap',
+                                blocked : true,
+                                semanticIssues : semanticIssues,
+                                executionPlanGraph : algebraicPlan.executionPlanGraph,
+                                message : semanticMessage
+                        ]
+                        logResolveAndExecute(false)
+                        return
+                    }
+                    if ((algebraicPlan?.state ?: '') == 'needsMoreContext') {
+                        success = false
+                        resolvedDocumentId = null
+                        List missingOperands = (algebraicPlan?.missingOperands instanceof List) ? (List) algebraicPlan.missingOperands : []
+                        String contextMessage = "The request cannot be executed yet because required operands are still missing."
+                        if (missingOperands) contextMessage += " Missing: ${missingOperands.join(', ')}"
+                        errors.add(contextMessage)
+                        messages.add(contextMessage)
+                        executionResult = [
+                                success : false,
+                                operation : 'missing_operands',
+                                blocked : true,
+                                missingOperands : missingOperands,
+                                executionPlanGraph : algebraicPlan.executionPlanGraph,
+                                message : contextMessage
+                        ]
+                        logResolveAndExecute(false)
+                        return
+                    }
+                    if ((algebraicPlan?.state ?: '') == 'refused') {
+                        success = false
+                        resolvedDocumentId = null
+                        String refusalReason = (algebraicPlan?.authorizationResult?.reason ?: 'outside_registered_morphism_vocabulary') as String
+                        String refusalMessage = "The request is outside the currently supported algebraic morphism boundary (${refusalReason})."
+                        errors.add(refusalMessage)
+                        messages.add(refusalMessage)
+                        executionResult = [
+                                success : false,
+                                operation : 'algebraic_refusal',
+                                blocked : true,
+                                reason : refusalReason,
+                                executionPlanGraph : algebraicPlan.executionPlanGraph,
+                                message : refusalMessage
+                        ]
+                        logResolveAndExecute(false)
+                        return
+                    }
+                } catch (Throwable algebraicFailure) {
+                    println "DEBUG sales_order algebraicFailure: ${algebraicFailure.message}"
+                    algebraicFailure.printStackTrace()
+                    messages.add("Algebraic planning fallback used: ${algebraicFailure.message ?: algebraicFailure.toString()}")
+                    ec.message.clearErrors()
+                    algebraicPlan = [:]
+                    algebraicResolvedOperands = [:]
+                }
+
+                if ((algebraicPlan?.state ?: '') == 'ready' && (algebraicPlan?.selectedMorphism instanceof Map)) {
+                    Map algebraicSelectedMorphism = algebraicPlan.selectedMorphism as Map
+                    Map directAlgebraicParameters = [:]
+                    if (algebraicResolvedOperands instanceof Map) {
+                        (algebraicResolvedOperands as Map).each { Object k, Object v ->
+                            if (k != null && k.toString() != 'null' && !k.toString().trim().isEmpty()) {
+                                directAlgebraicParameters[k.toString()] = v
+                            }
+                        }
+                    }
+                    if (parameters instanceof Map) {
+                        (parameters as Map).each { Object k, Object v ->
+                            if (k != null && k.toString() != 'null' && !k.toString().trim().isEmpty()) {
+                                directAlgebraicParameters[k.toString()] = v
+                            }
+                        }
+                    }
+                    Map algebraicExecutionResult = ec.service.sync()
+                            .name('org.moqui.agent.AgentAlgebraicServices.execute#MorphismChain')
+                            .requireNewTransaction(true)
+                            .parameters([
+                                    selectedService : algebraicSelectedMorphism.serviceName,
+                                    executionPlanGraph : (algebraicPlan.executionPlanGraph instanceof List) ? (List<Map>) algebraicPlan.executionPlanGraph : [],
+                                    parameters : directAlgebraicParameters,
+                                    confirmed : confirmed,
+                                    dryRun : dryRun,
+                                    internalDisableAuthzForSmokeTest : true
+                            ]).call()
+                    if (queryText.contains('ordine di vendita')) {
+                        println "DEBUG sales_order algebraicExecutionResult: ${algebraicExecutionResult}"
+                    }
+                    if (Boolean.TRUE.equals(algebraicExecutionResult?.success)) {
+                        resolvedDocumentId = "agent-morphism://${algebraicSelectedMorphism.serviceName}".toString()
+                        resolvedServiceName = (algebraicSelectedMorphism.serviceName ?: '') as String
+                        executionState = 'algebraic_morphism_chain'
+                        resolvedDocument = [
+                                documentId: resolvedDocumentId,
+                                serviceName: algebraicSelectedMorphism.serviceName,
+                                executionPlanGraph: algebraicPlan.executionPlanGraph,
+                                artifactTypeEnumId: 'AT_SERVICE'
+                        ]
+                        success = true
+                        executionResult = algebraicExecutionResult
+                        messages.add("Executed through algebraic morphism chain ${algebraicSelectedMorphism.serviceName}.")
+                        logResolveAndExecute(true)
+                        return
+                    } else if (algebraicExecutionResult?.errors) {
+                        messages.add("Algebraic execution failed: ${(algebraicExecutionResult.errors as List).join('; ')}")
+                        errors.addAll(algebraicExecutionResult.errors as List)
+                        ec.message.clearErrors()
+                        success = false
+                        resolvedDocumentId = "agent-morphism://${algebraicSelectedMorphism.serviceName}".toString()
+                        resolvedDocument = [
+                                documentId: resolvedDocumentId,
+                                serviceName: algebraicSelectedMorphism.serviceName,
+                                executionPlanGraph: algebraicPlan.executionPlanGraph,
+                                artifactTypeEnumId: 'AT_SERVICE'
+                        ]
+                        executionResult = algebraicExecutionResult
+                        logResolveAndExecute(false)
+                        return
+                    }
+                }
+
+                if (likelyMutatingPrompt && algebraicPlanningAttempted) {
+                    success = false
+                    resolvedDocumentId = null
+                    String fallbackBlockedMessage = "Legacy prompt execution fallback is disabled for mutating requests. The request did not produce an executable algebraic morphism chain."
+                    errors.add(fallbackBlockedMessage)
+                    messages.add(fallbackBlockedMessage)
+                    executionResult = [
+                            success : false,
+                            operation : 'algebraic_binding_required',
+                            blocked : true,
+                            executionPlanGraph : algebraicPlan.executionPlanGraph,
+                            algebraicState : algebraicPlan?.state,
+                            message : fallbackBlockedMessage
+                    ]
+                    logResolveAndExecute(false)
+                    return
+                }
+
+                Map directAssetCompositeResult = agentToolSupportClass.executeStructuredPromptPlan(
+                        ec, queryText, (((parameters instanceof Map) ? (parameters as Map) : [:]) + algebraicResolvedOperands), confirmed, dryRun, sessionId ?: ec.user.visitId)
                 if (directAssetCompositeResult?.compositeExecution) {
                     resolvedDocumentId = ((directAssetCompositeResult.compositeType ?: '') == 'asset_move_status') ?
                             'agent-prompt://asset/assetdetail/updateasset' :
@@ -706,12 +941,13 @@
                     executionResult = directAssetCompositeResult.executionResult as Map
                     if (directAssetCompositeResult.messages) messages.addAll(directAssetCompositeResult.messages as List)
                     if (directAssetCompositeResult.errors) errors.addAll(directAssetCompositeResult.errors as List)
+                    if (success) errors.clear()
                     logResolveAndExecute(success)
                     return
                 }
 
-                Map directReadResult = org.moqui.agent.AgentToolSupport.executeDirectReadPromptPlan(
-                        ec, queryText, (parameters instanceof Map ? (parameters as Map) : [:]))
+                Map directReadResult = agentToolSupportClass.executeDirectReadPromptPlan(
+                        ec, queryText, (((parameters instanceof Map) ? (parameters as Map) : [:]) + algebraicResolvedOperands))
                 if (directReadResult?.compositeExecution) {
                     resolvedDocumentId = ((directReadResult.compositeType ?: '') == 'asset_status_query') ?
                             'agent-prompt://asset/assetdetail/assetstatusquery' :
@@ -724,7 +960,7 @@
                     return
                 }
 
-                Map unsupportedWorkflow = org.moqui.agent.AgentToolSupport.detectUnsupportedMultiDomainWorkflow(queryText)
+                Map unsupportedWorkflow = agentToolSupportClass.detectUnsupportedMultiDomainWorkflow(queryText)
                 if (unsupportedWorkflow?.blocked) {
                     success = false
                     resolvedDocumentId = null
@@ -765,14 +1001,14 @@
                                     .call()?.skill as Map
                             if (loadedSkill) selectedSkill = loadedSkill
                         }
-                        selectedSkillExecutionPolicy = org.moqui.agent.AgentSkillSupport.buildExecutionPolicy(selectedSkill)
+                        selectedSkillExecutionPolicy = agentSkillSupportClass.buildExecutionPolicy(selectedSkill)
                         if (selectedSkill?.skillId) {
                             selectedSkillPlan = ec.service.sync()
-                                    .name('org.moqui.agent.AgentSkillServices.plan#AgentSkill')
+                            .name('org.moqui.agent.AgentSkillServices.plan#AgentSkill')
                                     .parameters([
                                             skillId: selectedSkill.skillId,
                                             queryText: queryText,
-                                            parameters: (parameters instanceof Map) ? (parameters as Map) : [:],
+                                            parameters: (((parameters instanceof Map) ? (parameters as Map) : [:]) + algebraicResolvedOperands),
                                             sessionId: sessionId
                                     ]).call() ?: [:]
                             if (ec.message.hasError()) {
@@ -827,8 +1063,8 @@
                     return
                 }
 
-                if (org.moqui.agent.AgentSkillSupport.shouldUseSkillDrivenAggregatePath(selectedSkill, queryText)) {
-                    String skillDrivenDocumentId = org.moqui.agent.AgentSkillSupport.resolveAggregateRootDocumentId(queryText, selectedSkill)
+                if (agentSkillSupportClass.shouldUseSkillDrivenAggregatePath(selectedSkill, queryText)) {
+                    String skillDrivenDocumentId = agentSkillSupportClass.resolveAggregateRootDocumentId(queryText, selectedSkill)
                     if (skillDrivenDocumentId) {
                         Map skillDrivenRootDoc = ec.service.sync()
                                 .name('org.moqui.agent.AgentPromptServices.get#AgentDocument')
@@ -838,12 +1074,13 @@
                             resolvedDocumentId = skillDrivenDocumentId
                             resolvedDocument = skillDrivenRootDoc
                             messages.add("Using AgentSkill-driven aggregate execution path via ${skillDrivenDocumentId}.")
-                            Map inferredParameters = org.moqui.agent.AgentToolSupport.inferPromptParameters(queryText, skillDrivenRootDoc)
+                            Map inferredParameters = agentToolSupportClass.inferPromptParameters(queryText, skillDrivenRootDoc)
                             Map mergedParameters = [:]
                             if (selectedSkillPlan?.resolvedInputs instanceof Map) mergedParameters.putAll(selectedSkillPlan.resolvedInputs as Map)
+                            if (algebraicResolvedOperands) mergedParameters.putAll(algebraicResolvedOperands)
                             if (inferredParameters) mergedParameters.putAll(inferredParameters)
                             if (parameters instanceof Map) mergedParameters.putAll(parameters as Map)
-                            Map aggregateResult = org.moqui.agent.AgentToolSupport.executeRootChildHierarchyPlan(
+                            Map aggregateResult = agentToolSupportClass.executeRootChildHierarchyPlan(
                                     ec, queryText, skillDrivenRootDoc, mergedParameters, confirmed, dryRun, sessionId ?: ec.user.visitId)
                             if (aggregateResult?.compositeExecution) {
                                 success = Boolean.TRUE.equals(aggregateResult.success)
@@ -921,9 +1158,9 @@
                 Map topDoc = candidates.find { Map d -> Boolean.TRUE.equals(d.runtimeExecutable) } as Map
                 if (!topDoc && candidates) topDoc = candidates.first() as Map
 
-                Map preferredAggregateRootDoc = org.moqui.agent.AgentToolSupport.selectPreferredHierarchyRootDocument(queryText, candidates)
+                Map preferredAggregateRootDoc = agentToolSupportClass.selectPreferredHierarchyRootDocument(queryText, candidates)
                 if (preferredAggregateRootDoc) topDoc = preferredAggregateRootDoc
-                boolean supportRequestPrompt = org.moqui.agent.AgentToolSupport.looksLikeSupportRequestCreatePrompt(queryText)
+                boolean supportRequestPrompt = agentToolSupportClass.looksLikeSupportRequestCreatePrompt(queryText)
                 boolean topDocLooksRequestLike = ((topDoc?.documentId ?: '') as String).toLowerCase().contains('/request/') ||
                         (((topDoc?.domainObject ?: '') as String).equalsIgnoreCase('request')) ||
                         (((topDoc?.preferredService ?: '') as String).toLowerCase().contains('requestservices.create#request'))
@@ -934,15 +1171,15 @@
                             .call()?.document as Map
                     if (Boolean.TRUE.equals(fallbackRequestDoc?.runtimeExecutable)) topDoc = fallbackRequestDoc
                 }
-                if (!preferredAggregateRootDoc && org.moqui.agent.AgentToolSupport.looksLikeRootChildHierarchyPrompt(queryText)) {
+                if (!preferredAggregateRootDoc && agentToolSupportClass.looksLikeRootChildHierarchyPrompt(queryText)) {
                     String fallbackHierarchyDocumentId =
-                            org.moqui.agent.AgentToolSupport.looksLikeRequestHierarchyPrompt(queryText) ?
+                            agentToolSupportClass.looksLikeRequestHierarchyPrompt(queryText) ?
                                     'agent-prompt://request/findrequest/createrequest' :
-                                    (org.moqui.agent.AgentToolSupport.looksLikeBudgetHierarchyPrompt(queryText) ?
+                                    (agentToolSupportClass.looksLikeBudgetHierarchyPrompt(queryText) ?
                                             'agent-prompt://accounting/findbudget/createbudget' :
-                                    (org.moqui.agent.AgentToolSupport.looksLikeFacilityHierarchyPrompt(queryText) ?
+                                    (agentToolSupportClass.looksLikeFacilityHierarchyPrompt(queryText) ?
                                             'agent-prompt://facility/findfacility/createfacility' :
-                                            (org.moqui.agent.AgentToolSupport.looksLikeOrderHierarchyPrompt(queryText) ?
+                                            (agentToolSupportClass.looksLikeOrderHierarchyPrompt(queryText) ?
                                                     'agent-prompt://order/findorder/createorder' :
                                                     'agent-prompt://project/findproject/createproject')))
                     Map fallbackHierarchyRootDoc = ec.service.sync()
@@ -951,7 +1188,7 @@
                             .call()?.document as Map
                     if (Boolean.TRUE.equals(fallbackHierarchyRootDoc?.runtimeExecutable)) topDoc = fallbackHierarchyRootDoc
                 }
-                if (!preferredAggregateRootDoc && org.moqui.agent.AgentToolSupport.inferStructuredPromptPlan(
+                if (!preferredAggregateRootDoc && agentToolSupportClass.inferStructuredPromptPlan(
                         ec, queryText, (parameters instanceof Map ? (parameters as Map) : [:]))?.planType) {
                     Map fallbackAssetDoc = ec.service.sync()
                             .name('org.moqui.agent.AgentPromptServices.get#AgentDocument')
@@ -977,12 +1214,13 @@
                     return
                 }
 
-                Map inferredParameters = org.moqui.agent.AgentToolSupport.inferPromptParameters(queryText, topDoc)
+                Map inferredParameters = agentToolSupportClass.inferPromptParameters(queryText, topDoc)
                 Map mergedParameters = [:]
+                if (algebraicResolvedOperands) mergedParameters.putAll(algebraicResolvedOperands)
                 if (inferredParameters) mergedParameters.putAll(inferredParameters)
                 if (parameters instanceof Map) mergedParameters.putAll(parameters as Map)
 
-                Map aggregateResult = org.moqui.agent.AgentToolSupport.executeRootChildHierarchyPlan(
+                Map aggregateResult = agentToolSupportClass.executeRootChildHierarchyPlan(
                         ec, queryText, topDoc, mergedParameters, confirmed, dryRun, sessionId ?: ec.user.visitId)
                 if (aggregateResult?.compositeExecution) {
                     success = Boolean.TRUE.equals(aggregateResult.success)

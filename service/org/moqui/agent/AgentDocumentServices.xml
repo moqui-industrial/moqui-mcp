@@ -1682,6 +1682,9 @@
                     graphContentValue.update()
                 }
 
+                ec.service.sync().name('org.moqui.agent.AgentDocumentServices.sync#ArtifactMorphismBridge')
+                        .parameters([graphId : effectiveGraphId, clearExisting : false]).call()
+
                 boolean shouldCompleteMathModelRun = (completeMathModelRun == null) ? true : Boolean.TRUE.equals(completeMathModelRun)
                 if (mathModelRunId && shouldCompleteMathModelRun) {
                     ec.service.sync().name('org.moqui.agent.AgentMathModelServices.complete#AgentMathModelRun')
@@ -1718,6 +1721,129 @@
         </out-parameters>
         <actions>
             <service-call name="org.moqui.agent.AgentDocumentServices.load#ArtifactGraph" in-map="context" out-map="context"/>
+        </actions>
+    </service>
+
+    <service verb="sync" noun="ArtifactMorphismBridge" authenticate="true" allow-remote="true" transaction-timeout="3600">
+        <description>Populate explicit Parameter-based bridge metadata between artifact graph vertices and category morphisms.</description>
+        <in-parameters>
+            <parameter name="graphId"/>
+            <parameter name="clearExisting" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="bridgedVertexCount" type="Integer"/>
+            <parameter name="bridgedMorphismCount" type="Integer"/>
+            <parameter name="unmatchedVertexCount" type="Integer"/>
+            <parameter name="matchedBridgeList" type="List"/>
+            <parameter name="unmatchedVertexList" type="List"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.entity.EntityCondition
+
+                String effectiveGraphId = (graphId ?: 'AgentArtifactGraph').toString()
+                boolean purgeExisting = (clearExisting == null) ? true : Boolean.TRUE.equals(clearExisting)
+                List<String> bridgeDefIdList = [
+                        'AgMorphBridgeGraphIdDef',
+                        'AgMorphBridgeGraphVertexIdDef',
+                        'AgMorphBridgeArtifactUriDef',
+                        'AgMorphBridgeArtifactKindDef'
+                ]
+
+                if (purgeExisting) {
+                    ec.entity.find('moqui.math.Parameter')
+                            .condition(ec.entity.conditionFactory.makeCondition('parameterDefId', EntityCondition.IN, bridgeDefIdList))
+                            .condition('morphismId', EntityCondition.NOT_EQUAL, null)
+                            .deleteAll()
+                }
+
+                Closure<String> makeBridgeParameterId = { String morphismId, String parameterDefId, String graphVertexId ->
+                    "${morphismId}_${parameterDefId}_${graphVertexId}".replaceAll(/[^A-Za-z0-9_]/, '_')
+                }
+                Closure<Void> upsertBridgeParameter = { String morphismId, String parameterDefId, String graphVertexId, String textValue, Integer sequenceNum ->
+                    if (!morphismId || !parameterDefId || !graphVertexId) return
+                    String safeTextValue = (textValue ?: '').toString()
+                    String parameterId = makeBridgeParameterId(morphismId, parameterDefId, graphVertexId)
+                    def parameterValue = ec.entity.find('moqui.math.Parameter').condition('parameterId', parameterId).one()
+                    boolean newParameter = parameterValue == null
+                    if (parameterValue) parameterValue = parameterValue.cloneValue()
+                    if (!parameterValue) {
+                        parameterValue = ec.entity.makeValue('moqui.math.Parameter')
+                        parameterValue.parameterId = parameterId
+                    }
+                    parameterValue.parameterDefId = parameterDefId
+                    parameterValue.morphismId = morphismId
+                    parameterValue.graphId = effectiveGraphId
+                    parameterValue.graphVertexId = graphVertexId
+                    parameterValue.sequenceNum = sequenceNum
+                    parameterValue.textValue = safeTextValue
+                    parameterValue.symbolicValue = safeTextValue.length() > 63 ? safeTextValue.substring(0, 63) : safeTextValue
+                    if (newParameter) parameterValue.create()
+                    else parameterValue.update()
+                }
+
+                List<Map> vertexMetaList = ec.entity.find('moqui.agent.graph.AgentArtifactVertexMeta')
+                        .condition('graphId', effectiveGraphId)
+                        .list()
+                        .collect { it.getPlainValueMap(0) as Map }
+
+                matchedBridgeList = []
+                unmatchedVertexList = []
+                Set<String> bridgedMorphismIdSet = new LinkedHashSet<String>()
+
+                vertexMetaList.each { Map vertexMeta ->
+                    String graphVertexId = (vertexMeta.graphVertexId ?: '').toString()
+                    String serviceNameValue = (vertexMeta.serviceName ?: '').toString()
+                    String xmlActionElementValue = (vertexMeta.xmlActionElement ?: '').toString()
+                    String sourceArtifactUriValue = (vertexMeta.sourceArtifactUri ?: '').toString()
+                    String artifactKindValue = (vertexMeta.artifactKind ?: '').toString()
+
+                    List morphismList = []
+                    if (serviceNameValue) {
+                        morphismList = ec.entity.find('moqui.math.ct.Morphism')
+                                .condition('serviceName', serviceNameValue)
+                                .list()
+                    } else if (xmlActionElementValue) {
+                        morphismList = ec.entity.find('moqui.math.ct.Morphism')
+                                .condition('categoryId', 'AgentXmlActionsDsl')
+                                .condition('morphismSymbol', xmlActionElementValue)
+                                .list()
+                    }
+
+                    if (!morphismList) {
+                        unmatchedVertexList.add([
+                                graphVertexId : graphVertexId,
+                                serviceName : serviceNameValue,
+                                xmlActionElement : xmlActionElementValue,
+                                sourceArtifactUri : sourceArtifactUriValue,
+                                artifactKind : artifactKindValue
+                        ])
+                        return
+                    }
+
+                    morphismList.each { morphism ->
+                        String morphismIdValue = (morphism.morphismId ?: '').toString()
+                        upsertBridgeParameter(morphismIdValue, 'AgMorphBridgeGraphIdDef', graphVertexId, effectiveGraphId, 1)
+                        upsertBridgeParameter(morphismIdValue, 'AgMorphBridgeGraphVertexIdDef', graphVertexId, graphVertexId, 2)
+                        if (sourceArtifactUriValue) upsertBridgeParameter(morphismIdValue, 'AgMorphBridgeArtifactUriDef', graphVertexId, sourceArtifactUriValue, 3)
+                        if (artifactKindValue) upsertBridgeParameter(morphismIdValue, 'AgMorphBridgeArtifactKindDef', graphVertexId, artifactKindValue, 4)
+                        bridgedMorphismIdSet.add(morphismIdValue)
+                        matchedBridgeList.add([
+                                graphId : effectiveGraphId,
+                                graphVertexId : graphVertexId,
+                                morphismId : morphismIdValue,
+                                serviceName : serviceNameValue,
+                                xmlActionElement : xmlActionElementValue,
+                                sourceArtifactUri : sourceArtifactUriValue,
+                                artifactKind : artifactKindValue
+                        ])
+                    }
+                }
+
+                bridgedVertexCount = (matchedBridgeList.collect { it.graphVertexId }.unique().size()) as Integer
+                bridgedMorphismCount = bridgedMorphismIdSet.size() as Integer
+                unmatchedVertexCount = unmatchedVertexList.size() as Integer
+            ]]></script>
         </actions>
     </service>
 
@@ -1852,6 +1978,9 @@
                     graphContentValue.description = contentDescription
                     graphContentValue.update()
                 }
+
+                ec.service.sync().name('org.moqui.agent.AgentDocumentServices.sync#ArtifactMorphismBridge')
+                        .parameters([graphId : effectiveGraphId, clearExisting : false]).call()
 
                 boolean shouldCompleteMathModelRun = (completeMathModelRun == null) ? true : Boolean.TRUE.equals(completeMathModelRun)
                 if (mathModelRunId && shouldCompleteMathModelRun) {

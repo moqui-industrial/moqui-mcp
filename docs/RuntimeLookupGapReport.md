@@ -28,6 +28,31 @@ The most important outcome is:
 
 The remaining gaps are now narrower and more concrete than before.
 
+## Latest Algebraic Runtime Round
+
+Date: `2026-08-06`
+
+This round validated the algebraic planner and the MCP dispatcher together on `http://127.0.0.1:8081`.
+
+What was confirmed:
+
+- `plan#PromptAsMorphism` now resolves OpenSearch-backed operands before declaring `needsMoreContext`
+- a budget prompt for fiscal year `2028` now resolves:
+  - `timePeriodId=100255`
+  - `budgetTypeEnumId=BudgetOperating`
+- `moqui_resolve_and_execute` now imports those resolved operands into the aggregate execution path
+- a dry-run budget prompt with explicit GL accounts and amounts now produces:
+  - one budget root
+  - four ordered budget items
+  - correct `glAccountId` and `amount` extraction for every line
+- a mixed HR + budget prompt is now blocked early with an explicit workflow-boundary message instead of falling into misleading legacy fallback behavior
+
+What remains open after this round:
+
+- the runtime still executes the selected aggregate through legacy prompt-document flows after the root is chosen
+- localized prompt coverage is weaker than English prompt coverage in the new algebraic path
+- lookup reuse is now wired for the planner, but not yet generalized into a full signature-driven morphism-chain executor
+
 Additional status from the latest runtime restart:
 
 - MCP initialization is now stable again from both `/mcp/*` and legacy root aliases `/sse` and `/message`

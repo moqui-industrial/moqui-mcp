@@ -18,6 +18,7 @@
             <parameter name="lookupKey" required="true"/>
             <parameter name="lookupText" required="true"/>
             <parameter name="organizationPartyId"/>
+            <parameter name="roleTypeId"/>
         </in-parameters>
         <out-parameters>
             <parameter name="success" type="Boolean"/>
@@ -36,6 +37,7 @@
                 recordId = null
                 String key = (lookupKey ?: '').toString().trim()
                 String text = (lookupText ?: '').toString().trim()
+                String roleHint = (roleTypeId ?: '').toString().trim()
                 if (!key || !text) return
 
                 Closure<String> normalize = { String raw ->
@@ -66,6 +68,24 @@
                             } catch (Throwable ignored) { }
                         }
                     }
+                    return [:]
+                }
+                Closure<Map> entityCanonicalMatch = { String entityName, String idField, List<String> matchFields, Map extraConditions = [:] ->
+                    if (!entityName || !idField || !matchFields) return [:]
+                    String wanted = canonical(text)
+                    if (!wanted) return [:]
+                    try {
+                        def find = ec.entity.find(entityName).disableAuthz()
+                        (extraConditions ?: [:]).each { Object k, Object v -> if (k && v != null && v.toString()) find.condition(k.toString(), v) }
+                        List entityList = find.list()
+                        List<Map> matches = entityList.findAll { ev ->
+                            List<String> candidates = matchFields.collect { String fieldName -> ev.get(fieldName) as String }
+                                    .findAll { it }
+                                    .collect { canonical(it) }
+                            candidates.contains(wanted)
+                        }.collect { it.getPlainValueMap(0) } as List<Map>
+                        if (matches.size() == 1) return makeRecord(idField, matches[0][idField], matches[0])
+                    } catch (Throwable ignored) { }
                     return [:]
                 }
 
@@ -132,19 +152,90 @@
                     Map exact = entityExactLookup('mantle.party.Party', 'partyId', ['partyId', 'pseudoId'])
                     if (!exact.recordId) {
                         try {
+                            Set<String> rolePartyIds = [] as Set<String>
+                            if (roleHint) {
+                                rolePartyIds = (ec.entity.find('mantle.party.PartyRole').disableAuthz()
+                                        .condition('roleTypeId', roleHint)
+                                        .list()
+                                        ?.collect { it.partyId as String }
+                                        ?.findAll { it } ?: []) as Set<String>
+                                if (!rolePartyIds) return
+                            }
                             List partyList = ec.entity.find('mantle.party.PartyDetail').disableAuthz().list()
+                            if (roleHint) partyList = partyList.findAll { it.partyId && rolePartyIds.contains(it.partyId as String) }
                             String wanted = canonical(text)
                             List<Map> matches = partyList.findAll { ev ->
+                                String personFullName = [ev.firstName, ev.lastName].findAll { it }.join(' ')
                                 List<String> candidates = [
                                         ev.partyId as String,
                                         ev.pseudoId as String,
-                                        ev.partyFullName as String,
-                                        ev.organizationName as String
+                                        ev.organizationName as String,
+                                        personFullName
                                 ].findAll { it }.collect { canonical(it) }
                                 candidates.contains(wanted)
                             }.collect { it.getPlainValueMap(0) } as List<Map>
                             if (matches.size() == 1) exact = makeRecord('partyId', matches[0].partyId, matches[0])
                         } catch (Throwable ignored) { }
+                    }
+                    if (exact.recordId) {
+                        recordId = exact.recordId
+                        record = exact
+                        success = true
+                        uniqueMatch = true
+                    }
+                    return
+                }
+
+                if (key == 'glAccount') {
+                    Map exact = entityExactLookup('mantle.ledger.account.GlAccount', 'glAccountId', ['glAccountId', 'accountCode'])
+                    if (!exact.recordId) {
+                        exact = entityCanonicalMatch('mantle.ledger.account.GlAccount', 'glAccountId',
+                                ['glAccountId', 'accountCode', 'accountName', 'description'])
+                    }
+                    if (exact.recordId) {
+                        recordId = exact.recordId
+                        record = exact
+                        success = true
+                        uniqueMatch = true
+                    }
+                    return
+                }
+
+                if (key == 'product') {
+                    Map exact = entityExactLookup('mantle.product.Product', 'productId', ['productId', 'pseudoId'])
+                    if (!exact.recordId) {
+                        exact = entityCanonicalMatch('mantle.product.Product', 'productId',
+                                ['productId', 'pseudoId', 'productName', 'description'])
+                    }
+                    if (exact.recordId) {
+                        recordId = exact.recordId
+                        record = exact
+                        success = true
+                        uniqueMatch = true
+                    }
+                    return
+                }
+
+                if (key == 'facility') {
+                    Map exact = entityExactLookup('mantle.facility.Facility', 'facilityId', ['facilityId', 'pseudoId'])
+                    if (!exact.recordId) {
+                        exact = entityCanonicalMatch('mantle.facility.Facility', 'facilityId',
+                                ['facilityId', 'pseudoId', 'facilityName', 'description'])
+                    }
+                    if (exact.recordId) {
+                        recordId = exact.recordId
+                        record = exact
+                        success = true
+                        uniqueMatch = true
+                    }
+                    return
+                }
+
+                if (key == 'asset') {
+                    Map exact = entityExactLookup('mantle.product.asset.Asset', 'assetId', ['assetId', 'serialNumber', 'softIdentifier'])
+                    if (!exact.recordId) {
+                        exact = entityCanonicalMatch('mantle.product.asset.Asset', 'assetId',
+                                ['assetId', 'assetName', 'serialNumber', 'softIdentifier'])
                     }
                     if (exact.recordId) {
                         recordId = exact.recordId
@@ -177,16 +268,65 @@
         </in-parameters>
         <actions>
             <script><![CDATA[
-                import org.moqui.agent.AgentConfigUtil
-                import org.moqui.agent.AgentToolSupport
+                import groovy.json.JsonOutput
+
+                Set<String> sensitiveFieldNames = [
+                        'password', 'passwd', 'token', 'accessToken', 'refreshToken', 'apiKey', 'secret',
+                        'email', 'emailAddress', 'phone', 'phoneNumber', 'paymentMethodId', 'card',
+                        'cardNumber', 'iban', 'address', 'postalAddress', 'cvv', 'securityCode'
+                ].collect { it.toLowerCase() } as Set<String>
+                Closure sanitizeValue
+                sanitizeValue = { Object value, String mode, boolean summaryOnly ->
+                    if (value == null) return null
+                    if (value instanceof Map) {
+                        Map out = [:]
+                        (value as Map).each { Object k, Object v ->
+                            String keyText = k != null ? k.toString() : ''
+                            if (keyText && sensitiveFieldNames.contains(keyText.toLowerCase())) {
+                                out[keyText] = '***'
+                            } else {
+                                out[keyText] = sanitizeValue(v, mode, summaryOnly)
+                            }
+                        }
+                        return out
+                    }
+                    if (value instanceof Collection) {
+                        return (value as Collection).collect { Object item -> sanitizeValue(item, mode, summaryOnly) }
+                    }
+                    if (summaryOnly && value instanceof CharSequence) {
+                        String text = value.toString()
+                        return text.length() > 400 ? text.substring(0, 400) : text
+                    }
+                    return value
+                }
+                Closure toJsonSafe = { Object value ->
+                    try {
+                        return JsonOutput.toJson(value)
+                    } catch (Throwable ignored) {
+                        return JsonOutput.toJson([stringValue: value?.toString()])
+                    }
+                }
+                Closure buildBusinessResultSummary = { Map toolResultMap ->
+                    Map resultMap = toolResultMap ?: [:]
+                    Map summary = [:]
+                    ['success', 'serviceName', 'errorType', 'errorMessage', 'confirmationRequired', 'riskLevel',
+                     'resolvedDocumentId', 'candidateCount', 'operation'].each { String key ->
+                        if (resultMap.containsKey(key)) summary[key] = resultMap[key]
+                    }
+                    if (resultMap.finalResult instanceof Map) {
+                        Map finalResult = resultMap.finalResult as Map
+                        summary.finalResult = finalResult.findAll { Object k, Object v -> !(v instanceof Map) && !(v instanceof Collection) }
+                    }
+                    return summary
+                }
 
                 def effectiveStart = startDate ?: ec.user.nowTimestamp
                 def effectiveEnd = endDate ?: ec.user.nowTimestamp
-                String parameterLogMode = AgentConfigUtil.getString('moqui.agent.log.parameters', 'masked')
-                String resultLogMode = AgentConfigUtil.getString('moqui.agent.log.results', 'summary')
-                Map sanitizedParameters = AgentToolSupport.sanitizeForLogging(parameters ?: [:], parameterLogMode, false)
-                Map sanitizedResult = AgentToolSupport.sanitizeForLogging(toolResult ?: [:], resultLogMode, 'summary'.equalsIgnoreCase(resultLogMode))
-                Map businessResultSummary = AgentToolSupport.buildBusinessResultSummary(toolResult ?: [:])
+                String parameterLogMode = System.getProperty('moqui.agent.log.parameters', 'masked')
+                String resultLogMode = System.getProperty('moqui.agent.log.results', 'summary')
+                Map sanitizedParameters = sanitizeValue(parameters ?: [:], parameterLogMode, false) as Map
+                Map sanitizedResult = sanitizeValue(toolResult ?: [:], resultLogMode, 'summary'.equalsIgnoreCase(resultLogMode)) as Map
+                Map businessResultSummary = buildBusinessResultSummary((toolResult instanceof Map) ? (toolResult as Map) : [:])
                 Object storedResult = 'summary'.equalsIgnoreCase(resultLogMode) ?
                         (businessResultSummary ?: sanitizedResult) : sanitizedResult
 
@@ -202,8 +342,8 @@
                         artifactTypeEnumId : artifactTypeEnumId,
                         artifactName : artifactName,
                         authzActionEnumId : authzActionEnumId,
-                        parametersJson : AgentToolSupport.toJson(sanitizedParameters),
-                        resultJson : AgentToolSupport.toJson(storedResult),
+                        parametersJson : toJsonSafe(sanitizedParameters),
+                        resultJson : toJsonSafe(storedResult),
                         success : Boolean.TRUE.equals(success) ? 'Y' : 'N',
                         errorMessage : errorMessage,
                         startDate : effectiveStart,
@@ -214,14 +354,14 @@
                 ])
                 logValue.create()
 
-                boolean elasticTelemetryEnabled = AgentConfigUtil.getBoolean('moqui.agent.elasticTelemetry.enabled', false)
+                boolean elasticTelemetryEnabled = Boolean.parseBoolean(System.getProperty('moqui.agent.elasticTelemetry.enabled', 'false'))
                 if (elasticTelemetryEnabled) {
-                    boolean includeParameters = AgentConfigUtil.getBoolean('moqui.agent.elasticTelemetry.includeParameters', false)
-                    boolean includeResults = AgentConfigUtil.getBoolean('moqui.agent.elasticTelemetry.includeResults', false)
-                    int maxSummaryLength = AgentConfigUtil.getInt('moqui.agent.elasticTelemetry.maxSummaryLength', 2000, 1)
-                    String parameterSummary = includeParameters ? AgentToolSupport.toJson(sanitizedParameters) : "parameterKeys=" + ((parameters ?: [:]).keySet() as List).join(',')
-                    String resultSummary = includeResults ? AgentToolSupport.toJson(sanitizedResult) :
-                            (businessResultSummary ? AgentToolSupport.toJson(businessResultSummary) : "resultKeys=" + ((toolResult ?: [:]).keySet() as List).join(','))
+                    boolean includeParameters = Boolean.parseBoolean(System.getProperty('moqui.agent.elasticTelemetry.includeParameters', 'false'))
+                    boolean includeResults = Boolean.parseBoolean(System.getProperty('moqui.agent.elasticTelemetry.includeResults', 'false'))
+                    int maxSummaryLength = Integer.parseInt(System.getProperty('moqui.agent.elasticTelemetry.maxSummaryLength', '2000'))
+                    String parameterSummary = includeParameters ? toJsonSafe(sanitizedParameters) : "parameterKeys=" + ((parameters ?: [:]).keySet() as List).join(',')
+                    String resultSummary = includeResults ? toJsonSafe(sanitizedResult) :
+                            (businessResultSummary ? toJsonSafe(businessResultSummary) : "resultKeys=" + ((toolResult ?: [:]).keySet() as List).join(','))
                     if (parameterSummary?.length() > maxSummaryLength) parameterSummary = parameterSummary.substring(0, maxSummaryLength)
                     if (resultSummary?.length() > maxSummaryLength) resultSummary = resultSummary.substring(0, maxSummaryLength)
                     Map resultMap = (toolResult instanceof Map) ? (toolResult as Map) : [:]

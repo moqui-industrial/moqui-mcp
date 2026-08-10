@@ -9,6 +9,12 @@ The project is still under active development. The current direction is to keep 
 - OpenSearch for retrieval
 - Moqui graph entities for artifact topology and knowledge lineage
 
+An additional experimental direction is now active on the `algebraic-mcp-reboot` branch:
+
+- treat Moqui services as registered morphisms
+- treat entities and view-entities as authoritative state objects
+- compile prompts toward service signatures before any business-specific fallback
+
 ## Current Focus
 
 The component is evolving along three complementary layers:

@@ -1,0 +1,278 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="refresh" noun="DiscoveredDataTemplates" authenticate="true" allow-remote="true" transaction-timeout="3600">
+        <description>Scan Moqui entity artifacts and refresh the discovered structural template catalog.</description>
+        <in-parameters>
+            <parameter name="filterRegexp"/>
+            <parameter name="activeOnly" type="Boolean" default="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="templateCount" type="Integer"/>
+            <parameter name="createdCount" type="Integer"/>
+            <parameter name="updatedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.impl.entity.EntityDefinition
+                import org.moqui.impl.entity.EntityJavaUtil.RelationshipInfo
+                import java.security.MessageDigest
+
+                Closure<String> csv = { Collection values ->
+                    return (values ?: []).findAll { it }.collect { it.toString() }.join(',')
+                }
+                Closure<String> prettyName = { String entityName ->
+                    String localName = entityName?.tokenize('.')?.last() ?: ''
+                    return localName
+                            .replaceAll(/([a-z0-9])([A-Z])/, '$1 $2')
+                            .replaceAll(/([A-Z]+)([A-Z][a-z])/, '$1 $2')
+                            .trim()
+                }
+                Closure<String> stableHash = { String raw ->
+                    MessageDigest md = MessageDigest.getInstance('SHA-256')
+                    return md.digest((raw ?: '').getBytes('UTF-8')).encodeHex().toString()
+                }
+                Closure<String> pickTemplateId = { String signatureHash ->
+                    return "AgTpl" + signatureHash.substring(0, 12)
+                }
+                Closure<Map> makeRootMember = { String entityName, EntityDefinition ed ->
+                    return [
+                            entityName: entityName,
+                            memberRoleType: 'root',
+                            parentEntityName: null,
+                            linkFieldNames: csv(ed.getPkFieldNames()),
+                            referencedFieldNames: csv(ed.getPkFieldNames()),
+                            sequenceFieldNames: null,
+                            pkFieldNames: csv(ed.getPkFieldNames()),
+                            notes: 'Detected root entity.'
+                    ]
+                }
+                Closure<Boolean> isSeqField = { String fieldName ->
+                    return (fieldName ?: '').endsWith('SeqId')
+                }
+                Closure<Boolean> isIdField = { String fieldName ->
+                    return (fieldName ?: '').endsWith('Id')
+                }
+                Closure<Map> buildRootSeqChildTemplate = { String rootEntityName, EntityDefinition rootEd, RelationshipInfo relInfo ->
+                    EntityDefinition childEd = relInfo.relatedEd
+                    if (!childEd || childEd.isViewEntity) return null
+                    List<String> rootPk = (rootEd.getPkFieldNames() ?: []) as List<String>
+                    List<String> childPk = (childEd.getPkFieldNames() ?: []) as List<String>
+                    if (!rootPk || !childPk || !rootPk.every { childPk.contains(it) }) return null
+                    List<String> extraPk = childPk.findAll { !rootPk.contains(it) }
+                    if (!extraPk || !extraPk.every { isSeqField(it as String) || isIdField(it as String) }) return null
+                    Map childMember = [
+                            entityName: childEd.fullEntityName,
+                            memberRoleType: 'child',
+                            parentEntityName: rootEntityName,
+                            linkFieldNames: csv(rootPk),
+                            referencedFieldNames: csv(rootPk),
+                            sequenceFieldNames: csv(extraPk.findAll { isSeqField(it as String) }),
+                            pkFieldNames: csv(childPk),
+                            notes: "Detected from relationship ${relInfo.relationshipName ?: relInfo.shortAlias ?: ''}"
+                    ]
+                    List<Map> members = [makeRootMember(rootEntityName, rootEd), childMember]
+                    String templateType = childMember.sequenceFieldNames ? 'root_seq_child' : 'root_child'
+                    String templateName = "${prettyName(rootEntityName)} / ${prettyName(childEd.fullEntityName)}"
+                    return [
+                            templateName: templateName,
+                            templateType: templateType,
+                            sourceEntityName: rootEntityName,
+                            rootEntityName: rootEntityName,
+                            description: "Discovered ${templateType} template from Moqui entity relationships.",
+                            evidenceJson: groovy.json.JsonOutput.toJson([
+                                    rootEntityName: rootEntityName,
+                                    childEntityName: childEd.fullEntityName,
+                                    relationshipName: relInfo.relationshipName,
+                                    relationshipType: relInfo.type,
+                                    rootPkFieldNames: rootPk,
+                                    childPkFieldNames: childPk
+                            ]),
+                            members: members
+                    ]
+                }
+                Closure<Map> buildRootParentTreeTemplate = { String entityName, EntityDefinition ed ->
+                    List<String> fields = (ed.getAllFieldNames() ?: []) as List<String>
+                    List<String> rootRefs = fields.findAll { ((it ?: '') as String).toLowerCase().startsWith('root') && isIdField(it as String) }
+                    List<String> parentRefs = fields.findAll { ((it ?: '') as String).toLowerCase().startsWith('parent') && isIdField(it as String) }
+                    if (!rootRefs || !parentRefs) return null
+                    return [
+                            templateName: "${prettyName(entityName)} Root / Parent Tree",
+                            templateType: 'root_parent_tree',
+                            sourceEntityName: entityName,
+                            rootEntityName: entityName,
+                            description: 'Discovered recursive tree with both root and parent references.',
+                            evidenceJson: groovy.json.JsonOutput.toJson([
+                                    entityName: entityName,
+                                    rootReferenceFieldNames: rootRefs,
+                                    parentReferenceFieldNames: parentRefs,
+                                    pkFieldNames: ed.getPkFieldNames()
+                            ]),
+                            members: [
+                                    makeRootMember(entityName, ed),
+                                    [
+                                            entityName: entityName,
+                                            memberRoleType: 'recursive_child',
+                                            parentEntityName: entityName,
+                                            linkFieldNames: csv(rootRefs + parentRefs),
+                                            referencedFieldNames: csv((ed.getPkFieldNames() ?: []) as List<String>),
+                                            sequenceFieldNames: null,
+                                            pkFieldNames: csv(ed.getPkFieldNames()),
+                                            notes: 'Detected recursive root/parent hierarchy.'
+                                    ]
+                            ]
+                    ]
+                }
+                Closure<Map> buildSelfParentHierarchyTemplate = { String entityName, EntityDefinition ed ->
+                    List<String> fields = (ed.getAllFieldNames() ?: []) as List<String>
+                    List<String> parentRefs = fields.findAll { ((it ?: '') as String).toLowerCase().startsWith('parent') && isIdField(it as String) }
+                    if (!parentRefs) return null
+                    if (fields.any { ((it ?: '') as String).toLowerCase().startsWith('root') && isIdField(it as String) }) return null
+                    return [
+                            templateName: "${prettyName(entityName)} Recursive Hierarchy",
+                            templateType: 'self_parent_hierarchy',
+                            sourceEntityName: entityName,
+                            rootEntityName: entityName,
+                            description: 'Discovered recursive hierarchy with parent reference only.',
+                            evidenceJson: groovy.json.JsonOutput.toJson([
+                                    entityName: entityName,
+                                    parentReferenceFieldNames: parentRefs,
+                                    pkFieldNames: ed.getPkFieldNames()
+                            ]),
+                            members: [
+                                    makeRootMember(entityName, ed),
+                                    [
+                                            entityName: entityName,
+                                            memberRoleType: 'self_recursive',
+                                            parentEntityName: entityName,
+                                            linkFieldNames: csv(parentRefs),
+                                            referencedFieldNames: csv(ed.getPkFieldNames()),
+                                            sequenceFieldNames: null,
+                                            pkFieldNames: csv(ed.getPkFieldNames()),
+                                            notes: 'Detected self-parent hierarchy.'
+                                    ]
+                            ]
+                    ]
+                }
+                Closure<Map> enrichMultilevel = { Map baseTemplate, String rootEntityName, EntityDefinition rootEd ->
+                    if (!baseTemplate || baseTemplate.templateType != 'root_seq_child') return baseTemplate
+                    List<Map> members = (baseTemplate.members instanceof List) ? (baseTemplate.members as List<Map>) : []
+                    Map childMember = members.size() > 1 ? members[1] : null
+                    if (!childMember?.entityName || !ec.entity.isEntityDefined(childMember.entityName as String)) return baseTemplate
+                    EntityDefinition childEd = ec.entity.getEntityDefinition(childMember.entityName as String)
+                    RelationshipInfo grandChildRel = (childEd.getRelationshipsInfo(false) ?: []).find { RelationshipInfo info ->
+                        info?.type == 'many' && info.relatedEd && !info.relatedEd.isViewEntity
+                    }
+                    if (!grandChildRel) return baseTemplate
+                    Map grandTemplate = buildRootSeqChildTemplate(childEd.fullEntityName, childEd, grandChildRel)
+                    if (!grandTemplate) return baseTemplate
+                    Map grandMember = ((grandTemplate.members ?: [])[1] ?: null) as Map
+                    if (!grandMember) return baseTemplate
+                    grandMember.memberRoleType = 'grandchild'
+                    members.add(grandMember)
+                    baseTemplate.members = members
+                    baseTemplate.templateType = 'root_seq_multilevel'
+                    baseTemplate.templateName = "${prettyName(rootEntityName)} / ${prettyName(childEd.fullEntityName)} / ${prettyName(grandChildRel.relatedEd.fullEntityName)}"
+                    baseTemplate.description = 'Discovered multilevel root with sequenced child and grandchild rows.'
+                    return baseTemplate
+                }
+
+                templateCount = 0
+                createdCount = 0
+                updatedCount = 0
+                List<Map> discoveredTemplates = []
+
+                for (String entityName in (ec.entity.getAllEntityNames(filterRegexp) ?: [])) {
+                    if (!entityName || !ec.entity.isEntityDefined(entityName)) continue
+                    EntityDefinition ed = ec.entity.getEntityDefinition(entityName)
+                    if (!ed || ed.isViewEntity) continue
+
+                    Map rootParentTree = buildRootParentTreeTemplate(entityName, ed)
+                    if (rootParentTree) discoveredTemplates.add(rootParentTree)
+
+                    Map selfParentTree = buildSelfParentHierarchyTemplate(entityName, ed)
+                    if (selfParentTree) discoveredTemplates.add(selfParentTree)
+
+                    (ed.getRelationshipsInfo(false) ?: []).each { RelationshipInfo relInfo ->
+                        if (relInfo?.type != 'many') return
+                        Map baseTemplate = buildRootSeqChildTemplate(entityName, ed, relInfo)
+                        if (!baseTemplate) return
+                        discoveredTemplates.add(enrichMultilevel(baseTemplate, entityName, ed))
+                    }
+                }
+
+                Set<String> seen = [] as Set<String>
+                discoveredTemplates.each { Map template ->
+                    if (!template) return
+                    String rawSignature = [
+                            template.templateType,
+                            template.rootEntityName,
+                            ((template.members ?: []) as List<Map>).collect { Map member ->
+                                [
+                                        member.entityName,
+                                        member.memberRoleType,
+                                        member.parentEntityName,
+                                        member.linkFieldNames,
+                                        member.referencedFieldNames,
+                                        member.sequenceFieldNames,
+                                        member.pkFieldNames
+                                ].join('|')
+                            }.join('||')
+                    ].join('###')
+                    String signatureHash = stableHash(rawSignature)
+                    if (!seen.add(signatureHash)) return
+
+                    String templateId = pickTemplateId(signatureHash)
+                    Map createMap = [
+                            agentDiscoveredDataTemplateId: templateId,
+                            templateName: template.templateName,
+                            templateType: template.templateType,
+                            sourceEntityName: template.sourceEntityName,
+                            rootEntityName: template.rootEntityName,
+                            signatureHash: signatureHash,
+                            detectionMethodEnumId: 'AgTplDetectEntity',
+                            evidenceJson: template.evidenceJson,
+                            description: template.description,
+                            active: 'Y',
+                            lastRefreshDate: ec.user.nowTimestamp
+                    ]
+                    def existing = ec.entity.find('moqui.agent.AgentDiscoveredDataTemplate')
+                            .condition('signatureHash', signatureHash)
+                            .one()
+                    if (existing) {
+                        existing.setAll(createMap)
+                        existing.update()
+                        updatedCount++
+                    } else {
+                        ec.entity.makeValue('moqui.agent.AgentDiscoveredDataTemplate').setAll(createMap).create()
+                        createdCount++
+                    }
+
+                    ec.entity.find('moqui.agent.AgentDiscoveredDataTemplateMember')
+                            .condition('agentDiscoveredDataTemplateId', templateId)
+                            .deleteAll()
+                    int seq = 1
+                    ((template.members ?: []) as List<Map>).each { Map member ->
+                        ec.entity.makeValue('moqui.agent.AgentDiscoveredDataTemplateMember').setAll([
+                                agentDiscoveredDataTemplateId: templateId,
+                                templateMemberSeqId: seq.toString().padLeft(2, '0'),
+                                entityName: member.entityName,
+                                memberRoleType: member.memberRoleType,
+                                parentEntityName: member.parentEntityName,
+                                linkFieldNames: member.linkFieldNames,
+                                referencedFieldNames: member.referencedFieldNames,
+                                sequenceFieldNames: member.sequenceFieldNames,
+                                pkFieldNames: member.pkFieldNames,
+                                notes: member.notes
+                        ]).create()
+                        seq++
+                    }
+                }
+
+                templateCount = seen.size()
+            ]]></script>
+        </actions>
+    </service>
+
+</services>

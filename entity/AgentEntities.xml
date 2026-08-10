@@ -434,4 +434,53 @@ along with this software (see the LICENSE.md file). If not, see
             <key-map field-name="mappedAggregatePatternId" related="agentAggregatePatternId"/>
         </relationship>
     </entity>
+
+    <!-- ========== DISCOVERED DATA TEMPLATES ========== -->
+    <entity entity-name="AgentDiscoveredDataTemplate" package="moqui.agent" use="transactional" cache="true">
+        <field name="agentDiscoveredDataTemplateId" type="id" is-pk="true"/>
+        <field name="templateName" type="text-medium"/>
+        <field name="templateType" type="text-short"/>
+        <field name="sourceEntityName" type="text-medium"/>
+        <field name="rootEntityName" type="text-medium"/>
+        <field name="signatureHash" type="text-medium"/>
+        <field name="detectionMethodEnumId" type="id"/>
+        <field name="evidenceJson" type="text-very-long"/>
+        <field name="description" type="text-long"/>
+        <field name="active" type="text-indicator"/>
+        <field name="lastRefreshDate" type="date-time"/>
+        <index name="AGDTMPL_SIG" unique="true">
+            <index-field name="signatureHash"/>
+        </index>
+        <index name="AGDTMPL_ROOT">
+            <index-field name="rootEntityName"/>
+        </index>
+        <index name="AGDTMPL_TYPE">
+            <index-field name="templateType"/>
+        </index>
+        <relationship type="many" related="moqui.agent.AgentDiscoveredDataTemplateMember" short-alias="members">
+            <key-map field-name="agentDiscoveredDataTemplateId"/>
+        </relationship>
+        <relationship type="one-nofk" title="DetectionMethod" related="moqui.basic.Enumeration">
+            <key-map field-name="detectionMethodEnumId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="AgentDiscoveredDataTemplateMember" package="moqui.agent" use="transactional" cache="true">
+        <field name="agentDiscoveredDataTemplateId" type="id" is-pk="true"/>
+        <field name="templateMemberSeqId" type="id" is-pk="true"/>
+        <field name="entityName" type="text-medium"/>
+        <field name="memberRoleType" type="text-short"/>
+        <field name="parentEntityName" type="text-medium"/>
+        <field name="linkFieldNames" type="text-medium"/>
+        <field name="referencedFieldNames" type="text-medium"/>
+        <field name="sequenceFieldNames" type="text-medium"/>
+        <field name="pkFieldNames" type="text-medium"/>
+        <field name="notes" type="text-very-long"/>
+        <index name="AGDTMPLM_ENTITY">
+            <index-field name="entityName"/>
+        </index>
+        <relationship type="one" related="moqui.agent.AgentDiscoveredDataTemplate" short-alias="template">
+            <key-map field-name="agentDiscoveredDataTemplateId"/>
+        </relationship>
+    </entity>
 </entities>

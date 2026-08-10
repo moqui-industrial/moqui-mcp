@@ -64,18 +64,46 @@ def pythonExecutable = providers.gradleProperty('pythonExecutable').orElse('pyth
 def agentIndexerDir = layout.projectDirectory.dir('tools/agent-indexer')
 def toolsDir = layout.projectDirectory.dir('tools')
 def defaultOutputDir = agentIndexerDir.dir('output')
+def generatedSeedDir = layout.projectDirectory.dir('data/generated')
 def defaultMoquiRoot = providers.gradleProperty('moquiRoot').orElse(moquiDir.absolutePath)
 def defaultMcpEndpoint = providers.gradleProperty('mcpEndpoint').orElse('http://localhost:8081/mcp/message')
 def defaultRpcEndpoint = providers.gradleProperty('rpcEndpoint').orElse('http://localhost:8081/rpc/json')
 def defaultIndexName = providers.gradleProperty('indexName').orElse('moqui_agent_prompts_v1')
 def defaultSessionId = providers.gradleProperty('sessionId').orElse('gradle-session')
 def defaultAuthHeader = providers.gradleProperty('authHeader').orNull
+def defaultMorphismDescriptionProvider = providers.gradleProperty('morphismDescriptionProvider').orElse('none')
+def defaultMorphismDescriptionModel = providers.gradleProperty('morphismDescriptionModel').orElse('')
+def defaultMorphismDescriptionApiKey = providers.gradleProperty('morphismDescriptionApiKey').orNull
+def defaultMorphismDescriptionBaseUrl = providers.gradleProperty('morphismDescriptionBaseUrl').orNull
+def defaultMorphismDescriptionLimit = providers.gradleProperty('morphismDescriptionLimit').orNull
 // scan-root for knowledge collection; defaults to moqui runtime/component to cover all components
 def defaultScanRoot = providers.gradleProperty('scanRoot').orElse(moquiDir.absolutePath + '/runtime/component')
 def workspaceRoot = moquiDir.parentFile
 def openSearchRuntimeDir = file(moquiDir.absolutePath + '/runtime/opensearch')
 def openSearchConfigSourceDir = layout.projectDirectory.dir('tools/opensearch/config')
 def openSearchScriptsSourceDir = layout.projectDirectory.dir('tools/opensearch')
+
+def callMoquiJsonRpc = { String method, Map params = [:] ->
+    if (!defaultAuthHeader) {
+        throw new GradleException("Missing -PauthHeader for ${method}")
+    }
+    def payload = groovy.json.JsonOutput.toJson([
+            jsonrpc: '2.0',
+            id     : 1,
+            method : method,
+            params : params
+    ])
+    def connection = new URL(defaultRpcEndpoint.get()).openConnection()
+    connection.setRequestMethod('POST')
+    connection.setDoOutput(true)
+    connection.setRequestProperty('Content-Type', 'application/json')
+    connection.setRequestProperty('Authorization', defaultAuthHeader)
+    connection.outputStream.withWriter('UTF-8') { it << payload }
+    int code = connection.responseCode
+    String body = (code >= 200 && code < 300 ? connection.inputStream : connection.errorStream)?.getText('UTF-8')
+    println body
+    if (code < 200 || code >= 300) throw new GradleException("${method} failed with HTTP ${code}")
+}
 
 def resolvePatternReferenceEpub = {
     def candidates = fileTree(workspaceRoot) {
@@ -169,6 +197,8 @@ tasks.register('indexAgentDocs') {
 tasks.register('loadMcpData', JavaExec) {
     group = 'moqui-mcp'
     description = 'Load moqui-mcp component data (seed, seed-initial, install). Run after deploying new data files to update ArtifactGroupMember and other seed records in the DB.'
+    if (rootProject.tasks.findByName('checkRuntime') != null) dependsOn rootProject.tasks.named('checkRuntime')
+    dependsOn rootProject.getTasksByName('build', true)
     workingDir = moquiDir
     mainClass = '-jar'
     jvmArgs = ['-server', '-Dgroovy.json.faststringutils.disable=true']
@@ -254,6 +284,162 @@ tasks.register('extractMoquiXsdArtifactRelations', Exec) {
             'moqui_xsd_artifact_relations.py',
             '--xsd-dir', frameworkDir.absolutePath + '/xsd',
             '--output', new File(defaultOutputDir.asFile, 'moqui-xsd-artifact-relations.json').absolutePath
+}
+
+tasks.register('exportXmlActionMorphismSeed', Exec) {
+    group = 'moqui-mcp'
+    description = 'Generate moqui-math Category/Morphism seed XML for atomic xml-actions operators from xml-actions-3.xsd.'
+    workingDir = agentIndexerDir.asFile
+    commandLine pythonExecutable.get(),
+            'generate_xml_action_morphism_seed.py',
+            '--moqui-root', moquiDir.absolutePath,
+            '--output', new File(generatedSeedDir.asFile, 'XmlActionMorphismSeed.xml').absolutePath
+}
+
+tasks.register('generateServiceActionCatalog', Exec) {
+    group = 'moqui-mcp'
+    description = 'Generate parsed service-action statement and service composition catalogs.'
+    workingDir = agentIndexerDir.asFile
+    commandLine pythonExecutable.get(),
+            'generate_service_action_catalog.py',
+            '--moqui-root', defaultMoquiRoot.get(),
+            '--output-dir', new File(defaultOutputDir.asFile, 'service-actions-global').absolutePath
+}
+
+tasks.register('enrichServiceMorphismDescriptions', Exec) {
+    group = 'moqui-mcp'
+    description = 'Optionally enrich parsed service documents with stronger semantic morphism descriptions using an LLM over the deterministic service graph summary.'
+    dependsOn 'generateServiceActionCatalog'
+    workingDir = agentIndexerDir.asFile
+    commandLine pythonExecutable.get(),
+            'enrich_service_morphism_descriptions.py',
+            '--input', new File(defaultOutputDir.asFile, 'service-actions-global/global-service-action-documents.jsonl').absolutePath,
+            '--output', new File(defaultOutputDir.asFile, 'service-actions-global/global-service-action-documents.enriched.jsonl').absolutePath,
+            '--summary', new File(defaultOutputDir.asFile, 'service-actions-global/global-service-action-documents.enriched.summary.json').absolutePath,
+            '--provider', defaultMorphismDescriptionProvider.get(),
+            '--model', defaultMorphismDescriptionModel.get()
+    doFirst {
+        if (defaultMorphismDescriptionApiKey) {
+            args '--api-key', defaultMorphismDescriptionApiKey
+        }
+        if (defaultMorphismDescriptionBaseUrl) {
+            args '--base-url', defaultMorphismDescriptionBaseUrl
+        }
+        if (defaultMorphismDescriptionLimit) {
+            args '--limit', defaultMorphismDescriptionLimit
+        }
+    }
+}
+
+tasks.register('exportServiceMorphismSeed', Exec) {
+    group = 'moqui-mcp'
+    description = 'Generate moqui-math Morphism seed XML for parsed service compositions.'
+    dependsOn 'enrichServiceMorphismDescriptions'
+    workingDir = agentIndexerDir.asFile
+    commandLine pythonExecutable.get(),
+            'generate_service_morphism_seed.py',
+            '--statements', new File(defaultOutputDir.asFile, 'service-actions-global/global-service-action-statements.jsonl').absolutePath,
+            '--services', new File(defaultOutputDir.asFile, 'service-actions-global/global-service-action-documents.enriched.jsonl').absolutePath,
+            '--output', new File(generatedSeedDir.asFile, 'ServiceMorphismSeed.xml').absolutePath
+}
+
+tasks.register('exportEntityMorphismSeed', Exec) {
+    group = 'moqui-mcp'
+    description = 'Generate moqui-math Category/Morphism seed XML for Moqui entity and view-entity structure.'
+    workingDir = agentIndexerDir.asFile
+    commandLine pythonExecutable.get(),
+            'generate_entity_morphism_seed.py',
+            '--scan-root', defaultScanRoot.get(),
+            '--output', new File(generatedSeedDir.asFile, 'EntityMorphismSeed.xml').absolutePath
+}
+
+tasks.register('prepareAlgebraicMetamodelSeeds') {
+    group = 'moqui-mcp'
+    description = 'Regenerate the algebraic metamodel seed files (xml-actions, services, entities) before loading them through standard Moqui data loading.'
+    dependsOn 'extractMoquiXsdArtifactRelations', 'exportXmlActionMorphismSeed', 'exportServiceMorphismSeed', 'exportEntityMorphismSeed'
+}
+
+tasks.register('bundleGeneratedAlgebraicSeed') {
+    group = 'moqui-mcp'
+    description = 'Combine generated xml-actions, service, and entity morphism seeds into a single explicit Moqui seed file for reliable loading.'
+    dependsOn 'prepareAlgebraicMetamodelSeeds'
+    inputs.files(
+            generatedSeedDir.file('XmlActionMorphismSeed.xml'),
+            generatedSeedDir.file('ServiceMorphismSeed.xml'),
+            generatedSeedDir.file('EntityMorphismSeed.xml')
+    )
+    outputs.file(generatedSeedDir.file('AlgebraicGeneratedSeed.xml'))
+    doLast {
+        File outputFile = new File(generatedSeedDir.asFile, 'AlgebraicGeneratedSeed.xml')
+        outputFile.parentFile.mkdirs()
+        List<File> sourceFiles = [
+                new File(generatedSeedDir.asFile, 'XmlActionMorphismSeed.xml'),
+                new File(generatedSeedDir.asFile, 'ServiceMorphismSeed.xml'),
+                new File(generatedSeedDir.asFile, 'EntityMorphismSeed.xml')
+        ]
+        List<String> mergedLines = ['<?xml version="1.0" encoding="UTF-8"?>', '<entity-facade-xml type="seed">']
+        sourceFiles.each { File sourceFile ->
+            if (!sourceFile.exists()) throw new GradleException("Missing generated seed file ${sourceFile}")
+            sourceFile.eachLine('UTF-8') { String line ->
+                String trimmed = line.trim()
+                if (!trimmed || trimmed.startsWith('<?xml') || trimmed.startsWith('<entity-facade-xml') || trimmed.startsWith('</entity-facade-xml')) return
+                mergedLines.add(line)
+            }
+        }
+        mergedLines.add('</entity-facade-xml>')
+        outputFile.setText(mergedLines.join(System.lineSeparator()) + System.lineSeparator(), 'UTF-8')
+        println "Wrote ${outputFile}"
+    }
+}
+
+tasks.register('loadAlgebraicComponentData', JavaExec) {
+    group = 'moqui-mcp'
+    description = 'Load moqui-mcp seed/install data through the standard component load path.'
+    dependsOn 'prepareAlgebraicMetamodelSeeds'
+    if (rootProject.tasks.findByName('checkRuntime') != null) dependsOn rootProject.tasks.named('checkRuntime')
+    dependsOn rootProject.getTasksByName('build', true)
+    workingDir = moquiDir
+    mainClass = '-jar'
+    jvmArgs = ['-server', '-Dgroovy.json.faststringutils.disable=true']
+    systemProperties = ['moqui.conf': 'conf/MoquiDevConf.xml', 'moqui.runtime': 'runtime']
+    args = ['moqui.war', 'load', 'types=seed,seed-initial,install', 'components=moqui-mcp']
+}
+
+tasks.register('loadGeneratedAlgebraicSeed', JavaExec) {
+    group = 'moqui-mcp'
+    description = 'Load the explicit generated algebraic seed bundle so service/entity/xml-actions morphism metadata is always materialized.'
+    dependsOn 'bundleGeneratedAlgebraicSeed'
+    if (rootProject.tasks.findByName('checkRuntime') != null) dependsOn rootProject.tasks.named('checkRuntime')
+    dependsOn rootProject.getTasksByName('build', true)
+    workingDir = moquiDir
+    mainClass = '-jar'
+    jvmArgs = ['-server', '-Dgroovy.json.faststringutils.disable=true']
+    systemProperties = ['moqui.conf': 'conf/MoquiDevConf.xml', 'moqui.runtime': 'runtime']
+    args = ['moqui.war', 'load', 'types=seed', 'location=component://moqui-mcp/data/generated/AlgebraicGeneratedSeed.xml']
+}
+
+tasks.register('loadAlgebraicMetamodel') {
+    group = 'moqui-mcp'
+    description = 'Regenerate algebraic metamodel seed data, run the standard component load, then explicitly load the generated algebraic seed bundle.'
+    dependsOn 'loadAlgebraicComponentData', 'loadGeneratedAlgebraicSeed'
+}
+
+tasks.register('refreshAlgebraicRuntimeIndexes') {
+    group = 'moqui-mcp'
+    description = 'Reload runtime DataDocument/DataFeed definitions for algebraic metadata and reindex their OpenSearch documents. This is a runtime maintenance step kept separate from standard Moqui load.'
+    doLast {
+        callMoquiJsonRpc('org.moqui.agent.AgentDocumentServices.reload#ArtifactGraphDocumentDefinitions')
+        callMoquiJsonRpc('org.moqui.agent.AgentDocumentServices.reload#RuntimeLookupDocumentDefinitions')
+        callMoquiJsonRpc('org.moqui.agent.AgentDocumentServices.index#ArtifactGraphDataDocuments', [graphId: 'AgentArtifactGraph', includeEmbedding: true])
+        callMoquiJsonRpc('org.moqui.agent.AgentDocumentServices.index#RuntimeLookupDataDocuments')
+        callMoquiJsonRpc('org.moqui.agent.AgentSkillServices.refresh#AgentSkills', [reindex: true, clusterName: 'default'])
+    }
+}
+
+tasks.register('rebuildAlgebraicRuntime') {
+    group = 'moqui-mcp'
+    description = 'Operational wrapper: run standard algebraic metamodel load and then perform the separate runtime document/index refresh.'
+    dependsOn 'loadAlgebraicMetamodel', 'refreshAlgebraicRuntimeIndexes'
 }
 
 tasks.register('generateArtifactGraphFromMoqui', Exec) {

@@ -84,7 +84,27 @@ def resolve_effective_xml_path(path: Path) -> Path | None:
     return path
 
 
-def collect_parameter_names(service_el: ET.Element, tag_name: str) -> list[str]:
+def is_identity_parameter(name: str | None, param_type: str | None) -> bool:
+    lowered_name = (name or "").lower()
+    lowered_type = (param_type or "").lower()
+    return lowered_name.endswith("id") or lowered_name.endswith("seqid") or lowered_type == "id"
+
+
+def derive_parameter_role(name: str | None, param_type: str | None, required: bool, direction: str) -> str:
+    lowered_name = (name or "").lower()
+    lowered_type = (param_type or "").lower()
+    if direction == "out":
+        return "produced_identity_operand" if is_identity_parameter(name, param_type) else "produced_operand"
+    if lowered_name.endswith("enumid") or lowered_name.endswith("typeenumid") or lowered_name == "statusid":
+        return "enum_operand"
+    if lowered_name.endswith("seqid"):
+        return "generated_operand"
+    if lowered_type == "id" or lowered_name.endswith("id"):
+        return "parent_operand" if required else "lookup_operand"
+    return "literal_value_operand"
+
+
+def collect_parameter_metadata(service_el: ET.Element, tag_name: str, direction: str) -> list[dict]:
     block = service_el.find(tag_name)
     if block is None:
         return []
@@ -92,7 +112,22 @@ def collect_parameter_names(service_el: ET.Element, tag_name: str) -> list[str]:
     for child in block.findall("parameter"):
         name = child.get("name")
         if name:
-            result.append(name)
+            param_type = child.get("type")
+            required = (child.get("required") or "").strip().lower() == "true"
+            entity_name = child.get("entity-name")
+            default_value = child.get("default-value")
+            result.append({
+                "name": name,
+                "direction": direction,
+                "type": param_type,
+                "required": required,
+                "entityName": entity_name,
+                "fieldName": name,
+                "defaultValue": default_value,
+                "identity": is_identity_parameter(name, param_type),
+                "role": derive_parameter_role(name, param_type, required, direction),
+                "source": "service-definition",
+            })
     return result
 
 
@@ -234,6 +269,117 @@ def likely_queries(service_verb: str, service_noun: str, domain_object: str | No
     return sorted(query for query in queries if query)
 
 
+def humanize_identifier(value: str | None) -> str:
+    if not value:
+        return ""
+    return value.replace(".", " ").replace("_", " ").replace("-", " ").strip()
+
+
+def dedupe_preserve(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for item in items:
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        ordered.append(item)
+    return ordered
+
+
+def summarize_required_operands(parameters: list[dict]) -> list[str]:
+    return dedupe_preserve([
+        str(param.get("name"))
+        for param in parameters
+        if param.get("direction") == "in" and param.get("required") and param.get("name")
+    ])
+
+
+def summarize_produced_operands(parameters: list[dict]) -> list[str]:
+    return dedupe_preserve([
+        str(param.get("name"))
+        for param in parameters
+        if param.get("direction") == "out" and param.get("name")
+    ])
+
+
+def dominant_operation_effect(operation_effects: list[str]) -> str:
+    priorities = [
+        "create", "upsert", "store", "update", "delete", "read",
+        "conditional_branch", "mutate", "unknown"
+    ]
+    normalized = [
+        "read" if str(effect).startswith("read") else str(effect)
+        for effect in operation_effects if effect
+    ]
+    for candidate in priorities:
+        if candidate in normalized:
+            return candidate
+    return normalized[0] if normalized else "unknown"
+
+
+def compose_service_semantic_sentences(service_context: dict, statement_docs: list[dict], read_entities: list[str],
+        written_entities: list[str], called_services: list[str], operation_effects: list[str],
+        complements: list[str]) -> tuple[str, str, str]:
+    service_name = service_context["serviceName"]
+    service_verb = service_context["serviceVerb"]
+    service_noun = service_context["serviceNoun"]
+    domain_object = service_context["domainObject"] or service_noun
+    required_operands = summarize_required_operands(service_context["inParameters"])
+    produced_operands = summarize_produced_operands(service_context["outParameters"])
+    dominant_effect = dominant_operation_effect(operation_effects)
+
+    effect_phrase_map = {
+        "create": "creates or initializes",
+        "upsert": "creates or updates",
+        "store": "stores or updates",
+        "update": "updates",
+        "delete": "deletes",
+        "read": "reads or searches",
+        "conditional_branch": "branches conditionally while processing",
+        "mutate": "mutates",
+        "unknown": "processes",
+    }
+    effect_phrase = effect_phrase_map.get(dominant_effect, "processes")
+    business_parts = [
+        f"Service {service_name} {effect_phrase} {humanize_identifier(domain_object) or humanize_identifier(service_noun) or 'the target domain object'}."
+    ]
+    if required_operands:
+        business_parts.append(f"Required inputs: {', '.join(required_operands[:8])}.")
+    if produced_operands:
+        business_parts.append(f"Produces: {', '.join(produced_operands[:8])}.")
+
+    technical_parts = [
+        f"Service {service_name} contains {len(statement_docs)} parsed xml-actions statements."
+    ]
+    if written_entities:
+        technical_parts.append(f"Writes entities: {', '.join(written_entities[:6])}.")
+    if read_entities:
+        technical_parts.append(f"Reads entities: {', '.join(read_entities[:6])}.")
+    if called_services:
+        technical_parts.append(f"Calls downstream services: {', '.join(called_services[:6])}.")
+    if complements:
+        technical_parts.append(f"Frequent operand fields: {', '.join(complements[:10])}.")
+
+    semantic_parts = [
+        business_parts[0],
+        f"Primary operation effect: {dominant_effect}.",
+    ]
+    if written_entities:
+        semantic_parts.append(f"Persistent targets: {', '.join(written_entities[:6])}.")
+    elif read_entities:
+        semantic_parts.append(f"Primary lookup targets: {', '.join(read_entities[:6])}.")
+    if called_services:
+        semantic_parts.append(f"Delegates to: {', '.join(called_services[:6])}.")
+    if required_operands:
+        semantic_parts.append(f"Binding constraints come from required operands {', '.join(required_operands[:8])}.")
+
+    return (
+        " ".join(technical_parts).strip(),
+        " ".join(business_parts).strip(),
+        " ".join(semantic_parts).strip(),
+    )
+
+
 def make_statement_id(service_name: str, path_parts: list[int]) -> str:
     joined = "/".join(f"{part:03d}" for part in path_parts)
     return f"statement://service/{service_name}/actions/{joined}"
@@ -340,12 +486,8 @@ def build_service_document(service_context: dict, statement_docs: list[dict]) ->
     statement_classes = sorted({doc.get("statementClass") for doc in statement_docs if doc.get("statementClass")})
     opaque = any(bool(doc.get("opaque")) for doc in statement_docs)
     domain_object = service_context["domainObject"]
-
-    business_sentence = f"Service {service_context['serviceName']} orchestrates {service_context['serviceVerb']} {domain_object or service_context['serviceNoun']}."
-    technical_sentence = (
-        f"Service {service_context['serviceName']} contains {len(statement_docs)} action statements, "
-        f"reads {len(read_entities)} entities, writes {len(written_entities)} entities, and calls "
-        f"{len(called_services)} downstream services."
+    technical_sentence, business_sentence, semantic_description = compose_service_semantic_sentences(
+        service_context, statement_docs, read_entities, written_entities, called_services, operation_effects, complements
     )
 
     return {
@@ -374,7 +516,9 @@ def build_service_document(service_context: dict, statement_docs: list[dict]) ->
         "likelyUserQueries": likely_user_queries,
         "technicalSentence": technical_sentence,
         "businessSentence": business_sentence,
+        "semanticDescription": semantic_description,
         "embeddingText": " ".join([
+            semantic_description,
             technical_sentence,
             business_sentence,
             " ".join(likely_user_queries[:20]),
@@ -411,8 +555,8 @@ def parse_service_file(path: Path, grammar: dict[str, dict], semantics: dict[str
             "domainObject": service_noun,
             "sourceArtifactUri": f"service://{service_name}",
             "sourceFile": str(effective_path),
-            "inParameters": collect_parameter_names(service_el, "in-parameters"),
-            "outParameters": collect_parameter_names(service_el, "out-parameters"),
+            "inParameters": collect_parameter_metadata(service_el, "in-parameters", "in"),
+            "outParameters": collect_parameter_metadata(service_el, "out-parameters", "out"),
             "implements": [impl.get("service") for impl in service_el.findall("implements") if impl.get("service")],
         }
 

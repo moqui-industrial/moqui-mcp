@@ -72,7 +72,7 @@
 
     <!-- LibreChat Proxy Servlet settings (same pattern as kibana_host/kibana_port in MoquiDefaultConf.xml) -->
     <default-property name="librechat_host" value="127.0.0.1"/>
-    <default-property name="librechat_port" value="3080"/>
+    <default-property name="librechat_port" value="3081"/>
     <default-property name="elasticsearch_url" value="http://127.0.0.1:9200"/>
     <!-- Local MCP service account used to initialize LibreChat without depending on browser session cookies.
          For validation of business flows we use the demo admin account with full permissions. -->
@@ -164,19 +164,6 @@
                 <init-param name="prefix" value="/registerSW.js"/>
                 <url-pattern>/registerSW.js</url-pattern>
             </servlet>
-            <servlet name="EnhancedMcpServlet" class="org.moqui.mcp.EnhancedMcpServlet"
-                     load-on-startup="5" async-supported="true">
-                <init-param name="allowedOrigins" value=""/>
-                <init-param name="allowCredentials" value="true"/>
-                <init-param name="keepAliveIntervalSeconds" value="30"/>
-                <init-param name="maxConnections" value="100"/>
-                <url-pattern>/mcp</url-pattern>
-                <url-pattern>/mcp/*</url-pattern>
-                <url-pattern>/sse</url-pattern>
-                <url-pattern>/sse/*</url-pattern>
-                <url-pattern>/message</url-pattern>
-                <url-pattern>/message/*</url-pattern>
-            </servlet>
         </webapp>
     </webapp-list>
 
@@ -193,14 +180,9 @@
             <subscreens-item name="agent" menu-title="Agent Chat" menu-index="97"
                     location="component://moqui-mcp/screen/agent.xml"/>
         </screen>
-        <!-- Register both "mcp" and the stripped child paths under webroot.
-             Depending on request path normalization, ScreenUrlInfo may see either:
-             - ["mcp"]
-             - ["mcp", "message"]
-             - ["message"]
-             - ["sse"]
-             The servlet still handles the actual MCP protocol, but these stub routes let
-             Moqui create Visit/auth context before servlet dispatch without 404ing first. -->
+        <!-- Keep the stub routes so request/path resolution can still recognize MCP-related
+             paths while MCP transport is being served through the service layer instead of
+             a custom servlet bootstrap. -->
         <screen location="component://webroot/screen/webroot.xml">
             <subscreens-item name="mcp" menu-include="false" location="component://moqui-mcp/screen/mcp.xml"/>
             <subscreens-item name="message" menu-include="false" location="component://moqui-mcp/screen/mcp.xml"/>

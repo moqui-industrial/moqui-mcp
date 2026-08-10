@@ -328,4 +328,47 @@ along with this software (see the LICENSE.md file). If not, see
         <alias entity-alias="PMHD" name="maxHitsDuration" field="textValue"/>
         <alias entity-alias="PTPD" name="tarpitDuration" field="textValue"/>
     </view-entity>
+
+    <view-entity entity-name="AgentArtifactMorphismBridge" package="moqui.agent.graph" cache="never">
+        <member-entity entity-alias="PBV" entity-name="moqui.math.Parameter">
+            <entity-condition><econdition entity-alias="PBV" field-name="parameterDefId" value="AgMorphBridgeGraphVertexIdDef"/></entity-condition>
+        </member-entity>
+        <member-entity entity-alias="AVM" entity-name="moqui.agent.graph.AgentArtifactVertexMeta" join-from-alias="PBV">
+            <key-map field-name="graphId"/>
+            <key-map field-name="graphVertexId"/>
+        </member-entity>
+        <member-entity entity-alias="M" entity-name="moqui.math.ct.Morphism" join-from-alias="PBV">
+            <key-map field-name="morphismId"/>
+        </member-entity>
+        <member-entity entity-alias="PBA" entity-name="moqui.math.Parameter" join-from-alias="M" join-optional="true">
+            <key-map field-name="morphismId"/>
+            <entity-condition><econdition entity-alias="PBA" field-name="parameterDefId" value="AgMorphBridgeArtifactUriDef"/></entity-condition>
+        </member-entity>
+        <member-entity entity-alias="PBK" entity-name="moqui.math.Parameter" join-from-alias="M" join-optional="true">
+            <key-map field-name="morphismId"/>
+            <entity-condition><econdition entity-alias="PBK" field-name="parameterDefId" value="AgMorphBridgeArtifactKindDef"/></entity-condition>
+        </member-entity>
+        <alias entity-alias="PBV" name="bridgeParameterId" field="parameterId"/>
+        <alias entity-alias="PBV" name="bridgeGraphId" field="graphId"/>
+        <alias entity-alias="PBV" name="bridgeGraphVertexId" field="graphVertexId"/>
+        <alias entity-alias="AVM" name="graphId"/>
+        <alias entity-alias="AVM" name="graphVertexId"/>
+        <alias entity-alias="AVM" name="label"/>
+        <alias entity-alias="AVM" name="vertexType"/>
+        <alias entity-alias="AVM" name="sourceArtifactUri"/>
+        <alias entity-alias="AVM" name="artifactKind"/>
+        <alias entity-alias="AVM" name="serviceName"/>
+        <alias entity-alias="AVM" name="serviceVerb"/>
+        <alias entity-alias="AVM" name="serviceNoun"/>
+        <alias entity-alias="AVM" name="entityName"/>
+        <alias entity-alias="AVM" name="xmlActionElement"/>
+        <alias entity-alias="M" name="morphismId"/>
+        <alias entity-alias="M" name="categoryId"/>
+        <alias entity-alias="M" name="morphismName"/>
+        <alias entity-alias="M" name="morphismSymbol"/>
+        <alias entity-alias="M" name="morphismTypeEnumId"/>
+        <alias entity-alias="M" name="morphismServiceName" field="serviceName"/>
+        <alias entity-alias="PBA" name="bridgeArtifactUri" field="textValue"/>
+        <alias entity-alias="PBK" name="bridgeArtifactKind" field="textValue"/>
+    </view-entity>
 </entities>

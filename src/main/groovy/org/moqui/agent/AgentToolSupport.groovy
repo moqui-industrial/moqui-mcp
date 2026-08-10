@@ -514,7 +514,7 @@ class AgentToolSupport {
         boolean hasItem = normalizedText.contains('item') || normalizedText.contains('items') ||
                 normalizedText.contains('riga') || normalizedText.contains('righe') ||
                 normalizedText.contains('linea') || normalizedText.contains('linee')
-        return hasRequest && hasItem
+        return (hasRequest && hasItem) || looksLikeSupportRequestCreatePrompt(queryText)
     }
 
     static boolean looksLikeBudgetHierarchyPrompt(String queryText) {
@@ -522,6 +522,7 @@ class AgentToolSupport {
         String normalizedText = normalizePromptWhitespace(queryText).toLowerCase()
         boolean hasBudget = normalizedText.contains('budget')
         boolean hasItem = normalizedText.contains('item') || normalizedText.contains('items') ||
+                normalizedText.contains('line') || normalizedText.contains('lines') ||
                 normalizedText.contains('riga') || normalizedText.contains('righe') ||
                 normalizedText.contains('linea') || normalizedText.contains('linee') ||
                 normalizedText.contains('dettagl')
@@ -603,6 +604,9 @@ class AgentToolSupport {
         }
         if (plan.planType == 'same_subject_multi_action') {
             return executeSameSubjectMultiActionPlan(ec, plan, confirmed, dryRun, sessionId)
+        }
+        if (plan.planType == 'aggregate_create_tree') {
+            return executeRootChildHierarchyPlan(ec, queryText, null, mergedParameters, confirmed, dryRun, sessionId)
         }
         return [:]
     }
@@ -687,6 +691,10 @@ class AgentToolSupport {
         if (looksLikeEmploymentPositionPrompt(queryText)) {
             Map employmentPositionPlan = inferEmploymentPositionPlan(ec, queryText, mergedParameters)
             if (employmentPositionPlan?.planType) return employmentPositionPlan
+        }
+        if (looksLikeRootChildHierarchyPrompt(queryText)) {
+            Map hierarchyPlan = inferRootChildHierarchyPlan(ec, queryText, null, mergedParameters)
+            if (hierarchyPlan?.planType) return hierarchyPlan
         }
         Map llmPlan = inferLlmStructuredPromptPlan(ec, queryText, mergedParameters)
         if (llmPlan?.planType) return llmPlan
@@ -1025,7 +1033,7 @@ class AgentToolSupport {
             primaryService : 'mantle.product.AssetServices.move#Asset',
             actions : [
                 [
-                    actionName : 'moveAsset',
+                    actionName : 'moveAssetLocation',
                     serviceName : 'mantle.product.AssetServices.move#Asset',
                     parameters : collectNonNullEntries([
                         assetId : '{@subject.subjectId}',
@@ -1033,7 +1041,7 @@ class AgentToolSupport {
                         locationSeqId : parsed.targetLocationSeqId
                     ]),
                     contextUpdates : [
-                        assetId : '{@context.newAssetId}',
+                        assetId : '{@context.assetId}',
                         facilityId : '{@context.facilityId}',
                         targetLocationSeqId : '{@context.targetLocationSeqId}'
                     ]
@@ -1041,12 +1049,11 @@ class AgentToolSupport {
                 [
                     actionName : 'updateAssetStatus',
                     serviceName : 'update#mantle.product.asset.Asset',
-                    parameters : [
-                        assetId : '{@context.assetId}',
+                    parameters : collectNonNullEntries([
+                        assetId : '{@subject.subjectId}',
                         statusId : parsed.statusId
-                    ],
+                    ]),
                     contextUpdates : [
-                        assetId : '{@context.assetId}',
                         statusId : '{@context.statusId}'
                     ]
                 ]
@@ -1141,7 +1148,7 @@ class AgentToolSupport {
         return inferAssetMoveStatusPlan(ec, queryText, combinedParameters)
     }
 
-    protected static String simpleEntityName(String entityName) {
+    static String simpleEntityName(String entityName) {
         if (!entityName) return null
         String trimmed = entityName.toString().trim()
         if (!trimmed) return null
@@ -1149,7 +1156,18 @@ class AgentToolSupport {
         return lastDot >= 0 ? trimmed.substring(lastDot + 1) : trimmed
     }
 
-    protected static String normalizeAggregateTypeFromPattern(String patternType, String rootEntityName, String patternName = null) {
+    static String toObjectPhrase(String rawName) {
+        String simpleName = simpleEntityName(rawName)
+        if (!simpleName) return null
+        return simpleName
+                .replaceAll(/([a-z0-9])([A-Z])/, '$1 $2')
+                .replaceAll(/([A-Z]+)([A-Z][a-z])/, '$1 $2')
+                .replaceAll(/\s+/, ' ')
+                .trim()
+                .toLowerCase()
+    }
+
+    static String normalizeAggregateTypeFromPattern(String patternType, String rootEntityName, String patternName = null) {
         String normalized = (patternType ?: '').toString().trim().toLowerCase()
         if (normalized) return normalized
         String lowerPatternName = (patternName ?: '').toString().toLowerCase()
@@ -1162,7 +1180,70 @@ class AgentToolSupport {
         return (simpleEntityName(rootEntityName) ?: 'aggregate').toLowerCase()
     }
 
-    protected static List<Map> loadAggregatePatternRegistry(ExecutionContext ec) {
+    static List<Map> loadDiscoveredTemplateRegistry(ExecutionContext ec) {
+        if (!ec?.entity) return []
+        try {
+            def templateList = ec.entity.find('moqui.agent.AgentDiscoveredDataTemplate').disableAuthz().useCache(false)
+                    .orderBy('templateType, rootEntityName, templateName')
+                    .list()
+                    .findAll { ((it.get('active') ?: 'Y') as String).equalsIgnoreCase('Y') }
+            List<Map> registry = []
+            templateList.each { templateEv ->
+                String templateId = templateEv.getString('agentDiscoveredDataTemplateId')
+                List<Map> members = []
+                try {
+                    members = ec.entity.find('moqui.agent.AgentDiscoveredDataTemplateMember').disableAuthz().useCache(false)
+                            .condition('agentDiscoveredDataTemplateId', templateId)
+                            .orderBy('templateMemberSeqId')
+                            .list()
+                            .collect { it.getMap() }
+                } catch (Throwable ignored) { }
+
+                Map rootMember = members.find { ((it.memberRoleType ?: '') as String).equalsIgnoreCase('root') } ?: [:]
+                List<Map> childMembers = members.findAll { !(((it.memberRoleType ?: '') as String).equalsIgnoreCase('root')) }
+                String rootEntityName = templateEv.getString('rootEntityName')
+                String templateName = templateEv.getString('templateName')
+
+                List<String> memberNames = members.collect { Map member ->
+                    member.memberName ?: simpleEntityName(member.entityName as String)
+                }.findAll { it } as List<String>
+                List<String> childMemberNames = childMembers.collect { Map member ->
+                    member.memberName ?: simpleEntityName(member.entityName as String)
+                }.findAll { it } as List<String>
+                List<String> sequenceFieldNames = childMembers.collectMany { Map member ->
+                    ((member.sequenceFieldNames ?: '') as String).split(',').collect { it?.trim() }.findAll { it }
+                }.unique() as List<String>
+
+                registry.add(collectNonNullEntries([
+                        aggregatePatternId : templateId,
+                        patternName : templateName,
+                        patternType : templateEv.getString('templateType'),
+                        rootEntityName : rootEntityName,
+                        rootEntitySimpleName : simpleEntityName(rootEntityName),
+                        rootPkFieldNames : rootMember.pkFieldNames ?: rootMember.linkFieldNames,
+                        rootReferenceFieldName : childMembers.find { ((it.memberRoleType ?: '') as String).equalsIgnoreCase('recursive_child') }?.linkFieldNames,
+                        parentReferenceFieldName : childMembers.find { ((it.memberRoleType ?: '') as String).equalsIgnoreCase('self_recursive') || ((it.memberRoleType ?: '') as String).equalsIgnoreCase('recursive_child') }?.linkFieldNames,
+                        sequenceFieldNames : sequenceFieldNames ? sequenceFieldNames.join(',') : null,
+                        description : templateEv.getString('description'),
+                        usageNotes : "Discovered from entity definitions for ${rootEntityName}",
+                        memberCount : members.size(),
+                        rootMemberName : rootMember.memberName ?: simpleEntityName(rootEntityName),
+                        childMemberNames : childMemberNames,
+                        childEntityNames : childMembers.collect { it.entityName }.findAll { it },
+                        memberNames : memberNames,
+                        memberEntityNames : members.collect { it.entityName }.findAll { it },
+                        supportedAggregateType : normalizeAggregateTypeFromPattern(templateEv.getString('templateType'), rootEntityName, templateName),
+                        patternSourceType : 'discovered_template'
+                ]))
+            }
+            return registry
+        } catch (Throwable t) {
+            ec.logger.warn("Unable to load discovered template registry: ${t.message}")
+            return []
+        }
+    }
+
+    static List<Map> loadAggregatePatternRegistry(ExecutionContext ec) {
         if (!ec?.entity) return []
         try {
             def patternList = ec.entity.find('moqui.agent.AgentAggregatePattern').disableAuthz().useCache(false)
@@ -1202,14 +1283,142 @@ class AgentToolSupport {
                         childEntityNames : childMembers.collect { it.entityName }.findAll { it },
                         memberNames : members.collect { it.memberName }.findAll { it },
                         memberEntityNames : members.collect { it.entityName }.findAll { it },
-                        supportedAggregateType : normalizeAggregateTypeFromPattern(patternEv.getString('patternType'), patternEv.getString('rootEntityName'), patternEv.getString('patternName'))
+                        supportedAggregateType : normalizeAggregateTypeFromPattern(patternEv.getString('patternType'), patternEv.getString('rootEntityName'), patternEv.getString('patternName')),
+                        patternSourceType : 'seed_pattern'
                 ]))
             }
+            registry.addAll(loadDiscoveredTemplateRegistry(ec))
             return registry
         } catch (Throwable t) {
             ec.logger.warn("Unable to load aggregate pattern registry: ${t.message}")
             return []
         }
+    }
+
+    static Map loadAggregatePatternIndex(ExecutionContext ec) {
+        List<Map> registry = loadAggregatePatternRegistry(ec)
+        Map<String, Map> memberByObject = [:]
+        Map<String, String> parentByObject = [:]
+        Map<String, String> rootByObject = [:]
+        Map<String, Set<String>> aliasesByObject = [:].withDefault { [] as Set<String> }
+        Map<String, List<Map>> membersByPattern = [:].withDefault { [] }
+
+        registry.each { Object patternObj ->
+            Map pattern = (patternObj instanceof Map) ? (Map) patternObj : [:]
+            String patternAggregateId = pattern.aggregatePatternId != null ? pattern.aggregatePatternId.toString() : ''
+            String patternRootMemberName = pattern.rootMemberName != null ? pattern.rootMemberName.toString() : null
+            String patternRootEntitySimpleName = pattern.rootEntitySimpleName != null ? pattern.rootEntitySimpleName.toString() : null
+            String patternRootEntityName = pattern.rootEntityName != null ? pattern.rootEntityName.toString() : null
+            String patternName = pattern.patternName != null ? pattern.patternName.toString() : null
+
+            String rootObject = toObjectPhrase(patternRootMemberName) ?:
+                    toObjectPhrase(patternRootEntitySimpleName) ?:
+                    toObjectPhrase(patternRootEntityName)
+            List<Map> memberRows = []
+            try {
+                memberRows = ec.entity.find('moqui.agent.AgentAggregatePatternMember').disableAuthz().useCache(false)
+                        .condition('agentAggregatePatternId', patternAggregateId)
+                        .orderBy('patternMemberSeqId')
+                        .list()
+                        .collect { it.getMap() }
+            } catch (Throwable ignored) { }
+
+            memberRows.each { Object memberObj ->
+                Map member = (memberObj instanceof Map) ? (Map) memberObj : [:]
+                String memberName = member.memberName != null ? member.memberName.toString() : null
+                String memberEntityName = member.entityName != null ? member.entityName.toString() : null
+                String parentEntityName = member.parentEntityName != null ? member.parentEntityName.toString() : null
+                String memberRoleType = member.memberRoleType != null ? member.memberRoleType.toString() : null
+
+                String objectPhrase = toObjectPhrase(memberName) ?:
+                        toObjectPhrase(memberEntityName)
+                if (!objectPhrase) return
+
+                String parentObject = toObjectPhrase(parentEntityName)
+                if (!parentObject && parentEntityName && rootObject &&
+                        simpleEntityName(parentEntityName)?.equalsIgnoreCase(patternRootEntitySimpleName)) {
+                    parentObject = rootObject
+                }
+
+                Map memberInfo = [
+                        aggregatePatternId : patternAggregateId,
+                        patternName : patternName,
+                        patternType : pattern.patternType,
+                        supportedAggregateType : pattern.supportedAggregateType,
+                        objectPhrase : objectPhrase,
+                        entityName : memberEntityName,
+                        entitySimpleName : simpleEntityName(memberEntityName),
+                        memberName : memberName,
+                        memberRoleType : memberRoleType,
+                        parentObjectPhrase : parentObject,
+                        parentEntityName : parentEntityName,
+                        rootObjectPhrase : rootObject
+                ]
+                memberByObject[objectPhrase] = memberInfo
+                String canonicalParent = (rootObject && parentEntityName && simpleEntityName(parentEntityName)?.equalsIgnoreCase(patternRootEntitySimpleName)) ? rootObject : parentObject
+                if (canonicalParent) parentByObject[objectPhrase] = canonicalParent
+                if (rootObject) rootByObject[objectPhrase] = rootObject
+                if (patternAggregateId) membersByPattern[patternAggregateId] << memberInfo
+
+                aliasesByObject[objectPhrase] << objectPhrase
+                if (memberName) aliasesByObject[objectPhrase] << memberName.trim().toLowerCase()
+                if (memberEntityName) aliasesByObject[objectPhrase] << toObjectPhrase(memberEntityName)
+                if (memberEntityName) aliasesByObject[objectPhrase] << simpleEntityName(memberEntityName).toLowerCase()
+                if ((memberRoleType ?: '').equalsIgnoreCase('root')) {
+                    String simpleRoot = toObjectPhrase(patternRootEntitySimpleName)
+                    if (simpleRoot) aliasesByObject[objectPhrase] << simpleRoot
+                    if (patternName) {
+                        String lowerPatternName = patternName.toLowerCase()
+                        if (lowerPatternName.contains('/')) aliasesByObject[objectPhrase] << lowerPatternName.split('/')[0].trim()
+                    }
+                }
+                if (objectPhrase in ['order', 'order header']) aliasesByObject[objectPhrase].addAll(['order', 'ordine', 'sales order', 'ordine di vendita'])
+                if (objectPhrase in ['request', 'support request']) aliasesByObject[objectPhrase].addAll(['request', 'richiesta', 'support request'])
+                if (objectPhrase in ['facility', 'facility location', 'warehouse']) aliasesByObject[objectPhrase].addAll(['facility', 'magazzino', 'warehouse'])
+                if (objectPhrase in ['person', 'employee']) aliasesByObject[objectPhrase].addAll(['person', 'impiegato', 'persona', 'employee'])
+                if (objectPhrase in ['employment position', 'empl position']) {
+                    aliasesByObject['employment position'].addAll(['employment position', 'empl position', 'posizione impiegato', 'posizione da impiegato', 'job position'])
+                    aliasesByObject['empl position'].addAll(['employment position', 'empl position', 'posizione impiegato', 'posizione da impiegato', 'job position'])
+                    rootByObject['employment position'] = 'employment position'
+                    rootByObject['empl position'] = 'employment position'
+                }
+                if (objectPhrase in ['asset']) aliasesByObject[objectPhrase].addAll(['asset'])
+                if (objectPhrase == 'shipment item') aliasesByObject[objectPhrase].addAll(['shipment item', 'shipment line', 'riga spedizione', 'voce spedizione', 'articolospedizione'])
+                if (objectPhrase in ['acctg trans entry', 'accounting transaction entry']) aliasesByObject[objectPhrase].addAll(['acctg trans entry', 'accounting transaction entry', 'entry contabile', 'riga contabile', 'riga transazione contabile'])
+                if (objectPhrase.endsWith(' header')) {
+                    String compactRoot = objectPhrase.replace(' header', '').trim()
+                    if (compactRoot) {
+                        aliasesByObject[compactRoot].addAll(aliasesByObject[objectPhrase])
+                        rootByObject[compactRoot] = compactRoot
+                    }
+                }
+            }
+        }
+
+        Map<String, List<String>> childrenByObject = [:].withDefault { [] }
+        parentByObject.each { Object childObj, Object parentObj ->
+            String child = childObj != null ? childObj.toString() : ''
+            String parent = parentObj != null ? parentObj.toString() : ''
+            if (child && parent) childrenByObject[parent] << child
+        }
+
+        return [
+                memberByObject : memberByObject,
+                parentByObject : parentByObject,
+                rootByObject : rootByObject,
+                aliasesByObject : aliasesByObject.collectEntries { Object keyObj, Object valueObj ->
+                    String key = keyObj != null ? keyObj.toString() : ''
+                    Set<String> values = [] as Set<String>
+                    if (valueObj instanceof Collection) {
+                        (valueObj as Collection).each { Object entry ->
+                            if (entry != null && entry.toString()) values << entry.toString()
+                        }
+                    }
+                    [(key): values]
+                },
+                childrenByObject : childrenByObject,
+                membersByPattern : membersByPattern
+        ]
     }
 
     static List<Map> loadUniversalPatternRegistry(ExecutionContext ec) {
@@ -1365,7 +1574,7 @@ class AgentToolSupport {
         ])
     }
 
-    protected static List<Map> buildSupportedAggregatePatternHints(ExecutionContext ec) {
+    static List<Map> buildSupportedAggregatePatternHints(ExecutionContext ec) {
         List<Map> supportedPatterns = [
                 [planType : 'same_subject_multi_action', subjectEntity : 'Asset', verbs : ['move', 'update_status']]
         ]
@@ -1670,12 +1879,16 @@ Rules:
         if (!aggregateKind) return [:]
 
         Map llmHierarchyPlan = inferLlmRootChildHierarchyPlan(ec, queryText, document, inferredParameters)
-        if (llmHierarchyPlan?.rootNode) return llmHierarchyPlan
+        if (llmHierarchyPlan?.rootNode) return finalizeRootChildHierarchyPlan(llmHierarchyPlan, aggregateKind)
 
-        if (aggregateKind == 'request') return inferRequestRootSeqPlan(ec, queryText, document, inferredParameters)
-        if (aggregateKind == 'budget') return inferBudgetRootSeqPlan(ec, queryText, document, inferredParameters)
-        if (aggregateKind == 'facility') return inferFacilityParentChildPlan(ec, queryText, document, inferredParameters)
-        if (aggregateKind == 'order') return inferOrderHeaderPartItemPlan(ec, queryText, document, inferredParameters)
+        if (aggregateKind == 'request') return finalizeRootChildHierarchyPlan(
+                inferRequestRootSeqPlan(ec, queryText, document, inferredParameters), aggregateKind)
+        if (aggregateKind == 'budget') return finalizeRootChildHierarchyPlan(
+                inferBudgetRootSeqPlan(ec, queryText, document, inferredParameters), aggregateKind)
+        if (aggregateKind == 'facility') return finalizeRootChildHierarchyPlan(
+                inferFacilityParentChildPlan(ec, queryText, document, inferredParameters), aggregateKind)
+        if (aggregateKind == 'order') return finalizeRootChildHierarchyPlan(
+                inferOrderHeaderPartItemPlan(ec, queryText, document, inferredParameters), aggregateKind)
 
         String normalizedText = normalizePromptWhitespace(queryText)
         if (!inferredParameters.workEffortName) {
@@ -1724,6 +1937,23 @@ Rules:
 
         plan.rootNode = buildRootChildHierarchyRootNode(plan)
 
+        return finalizeRootChildHierarchyPlan(plan, aggregateKind)
+    }
+
+    protected static Map finalizeRootChildHierarchyPlan(Map plan, String aggregateKind = null) {
+        if (!(plan instanceof Map) || !plan.rootNode) return plan ?: [:]
+        if (!plan.planType) plan.planType = 'aggregate_create_tree'
+        if (!plan.subjectEntity) {
+            Map<String, String> subjectEntityByAggregateKind = [
+                    project  : 'Project',
+                    request  : 'Request',
+                    budget   : 'Budget',
+                    facility : 'Facility',
+                    order    : 'OrderHeader'
+            ]
+            String inferredSubjectEntity = subjectEntityByAggregateKind[aggregateKind ?: '']
+            if (inferredSubjectEntity) plan.subjectEntity = inferredSubjectEntity
+        }
         return plan
     }
 
@@ -2208,7 +2438,13 @@ Rules:
 
         String resultIdField = (node.resultIdField ?: inferResultIdField((node.documentId ?: node.serviceName) as String)) as String
         String createdId = extractCreatedId(execResult, resultIdField)
-        Map nodeContext = collectNonNullEntries(new LinkedHashMap(nodeParameters + [(resultIdField): createdId]))
+        Map nodeContext = new LinkedHashMap(nodeParameters)
+        Map serviceResultMap = (execResult?.serviceResult instanceof Map) ? (execResult.serviceResult as Map) : [:]
+        serviceResultMap.each { String key, Object value ->
+            if (value != null && isAggregateContextScalar(value)) nodeContext[key] = value
+        }
+        if (resultIdField && createdId != null) nodeContext[resultIdField] = createdId
+        nodeContext = collectNonNullEntries(nodeContext)
 
         executionLog.add([
                 nodeType : node.nodeType,
@@ -2287,6 +2523,16 @@ Rules:
             if (parentValue != null) resolved = resolved.replace("{@parent.${key}}", parentValue.toString())
         }
         return resolved
+    }
+
+    protected static boolean isAggregateContextScalar(Object value) {
+        return value == null ||
+                value instanceof CharSequence ||
+                value instanceof Number ||
+                value instanceof Boolean ||
+                value instanceof java.util.Date ||
+                value instanceof java.sql.Date ||
+                value instanceof java.sql.Timestamp
     }
 
     protected static void applyAggregateNodePostCreate(ExecutionContext ec, Map node, Map nodeContext) {
@@ -2423,7 +2669,9 @@ Rules:
     }
 
     protected static String detectRootChildHierarchyAggregateKind(String queryText, Map document = null) {
-        if (isRequestHierarchyRootDocument(document) || looksLikeRequestHierarchyPrompt(queryText)) return 'request'
+        if (isRequestHierarchyRootDocument(document) ||
+                looksLikeRequestHierarchyPrompt(queryText) ||
+                looksLikeSupportRequestCreatePrompt(queryText)) return 'request'
         if (isBudgetHierarchyRootDocument(document) || looksLikeBudgetHierarchyPrompt(queryText)) return 'budget'
         if (isFacilityHierarchyRootDocument(document) || looksLikeFacilityHierarchyPrompt(queryText)) return 'facility'
         if (isOrderHierarchyRootDocument(document) || looksLikeOrderHierarchyPrompt(queryText)) return 'order'
@@ -2470,7 +2718,6 @@ Rules:
     protected static Map inferRequestRootSeqPlan(ExecutionContext ec, String queryText, Map document = null, Map mergedParameters = null) {
         String normalizedText = normalizePromptWhitespace(queryText)
         List<Map> requestItems = extractRequestItemPlan(normalizedText)
-        if (!requestItems) return [:]
 
         Map requestParams = new LinkedHashMap((mergedParameters instanceof Map) ? (mergedParameters as Map) : [:])
         if (!requestParams.requestName) requestParams.requestName = extractRequestName(normalizedText)
@@ -2486,13 +2733,14 @@ Rules:
         }
 
         requestParams = collectNonNullEntries(requestParams)
+        if (!requestParams.requestName && !requestParams.description) return [:]
         Map plan = [
                 aggregateType : 'root_seq_child',
                 aggregatePatternId : PATTERN_SILVERSTON_ROOT_CHILD_HIERARCHY,
                 rootDocumentId : document?.documentId ?: 'agent-prompt://request/findrequest/createrequest',
                 request : requestParams,
-                requestItems : requestItems,
-                childCount : requestItems.size()
+                requestItems : requestItems ?: [],
+                childCount : (requestItems ?: []).size()
         ]
         plan.rootNode = buildRootChildHierarchyRootNode(plan)
         return plan
@@ -2933,6 +3181,7 @@ Rules:
         return [
                 nodeType : 'request',
                 documentId : plan.rootDocumentId,
+                serviceName : 'mantle.request.RequestServices.create#Request',
                 resultIdField : 'requestId',
                 contextKey : 'request',
                 parameters : plan.request,
@@ -3031,13 +3280,15 @@ Rules:
             [
                     nodeType : 'order_item',
                     documentId : 'agent-prompt://order/orderdetail/addproductitem',
+                    serviceName : 'mantle.order.OrderServices.add#OrderProductQuantity',
                     resultIdField : 'orderItemSeqId',
                     contextKey : 'orderItem',
                     parameters : collectNonNullEntries([
                             productId : item.productId,
                             quantity : item.quantity,
                             requiredByDate : item.requiredByDate,
-                            description : item.description
+                            description : item.description,
+                            requireInventory : false
                     ]),
                     inheritRootFields : [orderId : 'orderId', orderPartSeqId : 'orderPartSeqId']
             ]
@@ -3048,13 +3299,15 @@ Rules:
                 [
                         nodeType : 'order_item',
                         documentId : 'agent-prompt://order/orderdetail/addproductitem',
+                        serviceName : 'mantle.order.OrderServices.add#OrderProductQuantity',
                         resultIdField : 'orderItemSeqId',
                         contextKey : 'orderItem',
                         parameters : collectNonNullEntries([
-                                productId : item.productId,
-                                quantity : item.quantity,
+                            productId : item.productId,
+                            quantity : item.quantity,
                                 requiredByDate : item.requiredByDate,
-                                description : item.description
+                                description : item.description,
+                                requireInventory : false
                         ]),
                         inheritRootFields : [orderId : 'orderId'],
                         inheritParentFields : [orderPartSeqId : 'orderPartSeqId']
@@ -3063,6 +3316,7 @@ Rules:
             [
                     nodeType : 'order_part',
                     documentId : 'agent-prompt://order/orderdetail/createorderpart',
+                    serviceName : 'mantle.order.OrderServices.create#OrderPart',
                     resultIdField : 'orderPartSeqId',
                     contextKey : 'orderPart',
                     parameters : collectNonNullEntries([
@@ -3080,6 +3334,7 @@ Rules:
         return [
                 nodeType : 'order_header',
                 documentId : plan.rootDocumentId,
+                serviceName : 'mantle.order.OrderServices.create#Order',
                 resultIdField : 'orderId',
                 contextKey : 'order',
                 parameters : plan.order,
@@ -3105,6 +3360,7 @@ Rules:
         String cleaned = normalizePromptWhitespace(text)
                 .replaceAll(/(?i)\s+ed\s+/, ' e ')
                 .replaceAll(/(?i)^e\s+/, '')
+                .replaceAll(/(?i)\s+(?:e|and)\s*$/, '')
                 .replaceAll(/[.,;:!?]+$/, '')
                 .trim()
         return cleaned
@@ -3124,16 +3380,23 @@ Rules:
             int splitIndex = -1
             String selectedPart = null
             parts.eachWithIndex { String part, int index ->
-                if (part?.toLowerCase()?.contains(' e ') && (selectedPart == null || part.size() > selectedPart.size())) {
+                String normalizedPart = part?.toLowerCase()
+                if ((normalizedPart?.contains(' e ') || normalizedPart?.contains(' and ')) &&
+                        (selectedPart == null || part.size() > selectedPart.size())) {
                     splitIndex = index
                     selectedPart = part
                 }
             }
             if (splitIndex < 0 || !selectedPart) break
-            int lastSeparatorIndex = selectedPart.toLowerCase().lastIndexOf(' e ')
+            String normalizedSelected = selectedPart.toLowerCase()
+            int italianSeparatorIndex = normalizedSelected.lastIndexOf(' e ')
+            int englishSeparatorIndex = normalizedSelected.lastIndexOf(' and ')
+            boolean useEnglishSeparator = englishSeparatorIndex > italianSeparatorIndex
+            int lastSeparatorIndex = useEnglishSeparator ? englishSeparatorIndex : italianSeparatorIndex
+            int separatorLength = useEnglishSeparator ? 5 : 3
             if (lastSeparatorIndex <= 0) break
             String left = cleanupPromptSegment(selectedPart.substring(0, lastSeparatorIndex))
-            String right = cleanupPromptSegment(selectedPart.substring(lastSeparatorIndex + 3))
+            String right = cleanupPromptSegment(selectedPart.substring(lastSeparatorIndex + separatorLength))
             parts.remove(splitIndex)
             if (right) parts.add(splitIndex, right)
             if (left) parts.add(splitIndex, left)
@@ -3413,8 +3676,13 @@ Rules:
     protected static List<Map> extractRequestItemPlan(String text) {
         if (!text) return []
         List<String> itemTexts = []
+        Integer expectedCount = null
+        String countTokenPattern = '(?:\\d+|un|uno|una|one|due|two|tre|three|quattro|four|cinque|five|sei|six|sette|seven|otto|eight|nove|nine|dieci|ten)'
+        def countMatcher = (text =~ /(?i)\b(?:con|with|add|aggiungi|aggiungere)\s+(${countTokenPattern})\s+(?:request\s+)?(?:items?|righe|linee)\b/)
+        if (countMatcher.find()) expectedCount = safeCountInteger(countMatcher.group(1))
         List patterns = [
-                /(?is)\b(?:con|with)\s+\d+\s+(?:items?|righe|linee)\s+(.+?)(?=(?:\bassegna\b|\bassign\b|\bcon\s+priorit|\bwith\s+priorit|$))/,
+                ~/(?is)\b(?:con|with)\s+(?:${countTokenPattern})\s+(?:request\s+)?(?:items?|righe|linee)\s+(.+?)(?=(?:\bassegna\b|\bassign\b|\bcon\s+priorit|\bwith\s+priorit|$))/,
+                ~/(?is)\b(?:add|aggiungi|aggiungere)\s+(?:${countTokenPattern})\s+(?:request\s+)?(?:items?|righe|linee)\s+(.+?)(?=(?:\bassegna\b|\bassign\b|\bcon\s+priorit|\bwith\s+priorit|$))/,
                 /(?is)\b(?:items?|righe|linee)\s*:\s*(.+?)(?=(?:\bassegna\b|\bassign\b|\bcon\s+priorit|\bwith\s+priorit|$))/
         ]
         for (pattern in patterns) {
@@ -3422,7 +3690,7 @@ Rules:
             if (matcher.find()) {
                 String rawItems = cleanupPromptSegment(matcher.group(1))
                 if (rawItems) {
-                    itemTexts = splitNamedItems(rawItems, null)
+                    itemTexts = splitNamedItems(rawItems, expectedCount)
                     if (itemTexts.size() <= 1) itemTexts = splitAmountBearingItems(rawItems)
                     break
                 }
@@ -3461,11 +3729,11 @@ Rules:
         List<String> itemTexts = []
         Integer expectedCount = null
         String countTokenPattern = '(?:\\d+|un|uno|una|one|due|two|tre|three|quattro|four|cinque|five|sei|six|sette|seven|otto|eight|nove|nine|dieci|ten)'
-        def countMatcher = (text =~ /(?i)\b(?:con|with)\s+(${countTokenPattern})\s+(?:budget\s+)?(?:items?|item|riga|righe|linea|linee)\b/)
+        def countMatcher = (text =~ /(?i)\b(?:con|with)\s+(${countTokenPattern})\s+(?:budget\s+)?(?:items?|item|lines?|line|riga|righe|linea|linee)\b/)
         if (countMatcher.find()) expectedCount = safeCountInteger(countMatcher.group(1))
         List patterns = [
-                ~/(?is)\b(?:con|with)\s+(?:${countTokenPattern})\s+(?:budget\s+)?(?:items?|item|riga|righe|linea|linee)\s+(.+?)(?=(?:\bper\s+(?:organization|organizzazione|company|azienda)\b|\banno\b|\byear\b|\btype\b|\btipo\b|$))/,
-                /(?is)\b(?:items?|item|riga|righe|linea|linee)\s*:\s*(.+?)(?=(?:\bper\s+(?:organization|organizzazione|company|azienda)\b|\banno\b|\byear\b|\btype\b|\btipo\b|$))/
+                ~/(?is)\b(?:con|with)\s+(?:${countTokenPattern})\s+(?:budget\s+)?(?:items?|item|lines?|line|riga|righe|linea|linee)\s+(.+?)(?=(?:\bper\s+(?:organization|organizzazione|company|azienda)\b|\banno\b|\byear\b|\btype\b|\btipo\b|$))/,
+                /(?is)\b(?:items?|item|lines?|line|riga|righe|linea|linee)\s*:\s*(.+?)(?=(?:\bper\s+(?:organization|organizzazione|company|azienda)\b|\banno\b|\byear\b|\btype\b|\btipo\b|$))/
         ]
         for (pattern in patterns) {
             def matcher = (text =~ pattern)
@@ -3719,6 +3987,9 @@ Rules:
     protected static Map buildRequestItemEntry(String itemText) {
         if (!itemText) return null
         String description = cleanupPromptSegment(itemText)
+                ?.replaceFirst(/(?i)^named\s+/, '')
+                ?.replaceFirst(/(?i)^con\s+nome\s+/, '')
+                ?.trim()
         BigDecimal quantity = null
         List quantityPatterns = [
                 /(?i)\b(?:qty|quantity|quantit[àa])\s*([0-9]+(?:[.,][0-9]+)?)/,
@@ -3901,6 +4172,30 @@ Rules:
         String normalized = normalizePromptWhitespace(displayName)
         String searchedPartyId = resolveIdByLookupSpec(ec, 'party', normalized)
         if (searchedPartyId) return searchedPartyId
+        try {
+            List<String> lookupValues = buildExactLookupVariants(normalized)
+            List<String> organizationFields = ['organizationName', 'pseudoId', 'partyId']
+            for (String fieldName in organizationFields) {
+                for (String lookupValue in lookupValues) {
+                    def organization = ec.entity.find('mantle.party.Organization').disableAuthz()
+                            .condition(fieldName, lookupValue)
+                            .one()
+                    if (organization?.partyId) return organization.partyId as String
+                }
+            }
+        } catch (Throwable ignored) { }
+        try {
+            List<String> lookupValues = buildExactLookupVariants(normalized)
+            List<String> partyFields = ['pseudoId', 'partyId']
+            for (String fieldName in partyFields) {
+                for (String lookupValue in lookupValues) {
+                    def party = ec.entity.find('mantle.party.Party').disableAuthz()
+                            .condition(fieldName, lookupValue)
+                            .one()
+                    if (party?.partyId) return party.partyId as String
+                }
+            }
+        } catch (Throwable ignored) { }
         return resolvePartyIdByPersonName(ec, displayName)
     }
 

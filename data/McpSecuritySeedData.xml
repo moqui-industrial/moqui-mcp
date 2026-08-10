@@ -24,6 +24,7 @@
     <moqui.security.ArtifactGroup artifactGroupId="McpDebugFullArtifactAccess" description="MCP debug full artifact access for end-to-end validation"/>
     <moqui.security.ArtifactGroup artifactGroupId="McpRuntimeEntities" description="MCP runtime internal entities"/>
     <moqui.security.ArtifactGroup artifactGroupId="McpRestPaths" description="MCP REST API Paths"/>
+    <moqui.security.ArtifactGroup artifactGroupId="McpAgentSkills" description="MCP Agent Skills"/>
 
     <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.mcp.McpServices.mcp#Initialize" artifactTypeEnumId="AT_SERVICE"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.mcp.McpServices.list#Tools" artifactTypeEnumId="AT_SERVICE"/>
@@ -46,6 +47,8 @@
     <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.update#AgentSessionExternalContext" artifactTypeEnumId="AT_SERVICE"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.find#AgentSessionsForUser" artifactTypeEnumId="AT_SERVICE"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="org.moqui.agent.AgentRuntimeServices.close#AgentSessionContext" artifactTypeEnumId="AT_SERVICE"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="mantle\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="(create|update|store|delete)#mantle\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="mantle\\.other\\.BudgetServices\\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="create#mantle\\.other\\.budget\\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="McpRuntimeServices" artifactName="store#mantle\\.other\\.budget\\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y"/>

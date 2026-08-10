@@ -130,6 +130,10 @@
     <moqui.math.ParameterDef parameterDefId="AgentGraphVersionParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpMathModel" parameterCode="graphVersion" parameterName="Graph Version" description="Artifact graph schema version."/>
     <moqui.math.ParameterDef parameterDefId="AgentLocaleListParam" parameterTypeEnumId="PtTextShort" purposeEnumId="PpMathModel" parameterCode="localeList" parameterName="Locale List" description="Comma-separated locales included in localization enrichment."/>
     <moqui.math.ParameterDef parameterDefId="AgentOpenSearchKnnEnabledParam" parameterTypeEnumId="PtTextIndicator" purposeEnumId="PpMathModel" parameterCode="opensearchKnnEnabled" parameterName="OpenSearch KNN Enabled" description="Whether vector/kNN indexing is enabled."/>
+    <moqui.math.ParameterDef parameterDefId="AgMorphBridgeGraphIdDef" parameterTypeEnumId="PtTextShort" purposeEnumId="PpMathModel" parameterCode="agMorphBridgeGraphId" parameterName="Bridge Graph Id" description="Graph identifier linked explicitly to a morphism."/>
+    <moqui.math.ParameterDef parameterDefId="AgMorphBridgeGraphVertexIdDef" parameterTypeEnumId="PtTextShort" purposeEnumId="PpMathModel" parameterCode="agMorphBridgeGraphVertexId" parameterName="Bridge Graph Vertex Id" description="Graph vertex identifier linked explicitly to a morphism."/>
+    <moqui.math.ParameterDef parameterDefId="AgMorphBridgeArtifactUriDef" parameterTypeEnumId="PtTextLong" purposeEnumId="PpMathModel" parameterCode="agMorphBridgeArtifactUri" parameterName="Bridge Artifact URI" description="Canonical artifact URI linked explicitly to a morphism."/>
+    <moqui.math.ParameterDef parameterDefId="AgMorphBridgeArtifactKindDef" parameterTypeEnumId="PtTextShort" purposeEnumId="PpMathModel" parameterCode="agMorphBridgeArtifactKind" parameterName="Bridge Artifact Kind" description="Artifact kind linked explicitly to a morphism."/>
 
     <moqui.math.Parameter parameterId="AgRagV1EmbProv" parameterDefId="AgentEmbeddingProviderParam" symbolicValue="openai"/>
     <moqui.math.Parameter parameterId="AgRagV1EmbModel" parameterDefId="AgentEmbeddingModelParam" symbolicValue="text-embedding-3-small"/>

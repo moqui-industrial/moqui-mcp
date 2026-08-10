@@ -18,6 +18,9 @@
     <moqui.basic.Enumeration enumId="AGSKL_DOMAIN" enumTypeId="AgentSkillType" description="Domain Semantic Skill"/>
     <moqui.basic.Enumeration enumId="AGSKL_SYSTEM" enumTypeId="AgentSkillType" description="System Skill"/>
     <moqui.basic.Enumeration enumId="AT_AGENT_SKILL" enumTypeId="ArtifactType" description="Agent Skill"/>
+    <moqui.security.ArtifactGroup artifactGroupId="McpAgentSkills" description="MCP Agent Skills"/>
+    <moqui.basic.EnumerationType enumTypeId="AgentTemplateDetectionMethod" description="Agent Template Detection Method"/>
+    <moqui.basic.Enumeration enumId="AgTplDetectEntity" enumTypeId="AgentTemplateDetectionMethod" description="Entity Relationship Scan"/>
 
     <moqui.basic.StatusType statusTypeId="AgentSkillStatus" description="Agent Skill Status"/>
     <moqui.basic.StatusItem statusId="SkillActive" statusTypeId="AgentSkillStatus" description="Active" sequenceNum="10"/>
@@ -77,6 +80,42 @@
             bodyText="# Moqui DataDocument/DataFeed\n\nUse DataDocument/DataFeed for authoritative denormalized read models."
             searchText="Moqui DataDocument DataFeed denormalized read models OpenSearch indexing aggregate documents authoritative entities primaryEntityName fields fieldPath conditions"
             contentHash="d4d4c4b4a4a4948372615141312111010f0e0d0c0b0a09080706050403020100"/>
+
+    <moqui.agent.AgentSkillRegister agentSkillRegisterId="moqui.algebraic.artifact-morphism-search"
+            skillId="moqui.algebraic.artifact-morphism-search"
+            artifactName="component://moqui-mcp/skills/algebraic/moqui-artifact-morphism-search/SKILL.md"
+            artifactTypeEnumId="AT_AGENT_SKILL"
+            artifactGroupId="McpAgentSkills"
+            skillTypeEnumId="AGSKL_SYSTEM"
+            domainName="MoquiMcp"
+            title="Moqui Artifact Morphism Search"
+            description="Treat prompts as requests for registered Moqui morphisms, validate signatures, bind operands, and refuse anything outside the authorized service vocabulary."
+            componentName="moqui-mcp"
+            skillLocation="component://moqui-mcp/skills/algebraic/moqui-artifact-morphism-search/SKILL.md"
+            skillPath="skills/algebraic/moqui-artifact-morphism-search/SKILL.md"
+            statusId="SkillActive"
+            frontmatterJson="{&quot;skillId&quot;:&quot;moqui.algebraic.artifact-morphism-search&quot;,&quot;artifactName&quot;:&quot;component://moqui-mcp/skills/algebraic/moqui-artifact-morphism-search/SKILL.md&quot;,&quot;artifactTypeEnumId&quot;:&quot;AT_AGENT_SKILL&quot;,&quot;artifactGroupId&quot;:&quot;McpAgentSkills&quot;,&quot;skillTypeEnumId&quot;:&quot;AGSKL_SYSTEM&quot;,&quot;domainName&quot;:&quot;MoquiMcp&quot;,&quot;title&quot;:&quot;Moqui Artifact Morphism Search&quot;,&quot;description&quot;:&quot;Treat prompts as requests for registered Moqui morphisms, validate signatures, bind operands, and refuse anything outside the authorized service vocabulary.&quot;,&quot;statusId&quot;:&quot;SkillActive&quot;,&quot;patterns&quot;:[&quot;algebraic-catalog&quot;,&quot;service-morphism&quot;,&quot;signature-check&quot;,&quot;operand-binding&quot;],&quot;preferredServices&quot;:[&quot;org.moqui.agent.AgentAlgebraicServices.search#Morphisms&quot;,&quot;org.moqui.agent.AgentAlgebraicServices.get#MorphismSignature&quot;,&quot;org.moqui.agent.AgentAlgebraicServices.search#Objects&quot;,&quot;org.moqui.agent.AgentAlgebraicServices.get#ObjectSchema&quot;,&quot;org.moqui.agent.AgentAlgebraicServices.plan#PromptAsMorphism&quot;],&quot;refusalRules&quot;:[&quot;Refuse requests that require inventing new services, generating Groovy, or writing free SQL.&quot;,&quot;Refuse requests that cannot be compiled to an authorized registered Moqui morphism.&quot;],&quot;fallbackMode&quot;:&quot;none&quot;}"
+            bodyText="# Moqui Artifact Morphism Search\n\nTreat prompts as requests for registered Moqui morphisms and validate signatures before any execution planning."
+            searchText="algebraic moqui artifact morphism search service morphism signature check operand binding entity object schema artifact authz no groovy no sql"
+            contentHash="algebraic-reboot-seed-20260806"/>
+
+    <moqui.agent.AgentSkillRegister agentSkillRegisterId="moqui.entity-template-catalog"
+            skillId="moqui.entity-template-catalog"
+            artifactName="component://moqui-mcp/skills/entity-template-catalog/SKILL.md"
+            artifactTypeEnumId="AT_AGENT_SKILL"
+            artifactGroupId="McpAgentSkills"
+            skillTypeEnumId="AGSKL_PATTERN"
+            domainName="MoquiMcp"
+            title="Moqui Entity Template Catalog"
+            description="Discover reusable structural templates directly from Moqui entity artifacts and register them for later planning."
+            componentName="moqui-mcp"
+            skillLocation="component://moqui-mcp/skills/entity-template-catalog/SKILL.md"
+            skillPath="skills/entity-template-catalog/SKILL.md"
+            statusId="SkillActive"
+            frontmatterJson="{&quot;skillId&quot;:&quot;moqui.entity-template-catalog&quot;,&quot;artifactName&quot;:&quot;component://moqui-mcp/skills/entity-template-catalog/SKILL.md&quot;,&quot;artifactTypeEnumId&quot;:&quot;AT_AGENT_SKILL&quot;,&quot;artifactGroupId&quot;:&quot;McpAgentSkills&quot;,&quot;skillTypeEnumId&quot;:&quot;AGSKL_PATTERN&quot;,&quot;domainName&quot;:&quot;MoquiMcp&quot;,&quot;title&quot;:&quot;Moqui Entity Template Catalog&quot;,&quot;description&quot;:&quot;Discover reusable structural templates directly from Moqui entity artifacts and register them for later planning.&quot;,&quot;statusId&quot;:&quot;SkillActive&quot;,&quot;patterns&quot;:[&quot;template-catalog&quot;,&quot;entity-structure&quot;,&quot;aggregate-discovery&quot;],&quot;preferredServices&quot;:[&quot;org.moqui.agent.AgentTemplateServices.refresh#DiscoveredDataTemplates&quot;,&quot;org.moqui.agent.AgentSkillServices.refresh#AgentSkills&quot;]}"
+            bodyText="# Moqui Entity Template Catalog\n\nDiscover and register reusable structural templates directly from Moqui entity definitions."
+            searchText="entity template catalog aggregate discovery root sequence child root parent tree recursive hierarchy Moqui entity definitions"
+            contentHash="entity-template-catalog-seed-20260807"/>
 
     <moqui.agent.AgentSkillRegister agentSkillRegisterId="moqui.pattern.budget-tree"
             skillId="moqui.pattern.budget-tree"
