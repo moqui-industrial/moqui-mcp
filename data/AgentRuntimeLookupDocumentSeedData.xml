@@ -13,7 +13,9 @@
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-facade-3.xsd" type="seed-initial">
 
     <!--
-        Runtime lookup documents used by moqui-mcp for entity resolution.
+        Custom runtime lookup documents used by moqui-mcp only for gaps not already covered by
+        standard Mantle/Moqui DataDocument projections and feeds.
+
         These fill concrete OpenSearch gaps found during end-to-end prompt tests:
         - budget_and_time_period
         - empl_position_class
@@ -22,6 +24,12 @@
         - role_type_lookup
         - status_item_lookup
         - fiscal_year_time_period
+        - facility_location_lookup
+
+        Standard business-object lookups should go through the existing Mantle/Moqui
+        projection documents first, including MantleParty, MantleProduct, MantleFacility,
+        MantleInventoryAsset, MantleGlAccount, MantleSalesOrderPart, MantleSalesOrderItem,
+        MantleProject, MantleTask, and MantleRequest.
     -->
 
     <moqui.entity.document.DataDocument
@@ -108,6 +116,30 @@
             fieldNameAlias="timePeriodTypeId" fieldValue="FiscalYear"/>
 
     <moqui.entity.document.DataDocument
+            dataDocumentId="FacilityLocationLookup"
+            documentName="Facility Location Lookup"
+            documentTitle="${facilityId ?: ''}:${locationSeqId ?: ''}"
+            primaryEntityName="mantle.facility.FacilityLocation"
+            indexName="mantle_inventory"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="FacilityLocationLookup" fieldSeqId="01" fieldPath="facilityId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="FacilityLocationLookup" fieldSeqId="02" fieldPath="locationSeqId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="FacilityLocationLookup" fieldSeqId="03" fieldPath="description"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="FacilityLocationLookup" fieldSeqId="04" fieldPath="locationTypeEnumId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="FacilityLocationLookup" fieldSeqId="05" fieldPath="type:description"
+            fieldNameAlias="locationType"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="FacilityLocationLookup" fieldSeqId="06" fieldPath="areaId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="FacilityLocationLookup" fieldSeqId="07" fieldPath="aisleId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="FacilityLocationLookup" fieldSeqId="08" fieldPath="sectionId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="FacilityLocationLookup" fieldSeqId="09" fieldPath="levelId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="FacilityLocationLookup" fieldSeqId="10" fieldPath="positionId"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="FacilityLocationLookup" fieldSeqId="11"
+            fieldPath="(locationSeqId ? locationSeqId.replaceAll('[^A-Za-z0-9]+', '') : null)"
+            fieldNameAlias="locationSeqIdCanonical" fieldType="keyword"/>
+    <moqui.entity.document.DataDocumentField dataDocumentId="FacilityLocationLookup" fieldSeqId="12"
+            fieldPath="(&quot;${facilityId ?: ''} ${locationSeqId ?: ''} ${description ?: ''} ${areaId ?: ''} ${aisleId ?: ''} ${sectionId ?: ''} ${levelId ?: ''} ${positionId ?: ''}&quot;)"
+            fieldNameAlias="searchText" fieldType="text"/>
+
+    <moqui.entity.document.DataDocument
             dataDocumentId="EmplPositionClass"
             documentName="Empl Position Class"
             documentTitle="${title ?: emplPositionClassId}"
@@ -155,6 +187,7 @@
     <moqui.entity.feed.DataFeedDocument dataFeedId="AgentRuntimeLookupFeed" dataDocumentId="RoleTypeLookup"/>
     <moqui.entity.feed.DataFeedDocument dataFeedId="AgentRuntimeLookupFeed" dataDocumentId="StatusItemLookup"/>
     <moqui.entity.feed.DataFeedDocument dataFeedId="AgentRuntimeLookupFeed" dataDocumentId="FiscalYearTimePeriod"/>
+    <moqui.entity.feed.DataFeedDocument dataFeedId="AgentRuntimeLookupFeed" dataDocumentId="FacilityLocationLookup"/>
     <moqui.entity.feed.DataFeedDocument dataFeedId="AgentRuntimeLookupFeed" dataDocumentId="EmplPositionClass"/>
     <moqui.entity.feed.DataFeedDocument dataFeedId="AgentRuntimeLookupFeed" dataDocumentId="EmplPosition"/>
 

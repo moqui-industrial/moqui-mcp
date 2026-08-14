@@ -13,7 +13,116 @@ from pathlib import Path
 from typing import Any
 
 
-PROMPT_VERSION = "service-morphism-enrichment-v1"
+PROMPT_VERSION = "service-morphism-enrichment-v2"
+
+
+def _input_names(service_doc: dict[str, Any]) -> set[str]:
+    return {
+        item.get("name")
+        for item in (service_doc.get("inParameters") or [])
+        if isinstance(item, dict) and item.get("name")
+    }
+
+
+def _called_services(service_doc: dict[str, Any]) -> list[str]:
+    return [str(item) for item in (service_doc.get("calledServices") or []) if item]
+
+
+def _contains_any(text: str, parts: list[str]) -> bool:
+    lowered = (text or "").lower()
+    return any(part.lower() in lowered for part in parts)
+
+
+def heuristic_semantic_overrides(service_doc: dict[str, Any]) -> dict[str, str]:
+    service_name = service_doc.get("serviceName") or ""
+    domain_object = service_doc.get("domainObject") or service_doc.get("serviceNoun") or "target domain object"
+    in_names = _input_names(service_doc)
+    called = _called_services(service_doc)
+    source_file = service_doc.get("sourceFile") or ""
+    semantic = service_doc.get("semanticDescription") or service_doc.get("businessSentence") or ""
+
+    if service_name.startswith("org.moqui.agent.") or service_name.startswith("org.moqui.mcp."):
+        return {
+            "selection": (
+                "Select only for internal agent runtime, MCP protocol, telemetry, or algebraic metamodel operations. "
+                "Do not select for ordinary ERP business requests from end users."
+            )
+        }
+
+    if domain_object == "Request":
+        if "assignToPartyId" in in_names or _contains_any(source_file, ["/mantle/request/"]) or any("RequestParty" in svc for svc in called):
+            return {
+                "semantic": (
+                    f"Service {service_name} creates or updates a support-style request or ticket. "
+                    "It can record the reporter, assign the ticket to a person, connect a customer or client, "
+                    "and preserve request status, priority, type, and resolution context."
+                ),
+                "selection": (
+                    "Select for user requests about opening, creating, updating, or assigning tickets, support requests, "
+                    "service requests, issue reports, maintenance requests, or urgent cases. "
+                    "It is the right morphism when the prompt speaks about a ticket plus assignee, reporter, customer, "
+                    "priority, or status, rather than accounting due dates or invoice terms."
+                ),
+                "binding": (
+                    "Use lookup bindings for assignee, reporter, customer, or client party operands when names are provided. "
+                    "If a deadline or due date is requested, bind it only through request fields actually exposed by the chosen request morphism; "
+                    "do not substitute invoice due-date services."
+                ),
+            }
+
+    if domain_object == "Task":
+        if "assignToPartyId" in in_names or "milestoneWorkEffortId" in in_names:
+            return {
+                "semantic": (
+                    f"Service {service_name} creates or updates executable work under a project hierarchy. "
+                    "It supports task creation, optional assignment to a party, and optional attachment to a milestone "
+                    "inside a project or work-effort tree."
+                ),
+                "selection": (
+                    "Select for prompts about creating or assigning tasks, especially when the prompt mentions a project, milestone, "
+                    "assignee, work name, priority, or parent work context."
+                ),
+            }
+
+    if domain_object == "Project":
+        return {
+            "semantic": (
+                f"Service {service_name} creates or updates the project root of a work-effort hierarchy. "
+                "It establishes the main project identity and may assign responsible parties at project level."
+            ),
+            "selection": (
+                "Select for prompts about creating or managing a project root, not for lower-level ticket, accounting, "
+                "or technical runtime operations."
+            ),
+        }
+
+    if _contains_any(service_name, ["InvoiceDueDate"]) or _contains_any(semantic, ["InvoiceDueDate"]):
+        return {
+            "selection": (
+                "Select only when the request is explicitly about invoice payment terms, invoice due-date calculation, "
+                "settlement terms, or agreement-based accounting deadlines. "
+                "Do not select for support tickets, work tasks, project deadlines, maintenance issues, or generic requests with a date."
+            )
+        }
+
+    if _contains_any(service_name, ["PartyAcctgPreference"]):
+        return {
+            "selection": (
+                "Select only for direct accounting-preference maintenance on the accounting-preferences entity itself, "
+                "or when an expert user explicitly asks to create or update accounting preferences. "
+                "Do not select as a fallback for budget, project, request, or support prompts."
+            )
+        }
+
+    if _contains_any(service_name, ["Bai2SystemMessage"]):
+        return {
+            "selection": (
+                "Select only for technical bank-file ingestion or BAI2 message import workflows. "
+                "Do not select for generic accounting, budgeting, project, request, or HR prompts."
+            )
+        }
+
+    return {}
 
 
 def load_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -89,6 +198,9 @@ def local_fallback(service_doc: dict[str, Any]) -> dict[str, Any]:
     statement_classes = service_doc.get("statementClasses") or []
     likely_queries = service_doc.get("likelyUserQueries") or []
     semantic = service_doc.get("semanticDescription") or service_doc.get("businessSentence") or ""
+    overrides = heuristic_semantic_overrides(service_doc)
+    if overrides.get("semantic"):
+        semantic = overrides["semantic"]
     if not semantic:
         semantic = f"Service {service_doc.get('serviceName')} operates on {domain_object}."
     semantic_parts = [semantic]
@@ -107,6 +219,8 @@ def local_fallback(service_doc: dict[str, Any]) -> dict[str, Any]:
         selection_bits.append(f"Likely matches phrases such as {', '.join(likely_queries[:6])}.")
     if required:
         selection_bits.append(f"It requires bindings for {', '.join(required[:6])}.")
+    if overrides.get("selection"):
+        selection_bits.append(overrides["selection"])
     binding_bits = []
     if required:
         binding_bits.append(f"Execution is blocked until required operands are bound: {', '.join(required[:8])}.")
@@ -116,6 +230,8 @@ def local_fallback(service_doc: dict[str, Any]) -> dict[str, Any]:
         binding_bits.append(f"The service produces operands such as {', '.join(produced[:8])}.")
     if called:
         binding_bits.append(f"It delegates part of the workflow to downstream services like {', '.join(called[:6])}.")
+    if overrides.get("binding"):
+        binding_bits.append(overrides["binding"])
     return {
         "semanticDescriptionLlm": " ".join(semantic_parts).strip(),
         "selectionDescription": " ".join(selection_bits).strip(),

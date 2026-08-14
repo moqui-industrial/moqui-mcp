@@ -39,9 +39,19 @@ class AgentPromptCandidateCompressor {
             fieldNames : ((source.fieldNames instanceof List) ? (source.fieldNames as List).take(8) : []),
             relatedEntities : ((source.relatedEntities instanceof List) ? (source.relatedEntities as List).take(8) : []),
             requiredEntities : ((source.requiredEntities instanceof List) ? (source.requiredEntities as List).take(8) : []),
-            businessQuestions : ((source.businessQuestions instanceof List) ? (source.businessQuestions as List).take(3) : []),
+            businessQuestions : normalizeTextList(source.businessQuestions, 3),
+            processHints : normalizeTextList(source.processHints, 3),
             summary : truncateText(source.summary, 240)
         ]
+    }
+
+    protected static List<String> normalizeTextList(Object value, int maxItems) {
+        if (value == null) return []
+        if (value instanceof List) {
+            return ((List) value).collect { it?.toString()?.trim() }.findAll { it }.take(maxItems)
+        }
+        String text = value.toString().trim()
+        return text ? [text] : []
     }
 
     protected static String truncateText(Object value, int maxLength) {

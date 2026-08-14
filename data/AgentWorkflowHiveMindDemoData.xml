@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entity-facade-xml type="seed">
+    <!--
+        Demo agent workflow/pipeline expressed as a nested mathematical execution plan.
+
+        This file is intentionally different from HiveMindDemoData.xml:
+        - HiveMindDemoData.xml contains the resulting business data (project HM, milestones, tasks, time entries, etc.)
+        - this file contains an abstract execution plan that explains which morphisms/services
+          may be chained to produce a comparable outcome.
+
+        The catalog of available morphisms remains flat in generated seed files.
+        This document is an example of a prompt/workflow instance layered on top of that catalog.
+    -->
+
+    <moqui.math.ParameterDef parameterDefId="AgPlanWorkflowKindDef" parameterTypeEnumId="PtTextShort"
+            purposeEnumId="PpMathModel" parameterCode="agPlanWorkflowKind"
+            parameterName="Workflow Kind"
+            description="Classifies a workflow graph instance, such as demo-seed-build, runtime-plan, or repair-plan."/>
+    <moqui.math.ParameterDef parameterDefId="AgPlanPromptDef" parameterTypeEnumId="PtTextLong"
+            purposeEnumId="PpMathModel" parameterCode="agPlanPrompt"
+            parameterName="Workflow Prompt"
+            description="Natural-language or declarative request represented by the workflow graph."/>
+    <moqui.math.ParameterDef parameterDefId="AgPlanOutcomeDef" parameterTypeEnumId="PtTextLong"
+            purposeEnumId="PpMathModel" parameterCode="agPlanOutcome"
+            parameterName="Workflow Outcome"
+            description="Business artifact expected as the outcome of the workflow graph."/>
+    <moqui.math.ParameterDef parameterDefId="AgPlanStepMorphismRefDef" parameterTypeEnumId="PtTextShort"
+            purposeEnumId="PpMathModel" parameterCode="agPlanStepMorphismRef"
+            parameterName="Step Morphism Reference"
+            description="Catalog morphismId selected for one workflow step."/>
+    <moqui.math.ParameterDef parameterDefId="AgPlanStepServiceNameDef" parameterTypeEnumId="PtTextShort"
+            purposeEnumId="PpMathModel" parameterCode="agPlanStepServiceName"
+            parameterName="Step Service Name"
+            description="Concrete Moqui service invoked by one workflow step."/>
+    <moqui.math.ParameterDef parameterDefId="AgPlanStepInputBindingsDef" parameterTypeEnumId="PtTextLong"
+            purposeEnumId="PpMathModel" parameterCode="agPlanStepInputBindingsJson"
+            parameterName="Step Input Bindings"
+            description="JSON object describing literals and upstream bindings required before executing the step."/>
+    <moqui.math.ParameterDef parameterDefId="AgPlanStepOutputBindingsDef" parameterTypeEnumId="PtTextLong"
+            purposeEnumId="PpMathModel" parameterCode="agPlanStepOutputBindingsJson"
+            parameterName="Step Output Bindings"
+            description="JSON object describing identifiers or values produced by the step for downstream steps."/>
+    <moqui.math.ParameterDef parameterDefId="AgPlanStepPurposeDef" parameterTypeEnumId="PtTextLong"
+            purposeEnumId="PpMathModel" parameterCode="agPlanStepPurpose"
+            parameterName="Step Purpose"
+            description="Human-readable explanation of why the step exists inside the workflow."/>
+    <moqui.math.ParameterDef parameterDefId="AgPlanEdgeBindingDef" parameterTypeEnumId="PtTextLong"
+            purposeEnumId="PpMathModel" parameterCode="agPlanEdgeBindingJson"
+            parameterName="Edge Binding"
+            description="JSON object describing which outputs flow across a dependency edge."/>
+
+    <moqui.math.Graph graphId="AgHmDemoWorkflow" graphTypeEnumId="GtDAG"
+            name="HiveMind demo seed workflow"
+            description="Nested mathematical workflow that explains how a subset of the HiveMind demo project hierarchy may be created by chaining service morphisms.">
+        <parameters parameterId="AgHmDemoWorkflowKind" parameterDefId="AgPlanWorkflowKindDef" graphId="AgHmDemoWorkflow"
+                sequenceNum="1" symbolicValue="demo-seed-build"/>
+        <parameters parameterId="AgHmDemoWorkflowPrompt" parameterDefId="AgPlanPromptDef" graphId="AgHmDemoWorkflow"
+                sequenceNum="2"
+                textValue="Build the HiveMind demo project hierarchy HM with project root, milestones, representative tasks, assignees, and task time entries."/>
+        <parameters parameterId="AgHmDemoWorkflowOutcome" parameterDefId="AgPlanOutcomeDef" graphId="AgHmDemoWorkflow"
+                sequenceNum="3"
+                textValue="{&quot;rootArtifact&quot;:&quot;mantle.work.effort.WorkEffort&quot;,&quot;rootId&quot;:&quot;HM&quot;,&quot;resultSeedFile&quot;:&quot;component://HiveMind/data/HiveMindDemoData.xml&quot;}"/>
+
+        <vertices graphVertexId="AgHmDemoStep01" graphId="AgHmDemoWorkflow" label="Create HM project root">
+            <parameters parameterId="AgHmDemoStep01Morph" parameterDefId="AgPlanStepMorphismRefDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep01" morphismId="AgSrvMorph_9c751f3ea560648e"
+                    sequenceNum="1" symbolicValue="AgSrvMorph_9c751f3ea560648e"/>
+            <parameters parameterId="AgHmDemoStep01Service" parameterDefId="AgPlanStepServiceNameDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep01" morphismId="AgSrvMorph_9c751f3ea560648e"
+                    sequenceNum="2" symbolicValue="mantle.work.ProjectServices.create#Project"/>
+            <parameters parameterId="AgHmDemoStep01Inputs" parameterDefId="AgPlanStepInputBindingsDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep01" morphismId="AgSrvMorph_9c751f3ea560648e"
+                    sequenceNum="3"
+                    textValue="{&quot;workEffortId&quot;:&quot;HM&quot;,&quot;workEffortName&quot;:&quot;HiveMind PM Build Out&quot;,&quot;workEffortTypeEnumId&quot;:&quot;WetProject&quot;,&quot;statusId&quot;:&quot;WeInProgress&quot;,&quot;statusFlowId&quot;:&quot;HmTaskSimple&quot;,&quot;totalClientCostAllowed&quot;:&quot;10000&quot;,&quot;costUomId&quot;:&quot;USD&quot;}"/>
+            <parameters parameterId="AgHmDemoStep01Outputs" parameterDefId="AgPlanStepOutputBindingsDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep01" morphismId="AgSrvMorph_9c751f3ea560648e"
+                    sequenceNum="4"
+                    textValue="{&quot;workEffortId&quot;:&quot;HM&quot;,&quot;bindingAlias&quot;:&quot;projectId&quot;}"/>
+            <parameters parameterId="AgHmDemoStep01Purpose" parameterDefId="AgPlanStepPurposeDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep01" morphismId="AgSrvMorph_9c751f3ea560648e"
+                    sequenceNum="5"
+                    textValue="Establish the root project identity that every milestone and task will reference through rootWorkEffortId."/>
+        </vertices>
+
+        <vertices graphVertexId="AgHmDemoStep02" graphId="AgHmDemoWorkflow" label="Create milestone HM-MS-001">
+            <parameters parameterId="AgHmDemoStep02Morph" parameterDefId="AgPlanStepMorphismRefDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep02" morphismId="AgSrvMorph_a04db68d474fd626"
+                    sequenceNum="1" symbolicValue="AgSrvMorph_a04db68d474fd626"/>
+            <parameters parameterId="AgHmDemoStep02Service" parameterDefId="AgPlanStepServiceNameDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep02" morphismId="AgSrvMorph_a04db68d474fd626"
+                    sequenceNum="2" symbolicValue="mantle.work.ProjectServices.create#Milestone"/>
+            <parameters parameterId="AgHmDemoStep02Inputs" parameterDefId="AgPlanStepInputBindingsDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep02" morphismId="AgSrvMorph_a04db68d474fd626"
+                    sequenceNum="3"
+                    textValue="{&quot;rootWorkEffortId&quot;:&quot;${AgHmDemoStep01.workEffortId}&quot;,&quot;workEffortId&quot;:&quot;HM-MS-001&quot;,&quot;workEffortName&quot;:&quot;HM Milestone 1&quot;,&quot;workEffortTypeEnumId&quot;:&quot;WetMilestone&quot;,&quot;statusId&quot;:&quot;WeInProgress&quot;,&quot;estimatedStartDate&quot;:&quot;2013-03-04 00:00:00&quot;,&quot;estimatedCompletionDate&quot;:&quot;2013-03-17 00:00:00&quot;}"/>
+            <parameters parameterId="AgHmDemoStep02Outputs" parameterDefId="AgPlanStepOutputBindingsDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep02" morphismId="AgSrvMorph_a04db68d474fd626"
+                    sequenceNum="4"
+                    textValue="{&quot;workEffortId&quot;:&quot;HM-MS-001&quot;,&quot;bindingAlias&quot;:&quot;milestone1Id&quot;}"/>
+            <parameters parameterId="AgHmDemoStep02Purpose" parameterDefId="AgPlanStepPurposeDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep02" morphismId="AgSrvMorph_a04db68d474fd626"
+                    sequenceNum="5"
+                    textValue="Create the first milestone container under the HM project root."/>
+        </vertices>
+
+        <vertices graphVertexId="AgHmDemoStep03" graphId="AgHmDemoWorkflow" label="Create milestone HM-MS-002">
+            <parameters parameterId="AgHmDemoStep03Morph" parameterDefId="AgPlanStepMorphismRefDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep03" morphismId="AgSrvMorph_a04db68d474fd626"
+                    sequenceNum="1" symbolicValue="AgSrvMorph_a04db68d474fd626"/>
+            <parameters parameterId="AgHmDemoStep03Service" parameterDefId="AgPlanStepServiceNameDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep03" morphismId="AgSrvMorph_a04db68d474fd626"
+                    sequenceNum="2" symbolicValue="mantle.work.ProjectServices.create#Milestone"/>
+            <parameters parameterId="AgHmDemoStep03Inputs" parameterDefId="AgPlanStepInputBindingsDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep03" morphismId="AgSrvMorph_a04db68d474fd626"
+                    sequenceNum="3"
+                    textValue="{&quot;rootWorkEffortId&quot;:&quot;${AgHmDemoStep01.workEffortId}&quot;,&quot;workEffortId&quot;:&quot;HM-MS-002&quot;,&quot;workEffortName&quot;:&quot;HM Milestone 2&quot;,&quot;workEffortTypeEnumId&quot;:&quot;WetMilestone&quot;,&quot;statusId&quot;:&quot;WeInPlanning&quot;,&quot;estimatedStartDate&quot;:&quot;2013-03-18 00:00:00&quot;,&quot;estimatedCompletionDate&quot;:&quot;2013-03-31 00:00:00&quot;}"/>
+            <parameters parameterId="AgHmDemoStep03Outputs" parameterDefId="AgPlanStepOutputBindingsDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep03" morphismId="AgSrvMorph_a04db68d474fd626"
+                    sequenceNum="4"
+                    textValue="{&quot;workEffortId&quot;:&quot;HM-MS-002&quot;,&quot;bindingAlias&quot;:&quot;milestone2Id&quot;}"/>
+            <parameters parameterId="AgHmDemoStep03Purpose" parameterDefId="AgPlanStepPurposeDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep03" morphismId="AgSrvMorph_a04db68d474fd626"
+                    sequenceNum="5"
+                    textValue="Create the second milestone container used by downstream task creation."/>
+        </vertices>
+
+        <vertices graphVertexId="AgHmDemoStep04" graphId="AgHmDemoWorkflow" label="Create representative task HM-004">
+            <parameters parameterId="AgHmDemoStep04Morph" parameterDefId="AgPlanStepMorphismRefDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep04" morphismId="AgSrvMorph_888cf001f2ea1e2a"
+                    sequenceNum="1" symbolicValue="AgSrvMorph_888cf001f2ea1e2a"/>
+            <parameters parameterId="AgHmDemoStep04Service" parameterDefId="AgPlanStepServiceNameDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep04" morphismId="AgSrvMorph_888cf001f2ea1e2a"
+                    sequenceNum="2" symbolicValue="mantle.work.TaskServices.create#Task"/>
+            <parameters parameterId="AgHmDemoStep04Inputs" parameterDefId="AgPlanStepInputBindingsDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep04" morphismId="AgSrvMorph_888cf001f2ea1e2a"
+                    sequenceNum="3"
+                    textValue="{&quot;workEffortId&quot;:&quot;HM-004&quot;,&quot;rootWorkEffortId&quot;:&quot;${AgHmDemoStep01.workEffortId}&quot;,&quot;parentWorkEffortId&quot;:&quot;HM-001&quot;,&quot;milestoneWorkEffortId&quot;:&quot;${AgHmDemoStep02.workEffortId}&quot;,&quot;workEffortName&quot;:&quot;Dashboard My Tasks&quot;,&quot;priority&quot;:&quot;1&quot;,&quot;estimatedWorkTime&quot;:&quot;20&quot;,&quot;timeUomId&quot;:&quot;TF_hr&quot;,&quot;workEffortTypeEnumId&quot;:&quot;WetTask&quot;,&quot;purposeEnumId&quot;:&quot;WepTask&quot;,&quot;statusId&quot;:&quot;WeInProgress&quot;,&quot;resolutionEnumId&quot;:&quot;WerUnresolved&quot;,&quot;statusFlowId&quot;:&quot;Default&quot;,&quot;assignToPartyId&quot;:&quot;EX_JOHN_DOE&quot;,&quot;assignRoleTypeId&quot;:&quot;Assignee&quot;}"/>
+            <parameters parameterId="AgHmDemoStep04Outputs" parameterDefId="AgPlanStepOutputBindingsDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep04" morphismId="AgSrvMorph_888cf001f2ea1e2a"
+                    sequenceNum="4"
+                    textValue="{&quot;workEffortId&quot;:&quot;HM-004&quot;,&quot;bindingAlias&quot;:&quot;task004Id&quot;}"/>
+            <parameters parameterId="AgHmDemoStep04Purpose" parameterDefId="AgPlanStepPurposeDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep04" morphismId="AgSrvMorph_888cf001f2ea1e2a"
+                    sequenceNum="5"
+                    textValue="Create one fully described task under milestone 1 so that later steps can attach time entries and comments to a concrete task identity."/>
+        </vertices>
+
+        <vertices graphVertexId="AgHmDemoStep05" graphId="AgHmDemoWorkflow" label="Add time entry to HM-004">
+            <parameters parameterId="AgHmDemoStep05Morph" parameterDefId="AgPlanStepMorphismRefDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep05" morphismId="AgSrvMorph_b27b5b491b528751"
+                    sequenceNum="1" symbolicValue="AgSrvMorph_b27b5b491b528751"/>
+            <parameters parameterId="AgHmDemoStep05Service" parameterDefId="AgPlanStepServiceNameDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep05" morphismId="AgSrvMorph_b27b5b491b528751"
+                    sequenceNum="2" symbolicValue="mantle.work.TaskServices.add#TaskTime"/>
+            <parameters parameterId="AgHmDemoStep05Inputs" parameterDefId="AgPlanStepInputBindingsDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep05" morphismId="AgSrvMorph_b27b5b491b528751"
+                    sequenceNum="3"
+                    textValue="{&quot;workEffortId&quot;:&quot;${AgHmDemoStep04.workEffortId}&quot;,&quot;partyId&quot;:&quot;EX_JOHN_DOE&quot;,&quot;hours&quot;:&quot;8&quot;,&quot;breakHours&quot;:&quot;2&quot;,&quot;comments&quot;:&quot;Create Task and My Tasks first pass&quot;,&quot;fromDate&quot;:&quot;2013-03-02 08:00:00&quot;,&quot;thruDate&quot;:&quot;2013-03-02 18:00:00&quot;}"/>
+            <parameters parameterId="AgHmDemoStep05Outputs" parameterDefId="AgPlanStepOutputBindingsDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep05" morphismId="AgSrvMorph_b27b5b491b528751"
+                    sequenceNum="4"
+                    textValue="{&quot;workEffortId&quot;:&quot;HM-004&quot;,&quot;effect&quot;:&quot;time entry stored for task HM-004&quot;}"/>
+            <parameters parameterId="AgHmDemoStep05Purpose" parameterDefId="AgPlanStepPurposeDef"
+                    graphId="AgHmDemoWorkflow" graphVertexId="AgHmDemoStep05" morphismId="AgSrvMorph_b27b5b491b528751"
+                    sequenceNum="5"
+                    textValue="Demonstrate a non-structural downstream step that consumes a previously created task identity and enriches the business result with execution history."/>
+        </vertices>
+
+        <edges graphEdgeId="AgHmDemoEdge01" graphId="AgHmDemoWorkflow" edgeTypeEnumId="GetDirected"
+                fromVertexId="AgHmDemoStep01" toVertexId="AgHmDemoStep02" isDirected="Y" label="projectId to milestone1">
+            <parameters parameterId="AgHmDemoEdge01Binding" parameterDefId="AgPlanEdgeBindingDef"
+                    graphId="AgHmDemoWorkflow" graphEdgeId="AgHmDemoEdge01" sequenceNum="1"
+                    textValue="{&quot;fromStep&quot;:&quot;AgHmDemoStep01&quot;,&quot;toStep&quot;:&quot;AgHmDemoStep02&quot;,&quot;binds&quot;:{&quot;rootWorkEffortId&quot;:&quot;workEffortId&quot;}}"/>
+        </edges>
+        <edges graphEdgeId="AgHmDemoEdge02" graphId="AgHmDemoWorkflow" edgeTypeEnumId="GetDirected"
+                fromVertexId="AgHmDemoStep01" toVertexId="AgHmDemoStep03" isDirected="Y" label="projectId to milestone2">
+            <parameters parameterId="AgHmDemoEdge02Binding" parameterDefId="AgPlanEdgeBindingDef"
+                    graphId="AgHmDemoWorkflow" graphEdgeId="AgHmDemoEdge02" sequenceNum="1"
+                    textValue="{&quot;fromStep&quot;:&quot;AgHmDemoStep01&quot;,&quot;toStep&quot;:&quot;AgHmDemoStep03&quot;,&quot;binds&quot;:{&quot;rootWorkEffortId&quot;:&quot;workEffortId&quot;}}"/>
+        </edges>
+        <edges graphEdgeId="AgHmDemoEdge03" graphId="AgHmDemoWorkflow" edgeTypeEnumId="GetDirected"
+                fromVertexId="AgHmDemoStep01" toVertexId="AgHmDemoStep04" isDirected="Y" label="projectId to task">
+            <parameters parameterId="AgHmDemoEdge03Binding" parameterDefId="AgPlanEdgeBindingDef"
+                    graphId="AgHmDemoWorkflow" graphEdgeId="AgHmDemoEdge03" sequenceNum="1"
+                    textValue="{&quot;fromStep&quot;:&quot;AgHmDemoStep01&quot;,&quot;toStep&quot;:&quot;AgHmDemoStep04&quot;,&quot;binds&quot;:{&quot;rootWorkEffortId&quot;:&quot;workEffortId&quot;}}"/>
+        </edges>
+        <edges graphEdgeId="AgHmDemoEdge04" graphId="AgHmDemoWorkflow" edgeTypeEnumId="GetDirected"
+                fromVertexId="AgHmDemoStep02" toVertexId="AgHmDemoStep04" isDirected="Y" label="milestone1Id to task">
+            <parameters parameterId="AgHmDemoEdge04Binding" parameterDefId="AgPlanEdgeBindingDef"
+                    graphId="AgHmDemoWorkflow" graphEdgeId="AgHmDemoEdge04" sequenceNum="1"
+                    textValue="{&quot;fromStep&quot;:&quot;AgHmDemoStep02&quot;,&quot;toStep&quot;:&quot;AgHmDemoStep04&quot;,&quot;binds&quot;:{&quot;milestoneWorkEffortId&quot;:&quot;workEffortId&quot;}}"/>
+        </edges>
+        <edges graphEdgeId="AgHmDemoEdge05" graphId="AgHmDemoWorkflow" edgeTypeEnumId="GetDirected"
+                fromVertexId="AgHmDemoStep04" toVertexId="AgHmDemoStep05" isDirected="Y" label="taskId to task time">
+            <parameters parameterId="AgHmDemoEdge05Binding" parameterDefId="AgPlanEdgeBindingDef"
+                    graphId="AgHmDemoWorkflow" graphEdgeId="AgHmDemoEdge05" sequenceNum="1"
+                    textValue="{&quot;fromStep&quot;:&quot;AgHmDemoStep04&quot;,&quot;toStep&quot;:&quot;AgHmDemoStep05&quot;,&quot;binds&quot;:{&quot;workEffortId&quot;:&quot;workEffortId&quot;}}"/>
+        </edges>
+    </moqui.math.Graph>
+</entity-facade-xml>

@@ -30,6 +30,7 @@
         <actions>
             <script><![CDATA[
                 import java.util.Calendar
+                import org.moqui.agent.AgentToolSupport
 
                 success = false
                 uniqueMatch = false
@@ -244,6 +245,14 @@
                         uniqueMatch = true
                     }
                     return
+                }
+
+                Map genericLookup = AgentToolSupport.lookupRecordBySpec(ec, key, text) ?: [:]
+                if (genericLookup?.recordId) {
+                    recordId = genericLookup.recordId as String
+                    record = (genericLookup.record instanceof Map) ? (Map) genericLookup.record : [:]
+                    success = true
+                    uniqueMatch = genericLookup.uniqueMatch != false
                 }
             ]]></script>
         </actions>

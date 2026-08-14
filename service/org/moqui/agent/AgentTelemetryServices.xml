@@ -222,6 +222,9 @@
         </out-parameters>
         <actions>
             <script><![CDATA[
+                import org.moqui.agent.AgentConfigUtil
+
+                boolean bestEffortTelemetry = AgentConfigUtil.getBoolean('moqui.agent.elasticTelemetry.bestEffort', true)
                 def logValue = ec.entity.makeValue('moqui.agent.AgentToolExecutionElasticLog')
                 logValue.setSequencedIdPrimary()
                 agentToolExecutionElasticLogId = logValue.getPrimaryKeys().values().first()
@@ -274,7 +277,14 @@
                         rerankerMathModelId : rerankerMathModelId,
                         mathModelRunId : mathModelRunId
                 ])
-                logValue.create()
+                try {
+                    logValue.create()
+                } catch (Throwable logFailure) {
+                    if (!bestEffortTelemetry) throw logFailure
+                    ec.message.clearErrors()
+                    ec.logger.warn("Skipping AgentToolExecutionElasticLog write for ${toolName}: ${logFailure.message ?: logFailure.toString()}")
+                    return
+                }
 
                 try {
                     ec.service.sync().name('org.moqui.agent.AgentTelemetryServices.count#AgentToolExecutionBin')

@@ -43,6 +43,7 @@ class AgentPromptCandidateBuilder {
                 'machineVariants', 'embeddingText', 'title', 'summary',
                 'knowledgeOnly', 'knowledgeCategory', 'sourceKind', 'verifiedByTest',
                 'scenarioName', 'workflowName', 'patternName', 'businessQuestions', 'relatedEntities',
+                'processHints',
                 'requiredEntities', 'optionalEntities', 'relatedAgentPrompts', 'serviceSequence',
                 'resolutionPolicy', 'primaryScreenPurpose', 'mutationRequiresFieldDiff',
                 'stateComparisonEntity', 'stateComparisonPkFields', 'updateTransitionName', 'updateServiceName'
@@ -75,6 +76,7 @@ class AgentPromptCandidateBuilder {
                         'workflowName^4',
                         'patternName^4',
                         'businessQuestions^2',
+                        'processHints^2',
                         'relatedEntities^2'
                     ]
                 ]

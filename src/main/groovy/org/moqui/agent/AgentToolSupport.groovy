@@ -47,6 +47,7 @@ class AgentToolSupport {
         'financial_posting', 'financial_reversal', 'cancellation'
     ] as Set<String>
     static final Map<String, Map<String, Object>> DATA_DOCUMENT_LOOKUP_SPECS = [
+            // ===== Standard Mantle / Moqui OpenSearch-backed lookup documents =====
             party : [
                     indexName : 'mantle',
                     documentType : 'MantleParty',
@@ -87,6 +88,16 @@ class AgentToolSupport {
                     fallbackEntityName : 'mantle.facility.Facility',
                     fallbackExactFields : ['facilityId', 'pseudoId', 'facilityName']
             ],
+            facilityLocation : [
+                    indexName : 'mantle_inventory',
+                    documentType : 'FacilityLocationLookup',
+                    idField : 'locationSeqId',
+                    exactFields : ['locationSeqId', 'locationSeqIdCanonical', 'facilityId'],
+                    canonicalFields : ['locationSeqIdCanonical'],
+                    textFields : ['locationSeqId', 'description', 'facilityId', 'areaId', 'aisleId', 'sectionId', 'levelId', 'positionId', 'searchText'],
+                    fallbackEntityName : 'mantle.facility.FacilityLocation',
+                    fallbackExactFields : ['locationSeqId']
+            ],
             asset : [
                     indexName : 'mantle_inventory',
                     documentType : 'MantleInventoryAsset',
@@ -107,6 +118,58 @@ class AgentToolSupport {
                     fallbackEntityName : 'mantle.ledger.account.GlAccount',
                     fallbackExactFields : ['glAccountId', 'accountCode']
             ],
+            project : [
+                    indexName : 'mantle',
+                    documentType : 'MantleProject',
+                    idField : 'workEffortId',
+                    exactFields : ['workEffortId', 'name', 'ownerPartyId'],
+                    canonicalFields : ['workEffortId', 'name'],
+                    textFields : ['name', 'status', 'type', 'purpose', 'organizationName', 'firstName', 'lastName'],
+                    fallbackEntityName : 'mantle.work.effort.WorkEffort',
+                    fallbackExactFields : ['workEffortId', 'workEffortName']
+            ],
+            task : [
+                    indexName : 'mantle',
+                    documentType : 'MantleTask',
+                    idField : 'workEffortId',
+                    exactFields : ['workEffortId', 'name', 'project', 'parent'],
+                    canonicalFields : ['workEffortId', 'name'],
+                    textFields : ['name', 'description', 'status', 'purpose', 'facilityName', 'organizationName', 'firstName', 'lastName'],
+                    fallbackEntityName : 'mantle.work.effort.WorkEffort',
+                    fallbackExactFields : ['workEffortId', 'workEffortName']
+            ],
+            request : [
+                    indexName : 'mantle',
+                    documentType : 'MantleRequest',
+                    idField : 'requestId',
+                    exactFields : ['requestId', 'name', 'task', 'facilityId', 'productStoreId'],
+                    canonicalFields : ['requestId', 'name'],
+                    textFields : ['name', 'description', 'status', 'type', 'resolution', 'facilityName', 'storeName', 'organizationName', 'firstName', 'lastName'],
+                    fallbackEntityName : 'mantle.request.Request',
+                    fallbackExactFields : ['requestId', 'requestName']
+            ],
+            salesOrderPart : [
+                    indexName : 'mantle_sales',
+                    documentType : 'MantleSalesOrderPart',
+                    idField : 'orderId',
+                    exactFields : ['orderId', 'orderPartSeqId', 'customerPartyId', 'facilityId'],
+                    canonicalFields : ['orderId', 'orderPartSeqId'],
+                    textFields : ['orderId', 'orderPartSeqId', 'customerPartyId', 'facilityId', 'city', 'postalCode'],
+                    fallbackEntityName : 'mantle.order.OrderPart',
+                    fallbackExactFields : ['orderId', 'orderPartSeqId']
+            ],
+            salesOrderItem : [
+                    indexName : 'mantle_sales',
+                    documentType : 'MantleSalesOrderItem',
+                    idField : 'orderId',
+                    exactFields : ['orderId', 'orderItemSeqId', 'orderPartSeqId', 'productId'],
+                    canonicalFields : ['orderId', 'orderItemSeqId', 'productId'],
+                    textFields : ['orderId', 'orderItemSeqId', 'orderPartSeqId', 'productId', 'pseudoId', 'city', 'customerPartyId'],
+                    fallbackEntityName : 'mantle.order.OrderItem',
+                    fallbackExactFields : ['orderId', 'orderItemSeqId', 'productId']
+            ],
+
+            // ===== Custom gap-filling lookup documents kept until standard equivalents exist =====
             budget : [
                     indexName : 'mantle',
                     documentType : 'BudgetAndTimePeriod',
@@ -204,6 +267,24 @@ class AgentToolSupport {
         String actionKind = (document?.actionKind ?: '').toString().trim().toLowerCase()
         if (actionKind && HIGH_RISK_ACTION_KINDS.contains(actionKind)) return 'high'
         return isHighRiskService(serviceName, operationEffect) ? 'high' : 'normal'
+    }
+
+    static boolean looksLikeDryRunPrompt(String queryText) {
+        String normalized = (queryText ?: '').toLowerCase()
+        if (!normalized) return false
+        return normalized.contains('dry run') ||
+                normalized.contains('do not execute') ||
+                normalized.contains("don't execute") ||
+                normalized.contains('without executing') ||
+                normalized.contains('before executing') ||
+                normalized.contains('show me what would') ||
+                normalized.contains('prepare but do not execute') ||
+                normalized.contains('procedere solo dopo mia conferma') ||
+                normalized.contains('procedi solo dopo mia conferma') ||
+                normalized.contains('senza eseguire') ||
+                normalized.contains('ma non eseguire') ||
+                normalized.contains('prima di eseguire') ||
+                normalized.contains('mostrando i dati che useresti')
     }
 
     static boolean checkArtifactAccess(ExecutionContext ec, String artifactTypeEnumId, String authzActionEnumId, String artifactName) {
@@ -379,26 +460,21 @@ class AgentToolSupport {
         if (!text) return inferred
 
         String preferredService = (document?.preferredService ?: '') as String
-        String canonicalPrompt = ((document?.canonicalPrompt ?: '') as String).toLowerCase()
         String domainObject = ((document?.domainObject ?: '') as String).toLowerCase()
         String actionKind = ((document?.actionKind ?: '') as String).toLowerCase()
 
         boolean createProjectPrompt =
             preferredService == 'mantle.work.ProjectServices.create#Project' ||
-                (actionKind == 'create' && domainObject == 'project') ||
-                canonicalPrompt == 'create project'
+                (actionKind == 'create' && domainObject == 'project')
         boolean createRequestPrompt =
             preferredService == 'mantle.request.RequestServices.create#Request' ||
-                (actionKind == 'create' && domainObject == 'request') ||
-                canonicalPrompt == 'create request'
+                (actionKind == 'create' && domainObject == 'request')
         boolean createFacilityPrompt =
             preferredService == 'create#mantle.facility.Facility' ||
-                (actionKind == 'create' && domainObject == 'facility') ||
-                canonicalPrompt == 'create facility'
+                (actionKind == 'create' && domainObject == 'facility')
         boolean createOrderPrompt =
             preferredService == 'mantle.order.OrderServices.create#Order' ||
-                (actionKind == 'create' && domainObject == 'order') ||
-                canonicalPrompt == 'create order'
+                (actionKind == 'create' && domainObject == 'order')
 
         if (createProjectPrompt) {
             String projectName = extractProjectName(text)
@@ -487,7 +563,7 @@ class AgentToolSupport {
     }
 
     static boolean looksLikeProjectAggregatePrompt(String queryText) {
-        return looksLikeRootChildHierarchyPrompt(queryText)
+        return looksLikeProjectHierarchyPrompt(queryText)
     }
 
     static boolean looksLikeRootChildHierarchyPrompt(String queryText) {
@@ -567,7 +643,16 @@ class AgentToolSupport {
                 normalizedText.contains('support') || normalizedText.contains('ticket')
         boolean hasCreateIntent = normalizedText.contains('crea') || normalizedText.contains('create') ||
                 normalizedText.contains('apri') || normalizedText.contains('open')
-        return hasRequestConcept && hasCreateIntent
+        boolean hasDeleteIntent = normalizedText.contains('delete') || normalizedText.contains('remove') ||
+                normalizedText.contains('elimina') || normalizedText.contains('rimuovi') ||
+                normalizedText.contains('cancella') || normalizedText.contains('cancell')
+        boolean hasReadIntent = normalizedText.contains('show') || normalizedText.contains('find') ||
+                normalizedText.contains('list') || normalizedText.contains('search') ||
+                normalizedText.contains('mostra') || normalizedText.contains('trova') ||
+                normalizedText.contains('elenca') || normalizedText.contains('cerca') ||
+                normalizedText.contains('quali') || normalizedText.contains('quale') ||
+                normalizedText.contains('where') || normalizedText.contains('dove')
+        return hasRequestConcept && hasCreateIntent && !hasDeleteIntent && !hasReadIntent
     }
 
     static boolean looksLikeAssetStatusQueryPrompt(String queryText) {
@@ -688,6 +773,13 @@ class AgentToolSupport {
     }
 
     static Map inferStructuredPromptPlan(ExecutionContext ec, String queryText, Map mergedParameters = null) {
+        if (isLlmOnlyPromptPlanningEnabled()) {
+            Map llmHierarchyPlan = inferLlmRootChildHierarchyPlan(ec, queryText, null, mergedParameters)
+            if (llmHierarchyPlan?.planType) return llmHierarchyPlan
+            Map llmPlan = inferLlmStructuredPromptPlan(ec, queryText, mergedParameters)
+            if (llmPlan?.planType) return llmPlan
+            return [:]
+        }
         if (looksLikeEmploymentPositionPrompt(queryText)) {
             Map employmentPositionPlan = inferEmploymentPositionPlan(ec, queryText, mergedParameters)
             if (employmentPositionPlan?.planType) return employmentPositionPlan
@@ -707,6 +799,11 @@ class AgentToolSupport {
         Map assetPlan = inferAssetMoveStatusPlan(ec, queryText, mergedParameters)
         if (assetPlan?.planType) return assetPlan
         return [:]
+    }
+
+    static boolean isLlmOnlyPromptPlanningEnabled() {
+        String plannerMode = AgentConfigUtil.getNormalizedString('moqui.agent.chat.plannerMode', '')
+        return plannerMode == 'llm_only' || AgentConfigUtil.getBoolean('moqui.agent.chat.bypassDeterministicPlanner', false)
     }
 
     static Map inferEmploymentPositionPlan(ExecutionContext ec, String queryText, Map mergedParameters = null) {
@@ -1402,6 +1499,32 @@ class AgentToolSupport {
             if (child && parent) childrenByObject[parent] << child
         }
 
+        // Canonicalize common WorkEffort business terms to the same rooted aggregate.
+        // The pattern registry stores the recursive structure generically as WorkEffort,
+        // while prompts normally speak in terms of project/milestone/task.
+        Map workEffortRootInfo = memberByObject['work effort root'] ?: memberByObject['work effort child']
+        if (workEffortRootInfo) {
+            ['project', 'milestone', 'task'].each { String businessObject ->
+                Map syntheticInfo = new LinkedHashMap(workEffortRootInfo)
+                syntheticInfo.objectPhrase = businessObject
+                syntheticInfo.rootObjectPhrase = 'project'
+                if (businessObject == 'project') {
+                    syntheticInfo.parentObjectPhrase = null
+                    syntheticInfo.memberRoleType = 'root'
+                } else {
+                    syntheticInfo.parentObjectPhrase = 'project'
+                    syntheticInfo.memberRoleType = 'recursive_child'
+                    parentByObject[businessObject] = 'project'
+                    childrenByObject['project'] << businessObject
+                }
+                memberByObject[businessObject] = syntheticInfo
+                rootByObject[businessObject] = 'project'
+            }
+            aliasesByObject['project'].addAll(['project', 'progetto', 'commessa'])
+            aliasesByObject['milestone'].addAll(['milestone', 'fase progetto', 'project milestone'])
+            aliasesByObject['task'].addAll(['task', 'attività', 'attivita', 'project task'])
+        }
+
         return [
                 memberByObject : memberByObject,
                 parentByObject : parentByObject,
@@ -1810,60 +1933,50 @@ Rules:
     static boolean isProjectHierarchyRootDocument(Map document) {
         if (!(document instanceof Map)) return false
         String preferredService = (document.preferredService ?: '') as String
-        String canonicalPrompt = ((document.canonicalPrompt ?: '') as String).toLowerCase()
         String domainObject = ((document.domainObject ?: '') as String).toLowerCase()
         String actionKind = ((document.actionKind ?: '') as String).toLowerCase()
         return Boolean.TRUE.equals(document.runtimeExecutable) && (
                 preferredService == 'mantle.work.ProjectServices.create#Project' ||
-                canonicalPrompt == 'create project' ||
                 (actionKind == 'create' && domainObject == 'project'))
     }
 
     static boolean isRequestHierarchyRootDocument(Map document) {
         if (!(document instanceof Map)) return false
         String preferredService = (document.preferredService ?: '') as String
-        String canonicalPrompt = ((document.canonicalPrompt ?: '') as String).toLowerCase()
         String domainObject = ((document.domainObject ?: '') as String).toLowerCase()
         String actionKind = ((document.actionKind ?: '') as String).toLowerCase()
         return Boolean.TRUE.equals(document.runtimeExecutable) && (
                 preferredService == 'mantle.request.RequestServices.create#Request' ||
-                canonicalPrompt == 'create request' ||
                 (actionKind == 'create' && domainObject == 'request'))
     }
 
     static boolean isBudgetHierarchyRootDocument(Map document) {
         if (!(document instanceof Map)) return false
         String preferredService = (document.preferredService ?: '') as String
-        String canonicalPrompt = ((document.canonicalPrompt ?: '') as String).toLowerCase()
         String domainObject = ((document.domainObject ?: '') as String).toLowerCase()
         String actionKind = ((document.actionKind ?: '') as String).toLowerCase()
         return Boolean.TRUE.equals(document.runtimeExecutable) && (
                 preferredService == 'mantle.other.BudgetServices.create#Budget' ||
-                canonicalPrompt == 'create budget' ||
                 (actionKind == 'create' && domainObject == 'budget'))
     }
 
     static boolean isFacilityHierarchyRootDocument(Map document) {
         if (!(document instanceof Map)) return false
         String preferredService = (document.preferredService ?: '') as String
-        String canonicalPrompt = ((document?.canonicalPrompt ?: '') as String).toLowerCase()
         String domainObject = ((document?.domainObject ?: '') as String).toLowerCase()
         String actionKind = ((document?.actionKind ?: '') as String).toLowerCase()
         return Boolean.TRUE.equals(document.runtimeExecutable) && (
                 preferredService == 'create#mantle.facility.Facility' ||
-                canonicalPrompt == 'create facility' ||
                 (actionKind == 'create' && domainObject == 'facility'))
     }
 
     static boolean isOrderHierarchyRootDocument(Map document) {
         if (!(document instanceof Map)) return false
         String preferredService = (document.preferredService ?: '') as String
-        String canonicalPrompt = ((document?.canonicalPrompt ?: '') as String).toLowerCase()
         String domainObject = ((document?.domainObject ?: '') as String).toLowerCase()
         String actionKind = ((document?.actionKind ?: '') as String).toLowerCase()
         return Boolean.TRUE.equals(document.runtimeExecutable) && (
                 preferredService == 'mantle.order.OrderServices.create#Order' ||
-                canonicalPrompt == 'create order' ||
                 (actionKind == 'create' && domainObject == 'order'))
     }
 
@@ -4027,7 +4140,8 @@ Rules:
             for (pattern in patterns) {
                 def matcher = (normalizedText =~ pattern)
                 if (matcher.find()) {
-                    parameters.targetLocationSeqId = matcher.group(1)
+                    String extractedLocation = matcher.group(1)
+                    parameters.targetLocationSeqId = resolveFacilityLocationSeqIdByToken(ec, extractedLocation) ?: extractedLocation
                     break
                 }
             }
@@ -4041,7 +4155,8 @@ Rules:
             for (pattern in patterns) {
                 def matcher = (normalizedText =~ pattern)
                 if (matcher.find()) {
-                    parameters.sourceLocationSeqId = matcher.group(1)
+                    String extractedLocation = matcher.group(1)
+                    parameters.sourceLocationSeqId = resolveFacilityLocationSeqIdByToken(ec, extractedLocation) ?: extractedLocation
                     break
                 }
             }
@@ -4381,6 +4496,12 @@ Rules:
         return resolveIdByLookupSpec(ec, 'facility', normalized)
     }
 
+    protected static String resolveFacilityLocationSeqIdByToken(ExecutionContext ec, String token) {
+        if (!ec || !token) return null
+        String normalized = normalizePromptWhitespace(token)
+        return resolveIdByLookupSpec(ec, 'facilityLocation', normalized)
+    }
+
     protected static String resolveAssetIdByToken(ExecutionContext ec, String token) {
         if (!ec || !token) return null
         String normalized = token.trim()
@@ -4391,6 +4512,32 @@ Rules:
         if (!ec || !token) return null
         String normalized = token.trim()
         return resolveIdByLookupSpec(ec, 'product', normalized)
+    }
+
+    protected static String resolveProjectIdByToken(ExecutionContext ec, String token) {
+        if (!ec || !token) return null
+        String normalized = normalizePromptWhitespace(token)
+        return resolveIdByLookupSpec(ec, 'project', normalized)
+    }
+
+    protected static String resolveTaskIdByToken(ExecutionContext ec, String token) {
+        if (!ec || !token) return null
+        String normalized = normalizePromptWhitespace(token)
+        return resolveIdByLookupSpec(ec, 'task', normalized)
+    }
+
+    protected static String resolveRequestIdByToken(ExecutionContext ec, String token) {
+        if (!ec || !token) return null
+        String normalized = normalizePromptWhitespace(token)
+        return resolveIdByLookupSpec(ec, 'request', normalized)
+    }
+
+    protected static String resolveSalesOrderIdByToken(ExecutionContext ec, String token) {
+        if (!ec || !token) return null
+        String normalized = normalizePromptWhitespace(token)
+        String orderId = resolveIdByLookupSpec(ec, 'salesOrderPart', normalized)
+        if (orderId) return orderId
+        return resolveIdByLookupSpec(ec, 'salesOrderItem', normalized)
     }
 
     protected static String resolveEmplPositionClassIdByToken(ExecutionContext ec, String token) {
@@ -4529,19 +4676,39 @@ Rules:
         return isLikelyStructuredIdToken(cleanedToken) ? cleanedToken : null
     }
 
-    protected static String resolveIdByLookupSpec(ExecutionContext ec, String lookupKey, String token) {
-        if (!ec || !lookupKey || !token) return null
+    static Map<String, Object> lookupRecordBySpec(ExecutionContext ec, String lookupKey, String token) {
+        if (!ec || !lookupKey || !token) return [:]
         try {
             Map<String, Object> spec = (DATA_DOCUMENT_LOOKUP_SPECS[lookupKey] ?: [:]) as Map<String, Object>
-            if (!spec) return null
+            if (!spec) return [:]
             List<Map> documentList = searchDataDocumentLookup(ec, spec, token)
             if (documentList) {
                 Map bestDocument = selectBestDataDocumentLookupHit(documentList, spec, token)
                 String idField = spec.idField as String
                 Object idValue = bestDocument?.get(idField)
-                if (idValue != null) return idValue as String
+                if (idField && idValue != null) {
+                    Map<String, Object> result = [lookupKey: lookupKey, idField: idField, recordId: idValue.toString(), uniqueMatch: true]
+                    result.record = bestDocument
+                    return result
+                }
             }
-            return resolveIdByEntityExactFallback(ec, spec, token)
+            String fallbackId = resolveIdByEntityExactFallback(ec, spec, token)
+            if (fallbackId) {
+                return [lookupKey: lookupKey, idField: spec.idField as String, recordId: fallbackId, record: [:], uniqueMatch: true] as Map<String, Object>
+            }
+            return [:]
+        } catch (Throwable t) {
+            ec.logger.warn("Lookup record failed for ${lookupKey} [${abbreviate(token, 120)}]: ${t.message}")
+            return [:]
+        } finally {
+            try { ec.message.clearErrors() } catch (Throwable ignored) { }
+        }
+    }
+
+    protected static String resolveIdByLookupSpec(ExecutionContext ec, String lookupKey, String token) {
+        if (!ec || !lookupKey || !token) return null
+        try {
+            return (lookupRecordBySpec(ec, lookupKey, token)?.recordId ?: null) as String
         } catch (Throwable t) {
             ec.logger.warn("Lookup failed for ${lookupKey} [${abbreviate(token, 120)}]: ${t.message}")
             return null
@@ -4585,6 +4752,14 @@ Rules:
         String indexName = resolveLookupIndexName(ec, spec)
         String documentType = spec.documentType as String
         if (!indexName || !documentType) return []
+        try {
+            boolean documentTypeDefined = ec.entity.find('moqui.entity.document.DataDocument').disableAuthz()
+                    .condition('dataDocumentId', documentType)
+                    .count() > 0
+            if (!documentTypeDefined) return []
+        } catch (Throwable ignored) {
+            return []
+        }
 
         String queryString = buildDataDocumentLookupQuery(spec, token)
         if (!queryString) return []

@@ -117,6 +117,16 @@
                             ?.unique()
                             ?.join(' | ') ?: ''
                 }
+                Closure<List> parseJsonList = { String rawValue ->
+                    String text = (rawValue ?: '').toString().trim()
+                    if (!text) return []
+                    try {
+                        def parsed = new groovy.json.JsonSlurper().parseText(text)
+                        if (parsed instanceof List) return parsed as List
+                    } catch (Throwable ignored) {
+                    }
+                    return []
+                }
                 Closure<Map> parseArtifactLocation = {
                     String componentName = ''
                     String area = ''
@@ -223,6 +233,19 @@
                 boolean isXmlActionsSchemaRef = sourceArtifactUri.endsWith('/xml-actions-3.xsd') || sourceArtifactUri.endsWith('\\xml-actions-3.xsd') || sourceArtifactUri.contains('xml-actions-3.xsd')
                 boolean isServiceCallExtension = xmlActionElement == 'service-call'
                 String businessObject = (entityName ?: domainObjectValue ?: '').toString()
+                String semanticDescription = firstValue(doc.semanticDescription as String, 'AgSrvSemanticDescriptionDef')
+                String selectionDescription = firstValue(doc.selectionDescription as String, 'AgSrvSelectionDescriptionDef')
+                String bindingDescription = firstValue(doc.bindingDescription as String, 'AgSrvBindingDescriptionDef')
+                String requiredOperandsJson = firstValue(doc.requiredOperandsJson as String, 'AgSrvRequiredOperandListDef')
+                String optionalOperandsJson = firstValue(doc.optionalOperandsJson as String, 'AgSrvOptionalOperandListDef')
+                String producedOperandsJson = firstValue(doc.producedOperandsJson as String, 'AgSrvProducedOperandListDef')
+                String requiredIdOperandsJson = firstValue(doc.requiredIdOperandsJson as String, 'AgSrvRequiredIdOperandListDef')
+                String producedIdOperandsJson = firstValue(doc.producedIdOperandsJson as String, 'AgSrvProducedIdOperandListDef')
+                List<String> requiredOperands = parseJsonList(requiredOperandsJson).collect { it?.toString() }.findAll { it }
+                List<String> optionalOperands = parseJsonList(optionalOperandsJson).collect { it?.toString() }.findAll { it }
+                List<String> producedOperands = parseJsonList(producedOperandsJson).collect { it?.toString() }.findAll { it }
+                List<String> requiredIdOperands = parseJsonList(requiredIdOperandsJson).collect { it?.toString() }.findAll { it }
+                List<String> producedIdOperands = parseJsonList(producedIdOperandsJson).collect { it?.toString() }.findAll { it }
                 if (!serviceVerb && serviceName?.contains('.')) {
                     String tail = serviceName.tokenize('.').last()
                     if (tail.contains('#')) serviceVerb = tail.substring(0, tail.indexOf('#'))
@@ -388,17 +411,30 @@
                                 verb ? "verb ${verb}" : '',
                                 noun ? "noun ${noun}" : '',
                                 businessObject ? "domain object ${businessObject}" : '',
-                                subjectValue ? "subject ${subjectValue}" : ''
+                                subjectValue ? "subject ${subjectValue}" : '',
+                                semanticDescription,
+                                selectionDescription,
+                                bindingDescription,
+                                requiredOperands ? "required operands ${requiredOperands.join(', ')}" : '',
+                                producedOperands ? "produced operands ${producedOperands.join(', ')}" : '',
+                                requiredIdOperands ? "required identity operands ${requiredIdOperands.join(', ')}" : '',
+                                producedIdOperands ? "produced identity operands ${producedIdOperands.join(', ')}" : ''
                         ])
                         enVariants.addAll([
                                 serviceName ?: '',
                                 verb && noun ? "${verb} ${noun}" : '',
-                                businessObject && verb ? "${verb} ${businessObject}" : ''
+                                businessObject && verb ? "${verb} ${businessObject}" : '',
+                                selectionDescription ?: '',
+                                requiredOperands ? "requires ${requiredOperands.join(' ')}" : '',
+                                producedOperands ? "produces ${producedOperands.join(' ')}" : ''
                         ])
                         itVariants.addAll([
                                 serviceName ?: '',
                                 verb && noun ? "${verb} ${noun}" : '',
-                                businessObject && verb ? "${verb} ${businessObject}" : ''
+                                businessObject && verb ? "${verb} ${businessObject}" : '',
+                                selectionDescription ?: '',
+                                requiredOperands ? "richiede ${requiredOperands.join(' ')}" : '',
+                                producedOperands ? "produce ${producedOperands.join(' ')}" : ''
                         ])
                         break
                     case 'AgentArtifactXmlAction':
@@ -554,6 +590,14 @@
                         parameterRoleValue,
                         operationValue,
                         calledServiceValue,
+                        semanticDescription,
+                        selectionDescription,
+                        bindingDescription,
+                        requiredOperands.join(' '),
+                        optionalOperands.join(' '),
+                        producedOperands.join(' '),
+                        requiredIdOperands.join(' '),
+                        producedIdOperands.join(' '),
                         humanExplanation,
                         aggregatePatternIds.join(' '),
                         aggregatePatternNames.join(' | '),
@@ -606,10 +650,19 @@
                 doc.knowledgeOnly = knowledgeOnly
                 doc.canonicalPrompt = canonicalPrompt
                 doc.embeddingText = embeddingText
+                doc.title = title ?: serviceName ?: artifactLabel ?: businessObject
+                doc.summary = safeJoin([semanticDescription, selectionDescription, bindingDescription])
                 doc.humanExplanation = humanExplanation
                 doc.englishPromptVariants = englishPromptVariants
                 doc.italianPromptVariants = italianPromptVariants
                 doc.uiLabels = uiLabelsText
+                doc.businessQuestions = selectionDescription
+                doc.processHints = bindingDescription
+                doc.executionRequiredContext = requiredOperands
+                doc.requiredEntities = requiredIdOperands
+                doc.optionalEntities = optionalOperands
+                doc.supportServices = producedOperands
+                doc.sourceFile = sourceArtifactUri
                 doc.fieldNames = fieldNames
                 doc.relatedEntities = relatedEntities
                 doc.boundServices = boundServices
@@ -622,6 +675,9 @@
                 doc.universalPatternChapters = universalPatternChapters
                 doc.patternEvidenceJson = patternEvidence ? groovy.json.JsonOutput.toJson(patternEvidence) : ''
                 doc.sourceScreenPath = screenPath
+                doc.semanticDescription = semanticDescription
+                doc.selectionDescription = selectionDescription
+                doc.bindingDescription = bindingDescription
                 if (doc.parameters) doc.remove('parameters')
                 doc._type = docType
                 doc._id = doc.documentId
@@ -911,6 +967,7 @@
                         'RoleTypeLookup',
                         'StatusItemLookup',
                         'FiscalYearTimePeriod',
+                        'FacilityLocationLookup',
                         'EmplPositionClass',
                         'EmplPosition'
                 ]
@@ -1039,6 +1096,56 @@
                             clusterName:clusterName
                     ]"
                     out-map="context"/>
+        </actions>
+    </service>
+
+    <service verb="index" noun="StandardLookupDataDocuments" authenticate="true" allow-remote="true" transaction-timeout="3600">
+        <description>Index standard Mantle/Moqui DataFeeds used by the agent for runtime lookup resolution before custom fallback documents.</description>
+        <in-parameters>
+            <parameter name="dataFeedId"/>
+            <parameter name="dataDocumentId"/>
+            <parameter name="fromUpdateStamp" type="Timestamp"/>
+            <parameter name="thruUpdateStamp" type="Timestamp"/>
+            <parameter name="batchSize" type="Integer" default="1000"/>
+            <parameter name="clusterName" default-value="default"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="feedsIndexed" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <if condition="dataFeedId">
+                <service-call name="org.moqui.search.SearchServices.index#DataFeedDocuments"
+                        in-map="[
+                                dataFeedId:dataFeedId,
+                                dataDocumentId:dataDocumentId,
+                                fromUpdateStamp:fromUpdateStamp,
+                                thruUpdateStamp:thruUpdateStamp,
+                                batchSize:batchSize,
+                                clusterName:clusterName
+                        ]"
+                        out-map="context"/>
+                <set field="feedsIndexed" from="1"/>
+                <return/>
+            </if>
+
+            <set field="feedsIndexed" from="0"/>
+            <set field="standardFeedIds" from="[
+                    'MantleSearch',
+                    'MantleSales',
+                    'MantleInventoryData',
+                    'MantleAccountingData'
+            ]"/>
+            <iterate list="standardFeedIds" entry="feedId">
+                <service-call name="org.moqui.search.SearchServices.index#DataFeedDocuments"
+                        in-map="[
+                                dataFeedId:feedId,
+                                fromUpdateStamp:fromUpdateStamp,
+                                thruUpdateStamp:thruUpdateStamp,
+                                batchSize:batchSize,
+                                clusterName:clusterName
+                        ]"/>
+                <set field="feedsIndexed" from="feedsIndexed + 1"/>
+            </iterate>
         </actions>
     </service>
 
@@ -2911,7 +3018,7 @@
                                 sourceServiceName : 'org.moqui.agent.AgentDocumentServices.index#AgentDocuments',
                                 parametersJson : JsonOutput.toJson([
                                     indexName : effectiveIndex,
-                                    documentSchemaVersion : documentSchemaVersion ?: 'screen-first-v1',
+                                    documentSchemaVersion : documentSchemaVersion ?: 'algebraic-morphism-v1',
                                     embeddingProvider : effectiveEmbeddingProvider,
                                     embeddingModel : effectiveEmbeddingModel,
                                     embeddingDimensions : effectiveEmbeddingDimensions,
@@ -2927,7 +3034,7 @@
                 runValue.setAll([
                         mathModelRunId : effectiveMathModelRunId,
                         indexName : effectiveIndex,
-                        documentSchemaVersion : documentSchemaVersion ?: 'screen-first-v1',
+                        documentSchemaVersion : documentSchemaVersion ?: 'algebraic-morphism-v1',
                         embeddingProvider : effectiveEmbeddingProvider,
                         embeddingModel : effectiveEmbeddingModel,
                         embeddingDimensions : effectiveEmbeddingDimensions,

@@ -130,16 +130,20 @@ class AgentPromptDeterministicReranker {
         String canonicalPromptLower = canonicalPrompt.toLowerCase()
         String domainObjectText = (source.domainObject ?: '') as String
         String subAreaText = (source.subArea ?: '') as String
+        String sourceAreaText = (source.area ?: '') as String
         String documentKind = (source.documentKind ?: '') as String
         boolean knowledgeOnly = Boolean.TRUE.equals(source.knowledgeOnly)
         String knowledgeCategory = (source.knowledgeCategory ?: '') as String
         String resolutionPolicy = (source.resolutionPolicy ?: '') as String
         String primaryScreenPurpose = (source.primaryScreenPurpose ?: '') as String
         boolean mutationRequiresFieldDiff = Boolean.TRUE.equals(source.mutationRequiresFieldDiff)
+        String serviceName = (source.serviceName ?: source.artifactName ?: source.documentId ?: '') as String
         List sourceFieldNames = (source.fieldNames instanceof List) ? source.fieldNames as List : []
         List<String> sourceUiLabels = (source.uiLabels instanceof List) ?
             ((List) source.uiLabels).collect { (it ?: '').toString() } :
             []
+        Set<String> promptDomainFamilies = inferPromptDomainFamilies(queryTokens, normalizedQueryText)
+        Set<String> candidateDomainFamilies = inferCandidateDomainFamilies(source)
 
         boolean readIntent = ['find','search','list','show','view','open','display','read',
                               'trova','cerca','elenca','mostra','visualizza','apri','leggi'].any { normalizedQueryText.contains(it) }
@@ -203,18 +207,56 @@ class AgentPromptDeterministicReranker {
         boolean cancelSynonymMatch =
             queryTokens.any { it == 'void' } &&
                 (canonicalPromptLower.contains('cancel') || uiLabelText.contains('cancel'))
+        Set<String> readLikeOperationEffects = [
+            'read', 'read_one', 'read_list', 'read_count', 'read_query', 'read_detail', 'navigation'
+        ] as Set<String>
         boolean queryProjectCreate =
             queryActionKind == 'create' &&
                 queryTokens.any { it in ['project', 'progetto', 'commessa'] }
+        boolean queryRequestCreate =
+            queryTokens.any { it in ['ticket', 'support', 'request', 'richiesta'] } &&
+                queryTokens.any { it in ['open', 'aprire', 'apri', 'create', 'crea', 'creare', 'new', 'nuovo', 'nuova'] }
         boolean candidateProjectCreate =
             sourceActionKind == 'create' &&
                 sourceOperationEffect == 'create' &&
                 (domainObjectText ?: '').toLowerCase() == 'project'
+        boolean candidateRequestCreate =
+            sourceActionKind == 'create' &&
+                (domainObjectText ?: '').toLowerCase() == 'request'
         boolean candidateProjectRelated =
             ((domainObjectText ?: '').toLowerCase() in ['project', 'milestone', 'projecttasks', 'task']) ||
                 canonicalPromptLower.contains('project') || canonicalPromptLower.contains('milestone')
+        boolean internalTechnicalService =
+            serviceName.startsWith('org.moqui.agent.') ||
+                serviceName.startsWith('org.moqui.mcp.') ||
+                sourceAreaText.equalsIgnoreCase('Agent') ||
+                sourceAreaText.equalsIgnoreCase('Mcp')
+        boolean queryMentionsInternalTechnicalDomain =
+            queryTokenSet.intersect(['agent', 'mcp', 'math', 'model', 'telemetry', 'skill', 'tools', 'tool'] as Set).size() > 0
+        boolean strongDomainMismatch =
+            !knowledgeOnly &&
+                domainQueryTokenSet.size() >= 2 &&
+                candidateDomainMatches == 0 &&
+                !candidateDomainPhraseMatch &&
+                domainBigramMatches == 0
+        boolean familyMismatch =
+            !knowledgeOnly &&
+                promptDomainFamilies &&
+                candidateDomainFamilies &&
+                promptDomainFamilies.intersect(candidateDomainFamilies).isEmpty()
+        boolean familyMatch =
+            !knowledgeOnly &&
+                promptDomainFamilies &&
+                candidateDomainFamilies &&
+                !promptDomainFamilies.intersect(candidateDomainFamilies).isEmpty()
 
         if (hybridMode) {
+            if (internalTechnicalService && !queryMentionsInternalTechnicalDomain) structuredBoost -= 0.55d
+            if (strongDomainMismatch) structuredBoost -= 0.42d
+            if (familyMismatch) structuredBoost -= 0.72d
+            if (familyMatch) structuredBoost += 0.26d
+            if (mutateIntent && reqCtx.isEmpty() && sourceActionKind in ['update', 'status']) structuredBoost -= 0.18d
+            if (mutateIntent && sourceOperationEffect in ['opaque', 'unresolved_binding']) structuredBoost -= 0.18d
             if (!includeNonExecutable && executionChannel == 'unsupported') structuredBoost -= 0.50d
             if (queryProfile.intentType == 'knowledge') {
                 if (knowledgeOnly) structuredBoost += 0.28d
@@ -275,7 +317,8 @@ class AgentPromptDeterministicReranker {
             if (readIntent && ['read_query', 'read_detail', 'navigation'].contains(sourceOperationEffect)) structuredBoost += 0.12d
             if (readIntent && ['create','update','delete','status_transition','batch_update','financial_posting','cancellation'].contains(sourceOperationEffect)) structuredBoost -= 0.20d
             if (mutateIntent && ['create','update','delete','status_transition','batch_update'].contains(sourceOperationEffect)) structuredBoost += 0.12d
-            if (mutateIntent && ['read_query', 'read_detail', 'navigation'].contains(sourceOperationEffect)) structuredBoost -= 0.18d
+            if (mutateIntent && readLikeOperationEffects.contains(sourceOperationEffect)) structuredBoost -= 0.26d
+            if (mutateIntent && sourceActionKind in ['list', 'detail', 'navigate']) structuredBoost -= 0.16d
             if (queryActionKind != 'unresolved') {
                 if (queryActionKind == sourceActionKind) structuredBoost += queryActionKind == 'update' ? 0.22d : 0.16d
                 else if (queryActionKind in ['list', 'detail'] && sourceActionKind in ['list', 'detail', 'navigate']) structuredBoost += 0.06d
@@ -307,8 +350,19 @@ class AgentPromptDeterministicReranker {
                 if (sourceActionKind in ['list', 'detail', 'navigate', 'unresolved']) structuredBoost -= 0.18d
                 if (candidateProjectRelated && !candidateProjectCreate) structuredBoost -= 0.08d
             }
+            if (queryRequestCreate) {
+                if (candidateRequestCreate) structuredBoost += 0.34d
+                if (readLikeOperationEffects.contains(sourceOperationEffect)) structuredBoost -= 0.24d
+                if ((domainObjectText ?: '').toLowerCase() != 'request' && candidateDomainMatches == 0) structuredBoost -= 0.12d
+            }
             if (source.promptGroupId) structuredBoost += 0.05d
         } else {
+            if (internalTechnicalService && !queryMentionsInternalTechnicalDomain) structuredBoost -= 0.45d
+            if (strongDomainMismatch) structuredBoost -= 0.32d
+            if (familyMismatch) structuredBoost -= 0.55d
+            if (familyMatch) structuredBoost += 0.18d
+            if (mutateIntent && reqCtx.isEmpty() && sourceActionKind in ['update', 'status']) structuredBoost -= 0.14d
+            if (mutateIntent && sourceOperationEffect in ['opaque', 'unresolved_binding']) structuredBoost -= 0.14d
             if (!includeNonExecutable && nonPrimaryChannels.contains(executionChannel)) structuredBoost -= 0.35d
             if (queryProfile.intentType == 'knowledge') {
                 if (knowledgeOnly) structuredBoost += 0.24d
@@ -361,7 +415,8 @@ class AgentPromptDeterministicReranker {
             }
             if (readIntent && ['create','update','delete','batch_update','status_transition','financial_posting','cancellation'].contains(sourceOperationEffect)) structuredBoost -= 0.20d
             if (readIntent && ['create','update','delete','status'].contains(sourceActionKind)) structuredBoost -= 0.10d
-            if (mutateIntent && 'read_query' == sourceOperationEffect) structuredBoost -= 0.12d
+            if (mutateIntent && readLikeOperationEffects.contains(sourceOperationEffect)) structuredBoost -= 0.18d
+            if (mutateIntent && sourceActionKind in ['list', 'detail', 'navigate']) structuredBoost -= 0.12d
             if (queryActionKind == 'navigate' && resolutionPolicy == 'navigate_then_maybe_update') structuredBoost += 0.10d
             if (queryActionKind == 'navigate' && primaryScreenPurpose == 'edit') structuredBoost += 0.12d
             if (queryActionKind == 'navigate' && sourceActionKind == 'update') structuredBoost -= queryExplicitValueSignal ? 0.02d : 0.18d
@@ -372,11 +427,20 @@ class AgentPromptDeterministicReranker {
                 if (sourceActionKind in ['list', 'detail', 'navigate', 'unresolved']) structuredBoost -= 0.14d
                 if (candidateProjectRelated && !candidateProjectCreate) structuredBoost -= 0.06d
             }
+            if (queryRequestCreate) {
+                if (candidateRequestCreate) structuredBoost += 0.24d
+                if (readLikeOperationEffects.contains(sourceOperationEffect)) structuredBoost -= 0.18d
+                if ((domainObjectText ?: '').toLowerCase() != 'request' && candidateDomainMatches == 0) structuredBoost -= 0.10d
+            }
         }
         structuredBoost
     }
 
     protected static String inferQueryActionKind(List<String> queryTokens, boolean queryExplicitValueSignal) {
+        boolean requestCreateIntent =
+            queryTokens.any { it in ['ticket', 'support', 'request', 'richiesta'] } &&
+                queryTokens.any { it in ['open', 'aprire', 'apri', 'create', 'crea', 'creare', 'new', 'nuovo', 'nuova'] }
+        if (requestCreateIntent) return 'create'
         if (queryTokens.any { it in ['find','search','list','show','view','display','trova','cerca','elenca','mostra','visualizza'] }) return 'list'
         if (queryTokens.any { it in ['open','inspect','details','detail','apri','dettaglio','dettagli'] }) return 'detail'
         if (queryTokens.any { it in ['create','add','new','place','crea','creare','nuovo','nuova','inserisci'] }) return 'create'
@@ -393,10 +457,81 @@ class AgentPromptDeterministicReranker {
     }
 
     protected static List<String> candidateDomainTokens(Map source, Set<String> domainNoiseTokens) {
-        String candidateText = [(source.domainObject ?: ''), (source.subArea ?: ''), (source.area ?: '')]
-            .findAll { it }
-            .join(' ')
+        List<String> extraText = []
+        if (source.relatedEntities instanceof List) extraText.addAll((List) source.relatedEntities)
+        if (source.requiredEntities instanceof List) extraText.addAll((List) source.requiredEntities)
+        if (source.optionalEntities instanceof List) extraText.addAll((List) source.optionalEntities)
+        if (source.fieldNames instanceof List) extraText.addAll((List) source.fieldNames)
+        String candidateText = [
+            (source.domainObject ?: ''),
+            (source.subArea ?: ''),
+            (source.area ?: ''),
+            (source.patternName ?: ''),
+            (source.workflowName ?: ''),
+            (source.scenarioName ?: ''),
+            (source.serviceName ?: ''),
+            (source.preferredService ?: '')
+        ]
+            .findAll { it } + extraText.findAll { it }
         List<String> candidateTokens = AgentToolSupport.tokenizeSearchText(candidateText) as List<String>
         candidateTokens.findAll { !(it in domainNoiseTokens) }.unique()
+    }
+
+    protected static Set<String> inferPromptDomainFamilies(List<String> queryTokens, String normalizedQueryText) {
+        Set<String> families = [] as Set<String>
+        registerFamilyMatches(families, queryTokens, normalizedQueryText, [
+            project : ['project', 'progetto', 'commessa', 'milestone', 'task', 'workeffort'],
+            budget : ['budget', 'glaccount', 'accounting', 'conto', 'contabile', 'fiscal', 'ledger'],
+            order : ['order', 'ordine', 'sales', 'customer', 'delivery', 'product'],
+            request : ['request', 'ticket', 'support', 'richiesta', 'issue'],
+            asset : ['asset', 'warehouse', 'facility', 'location', 'inventory', 'magazzino', 'locazione'],
+            party : ['party', 'person', 'employee', 'worker', 'assignee', 'organization', 'john', 'doe', 'mario', 'rossi'],
+            invoice : ['invoice', 'fattura', 'billing', 'due', 'payment'],
+            payment : ['payment', 'bank', 'bai', 'statement', 'message', 'systemmessage']
+        ])
+        families
+    }
+
+    protected static Set<String> inferCandidateDomainFamilies(Map source) {
+        Set<String> families = [] as Set<String>
+        List<String> extraText = []
+        if (source.relatedEntities instanceof List) extraText.addAll((List) source.relatedEntities)
+        if (source.requiredEntities instanceof List) extraText.addAll((List) source.requiredEntities)
+        if (source.optionalEntities instanceof List) extraText.addAll((List) source.optionalEntities)
+        if (source.fieldNames instanceof List) extraText.addAll((List) source.fieldNames)
+        String candidateText = ([
+            (source.domainObject ?: ''),
+            (source.subArea ?: ''),
+            (source.area ?: ''),
+            (source.patternName ?: ''),
+            (source.workflowName ?: ''),
+            (source.scenarioName ?: ''),
+            (source.serviceName ?: ''),
+            (source.preferredService ?: ''),
+            (source.documentId ?: '')
+        ] + extraText.findAll { it }).join(' ').toLowerCase()
+        List<String> candidateTokens = AgentToolSupport.tokenizeSearchText(candidateText) as List<String>
+        registerFamilyMatches(families, candidateTokens, candidateText, [
+            project : ['project', 'milestone', 'task', 'workeffort'],
+            budget : ['budget', 'glaccount', 'ledger', 'fiscal', 'accounting'],
+            order : ['order', 'orderpart', 'orderitem', 'sales'],
+            request : ['request', 'ticket', 'support'],
+            asset : ['asset', 'facility', 'location', 'inventory', 'warehouse'],
+            party : ['party', 'person', 'employee', 'organization', 'user', 'assignee'],
+            invoice : ['invoice', 'billing'],
+            payment : ['payment', 'bai', 'statement', 'systemmessage', 'message']
+        ])
+        families
+    }
+
+    protected static void registerFamilyMatches(Set<String> families, List<String> tokens, String fullText, Map<String, List<String>> familyMap) {
+        Set<String> tokenSet = (tokens ?: []) as Set<String>
+        familyMap.each { String familyName, List<String> aliases ->
+            boolean matched = aliases.any { String alias ->
+                String normalizedAlias = alias.toLowerCase()
+                tokenSet.contains(normalizedAlias) || (fullText?.contains(normalizedAlias))
+            }
+            if (matched) families << familyName
+        }
     }
 }

@@ -125,6 +125,58 @@ class AgentPromptDecompositionTests extends Specification {
         (result.atomicCommands as List)[0].targetObjectText == "employment position"
     }
 
+    def "decompose support ticket open assign deadline prompt into rooted request composition"() {
+        when:
+        Map result = ec.service.sync()
+                .name("org.moqui.agent.AgentAlgebraicServices.decompose#PromptIntoAtomicCommands")
+                .parameters([
+                        queryText: "Potresti aprire un ticket urgente per il cambio compressore, assegnarlo a John Doe e impostare la scadenza al 19/04/2026?"
+                ]).call()
+
+        then:
+        result.success == true
+        result.workflowIntent.language == "it"
+        result.workflowIntent.complexity == "compound"
+        (result.atomicCommands as List)*.verbLemma == ["create", "assign", "set"]
+        (result.atomicCommands as List)*.targetObjectText == ["request", "request", "request"]
+        ((result.atomicCommands as List)[1].complements.references.assignedPartyName) == "John Doe"
+        ((result.atomicCommands as List)[2].complements.values.responseRequiredDate) == "19/04/2026"
+    }
+
+    def "decompose assigned task query as read over task object"() {
+        when:
+        Map result = ec.service.sync()
+                .name("org.moqui.agent.AgentAlgebraicServices.decompose#PromptIntoAtomicCommands")
+                .parameters([
+                        queryText: "Quali task sono assegnati a John Doe con ruolo Project Manager?"
+                ]).call()
+
+        then:
+        result.success == true
+        result.workflowIntent.mutability == "read-only"
+        (result.atomicCommands as List).size() == 1
+        (result.atomicCommands as List)[0].verbLemma == "read"
+        (result.atomicCommands as List)[0].targetObjectText == "task"
+        ((result.atomicCommands as List)[0].complements.references.assignedPartyName) == "John Doe"
+    }
+
+    def "decompose project verification query as read projection on project root"() {
+        when:
+        Map result = ec.service.sync()
+                .name("org.moqui.agent.AgentAlgebraicServices.decompose#PromptIntoAtomicCommands")
+                .parameters([
+                        queryText: "Puoi mostrarmi le milestone e i task del progetto Commessa Hormel Food Corporation 2027 appena creato?"
+                ]).call()
+
+        then:
+        result.success == true
+        result.workflowIntent.mutability == "read-only"
+        (result.atomicCommands as List).size() == 1
+        (result.atomicCommands as List)[0].verbLemma == "read"
+        (result.atomicCommands as List)[0].targetObjectText == "project"
+        ((result.atomicCommands as List)[0].complements.references.projectName) == "Commessa Hormel Food Corporation 2027 appena creato"
+    }
+
     def "classify root child aggregate composition from decomposed budget prompt"() {
         given:
         Map decomposition = ec.service.sync()
@@ -192,6 +244,29 @@ class AgentPromptDecompositionTests extends Specification {
         result.planningMode == "cross_aggregate_workflow"
         result.patternClassification.patternId == "cross_aggregate_workflow"
         (result.blockedReasons as List)[0].reason == "cross_aggregate_workflow"
+    }
+
+    def "classify support ticket open assign deadline prompt as single object composition"() {
+        given:
+        Map decomposition = ec.service.sync()
+                .name("org.moqui.agent.AgentAlgebraicServices.decompose#PromptIntoAtomicCommands")
+                .parameters([
+                        queryText: "Potresti aprire un ticket urgente per il cambio compressore, assegnarlo a John Doe e impostare la scadenza al 19/04/2026?"
+                ]).call()
+
+        when:
+        Map result = ec.service.sync()
+                .name("org.moqui.agent.AgentAlgebraicServices.classify#AtomicCommandPattern")
+                .parameters([
+                        atomicCommands: decomposition.atomicCommands,
+                        commandGraph: decomposition.commandGraph,
+                        workflowIntent: decomposition.workflowIntent
+                ]).call()
+
+        then:
+        result.planningMode == "single_object_composition"
+        result.aggregateRootObject == "request"
+        result.patternClassification.patternId == "single_object_mutation"
     }
 
     def "map atomic commands to morphism candidates for budget aggregate prompt"() {

@@ -94,7 +94,9 @@
                 }
                 Set<String> stopTerms = [
                         'create', 'insert', 'update', 'delete', 'remove', 'assign', 'close', 'approve', 'submit', 'store', 'move',
-                        'new', 'with', 'for', 'and', 'the'
+                        'new', 'with', 'for', 'and', 'the',
+                        'read', 'show', 'list', 'find', 'search', 'get',
+                        'mostra', 'mostrarmi', 'trova', 'cerca', 'elenca'
                 ] as Set<String>
                 Closure<Set<String>> tokenizeArtifact = { String text ->
                     if (!text) return [] as Set<String>
@@ -111,7 +113,7 @@
                 }
 
                 int effectiveLimit = Math.max(1, (limit ?: 20) as Integer)
-                int fetchLimit = Math.max(effectiveLimit * 20, 400)
+                int fetchLimit = Math.max(effectiveLimit * 200, 5000)
                 String normalizedQueryText = normalizeQueryText(queryText)
                 Set<String> queryTerms = tokenize(normalizedQueryText)
                 Set<String> domainTerms = queryTerms.findAll { !stopTerms.contains(it) } as Set<String>
@@ -119,58 +121,28 @@
                 Set<String> genericSuffixes = ['item', 'detail', 'entry', 'line', 'type', 'status', 'header', 'part', 'group', 'info', 'data'] as Set<String>
                 Set<String> specificDomainTerms = domainTerms.findAll { !genericSuffixes.contains(it) } as Set<String>
                 if (specificDomainTerms.isEmpty()) specificDomainTerms = domainTerms
+                boolean technicalQuery = queryTerms.any {
+                    it in ['agent', 'mcp', 'math', 'model', 'metamodel', 'telemetry', 'skill', 'tool', 'tools']
+                }
 
                 import org.moqui.entity.EntityCondition
 
                 def condList = [ec.entity.conditionFactory.makeCondition('categoryId', EntityCondition.EQUALS, 'AgentXmlActionsDsl')]
-                if (specificDomainTerms) {
-                    def orConds = []
-                    specificDomainTerms.each { String term ->
-                        if (term && term.length() > 2) {
-                            orConds.add(ec.entity.conditionFactory.makeCondition('serviceName', EntityCondition.LIKE, "%${term}%"))
-                            orConds.add(ec.entity.conditionFactory.makeCondition('morphismSymbol', EntityCondition.LIKE, "%${term}%"))
-                        }
-                    }
-                    if (orConds) {
-                        condList.add(ec.entity.conditionFactory.makeCondition(orConds, EntityCondition.OR))
-                    }
-                }
                 def rows = ec.entity.find('moqui.math.ct.Morphism')
                         .condition(ec.entity.conditionFactory.makeCondition(condList, EntityCondition.AND))
                         .orderBy('serviceName')
                         .limit(fetchLimit)
                         .list() ?: []
-                if (!rows) {
-                    try {
-                        ec.entity.makeDataLoader()
-                                .location('component://moqui-mcp/data/AppSeedData.xml')
-                                .location('component://moqui-mcp/data/McpSecuritySeedData.xml')
-                                .location('component://moqui-mcp/data/AgentDocumentSeedData.xml')
-                                .location('component://moqui-mcp/data/AgentSkillDocumentSeedData.xml')
-                                .location('component://moqui-mcp/data/AgentSkillSeedData.xml')
-                                .location('component://moqui-mcp/data/AgentAggregatePatternSeedData.xml')
-                                .location('component://moqui-mcp/data/AgentUniversalPatternSeedData.xml')
-                                .location('component://moqui-mcp/data/AgentGraphMetadataSeedData.xml')
-                                .location('component://moqui-mcp/data/AgentMathModelSeedData.xml')
-                                .location('component://moqui-mcp/data/generated/XmlActionMorphismSeed.xml')
-                                .location('component://moqui-mcp/data/generated/ServiceMorphismSeed.xml')
-                                .location('component://moqui-mcp/data/generated/EntityMorphismSeed.xml')
-                                .location('component://moqui-mcp/data/AgentRuntimeSeedData.xml')
-                                .load()
-                        rows = ec.entity.find('moqui.math.ct.Morphism')
-                                .condition('categoryId', 'AgentXmlActionsDsl')
-                                .orderBy('serviceName')
-                                .limit(fetchLimit)
-                                .list() ?: []
-                    } catch (Throwable e) {
-                        println "DEBUG seed load error: ${e.class.name}: ${e.message}"
-                    }
-                }
 
                 morphismList = []
                 rows.each { row ->
                     String serviceName = (row.serviceName ?: '') as String
                     if (!serviceName || !serviceName.contains('#')) return
+                    if (serviceName.startsWith('component://')) return
+                    boolean executableService = ec.serviceFacade.isServiceDefined(serviceName) || ec.serviceFacade.isEntityAutoPattern(serviceName)
+                    if (!executableService) return
+                    boolean internalTechnicalService = serviceName.startsWith('org.moqui.agent.') || serviceName.startsWith('org.moqui.mcp.')
+                    if (internalTechnicalService && !technicalQuery) return
                     if (componentName && !(serviceName.toLowerCase().contains(componentName.toString().toLowerCase()) ||
                             (row.morphismName ?: '').toString().toLowerCase().contains(componentName.toString().toLowerCase()))) return
 
@@ -190,15 +162,20 @@
                     String loweredNoun = currentServiceNoun.toLowerCase()
                     String loweredVerb = currentServiceVerb.toLowerCase()
 
-                    String haystack = [row.serviceName, row.morphismName, row.description, sr?.description, sr?.configParameters,
+                    String rawDescription = ((row.description ?: sr?.description ?: '') as String)
+                    String loweredRawDescription = rawDescription.toLowerCase()
+                    String positiveDescription = loweredRawDescription
+                            .replaceAll(/select only[^.]*\./, ' ')
+                            .replaceAll(/do not select[^.]*\./, ' ')
+                    String haystack = [row.serviceName, row.morphismName, positiveDescription, sr?.configParameters,
                                        currentServiceVerb, currentServiceNoun]
                             .findAll { it }.join(' ').toLowerCase()
-                    if (queryTerms && !queryTerms.any { haystack.contains(it) }) return
+                    if (queryTerms && !queryTerms.any { haystack.contains(it) || loweredRawDescription.contains(it) }) return
 
                     Set<String> artifactTerms = ([] as Set<String>)
                     artifactTerms.addAll(tokenizeArtifact(serviceName))
                     artifactTerms.addAll(tokenizeArtifact((row.morphismName ?: '') as String))
-                    artifactTerms.addAll(tokenizeArtifact((row.description ?: '') as String))
+                    artifactTerms.addAll(tokenizeArtifact(positiveDescription))
                     artifactTerms.addAll(tokenizeArtifact((sr?.description ?: '') as String))
                     artifactTerms.addAll(tokenizeArtifact(currentServiceVerb))
                     artifactTerms.addAll(tokenizeArtifact(currentServiceNoun))
@@ -208,7 +185,24 @@
                         if (artifactTerms.contains(term)) score += stopTerms.contains(term) ? 1 : 5
                         else if (haystack.contains(term)) score += stopTerms.contains(term) ? 0 : 2
                     }
-                    if (domainTerms && !domainTerms.any { artifactTerms.contains(it) || haystack.contains(it) }) return
+                    if (specificDomainTerms && !specificDomainTerms.any { artifactTerms.contains(it) || haystack.contains(it) }) return
+                    if (!specificDomainTerms && domainTerms && !domainTerms.any { artifactTerms.contains(it) || haystack.contains(it) }) return
+
+                    specificDomainTerms.each { String term ->
+                        if (artifactTerms.contains(term)) score += 18
+                        else if (haystack.contains(term)) score += 8
+                    }
+                    specificDomainTerms.each { String term ->
+                        if (loweredRawDescription.contains("do not select") && loweredRawDescription.contains(term)) score -= 30
+                    }
+                    if (specificDomainTerms && specificDomainTerms.any { loweredNoun.contains(it) }) score += 12
+                    if (specificDomainTerms.size() > 1 && specificDomainTerms.every { haystack.contains(it) || loweredNoun.contains(it) }) score += 10
+                    boolean queryWantsChildLines = ['item', 'items', 'line', 'lines', 'riga', 'righe', 'detail', 'details', 'dettaglio', 'dettagli']
+                            .any { normalizedQueryText.contains(it) }
+                    boolean queryWantsReport = ['report', 'summary', 'riepilogo', 'resoconto'].any { normalizedQueryText.contains(it) }
+                    if (queryWantsChildLines && (loweredNoun.contains('item') || loweredNoun.contains('detail'))) score += 12
+                    if (queryWantsChildLines && loweredNoun.contains('report')) score -= 12
+                    if (!queryWantsReport && loweredNoun.contains('report')) score -= 8
 
                     boolean queryIsMutatingUpdate = ['set', 'update', 'move', 'sposta', 'spostare', 'change', 'imposta', 'metti', 'aggiorna'].any { normalizedQueryText.contains(it) }
                     if (!queryIsMutatingUpdate && (loweredVerb.contains('create') || loweredVerb.contains('add'))) score += 4
@@ -636,6 +630,7 @@
                     return values.findAll { it && it != 'null' }.unique().sort()
                 }
                 Closure<Map> loadServiceMorphism = { String currentServiceName ->
+                    if (!currentServiceName || currentServiceName.startsWith('component://')) return null
                     def morphism = ec.entity.find('moqui.math.ct.Morphism')
                             .condition('categoryId', 'AgentXmlActionsDsl')
                             .condition('serviceName', currentServiceName)
@@ -983,6 +978,19 @@
                     }
                     if (text.contains('asset')) return 'asset'
                     if (text.contains('posizione') || text.contains('position')) return 'employment position'
+                    if (text.contains('ticket') || text.contains('support request') || text.contains('richiesta di supporto') || text.contains('richiesta di support')) return 'request'
+                    if ((text.contains('milestone') || text.contains('task')) &&
+                            (text.contains('project') || text.contains('progetto') || text.contains('commessa')) &&
+                            !text.contains('project manager')) return 'project'
+                    if (text.contains('task')) return 'task'
+                    if (text.contains('milestone')) return 'milestone'
+                    if (text.contains('budget')) {
+                        boolean budgetChildText = text.matches(/.*\b(righe|riga|linee|line|lines|item|items|detail|details|dettagli|conto|conti|account|accounts|gl account|account code)\b.*/)
+                        if (budgetChildText) return 'budget item'
+                        return 'budget'
+                    }
+                    if (text.contains('order') || text.contains('ordine')) return 'order'
+                    if (text.contains('project') || text.contains('progetto') || text.contains('commessa')) return 'project'
                     for (Map aliasEntry in aggregateAliasPairs) {
                         String alias = aliasEntry.alias as String
                         if (alias && alias.length() > 2 && !roleAliases.contains(alias)) {
@@ -1001,18 +1009,26 @@
                     String trimmed = lowered.trim()
                             .replaceFirst(/^(?:potresti|puoi|per favore|please|could you|would you)\s+/, '')
                             .trim()
+                    if (trimmed.matches(/^(?:which|what|where|quali|quale|dove)\b.*/)) return 'read'
+                    if (trimmed.matches(/^(?:open|aprire|apri)\b.*/) &&
+                            trimmed.matches(/.*\b(ticket|support|request|richiesta)\b.*/)) return 'create'
                     if (trimmed.matches(/^(?:create|new|insert|add|crea|creare|inserisci|inserire|aggiungi|nuovo|nuova)\b.*/)) return 'create'
                     if (trimmed.matches(/^(?:link|connect|associate|attach|collega|connetti|associa|collegala|collegalo)\b.*/)) return 'link'
                     if (trimmed.matches(/^(?:assign|allocate|assegna|assegnala|assegnalo)\b.*/)) return 'assign'
-                    if (trimmed.matches(/^(?:set|update|change|mark|move|imposta|metti|aggiorna|cambia|sposta|spostare)\b.*/)) return 'set'
+                    if (trimmed.matches(/^(?:close|chiudi|chiudere|cancel|cancella|cancellare)\b.*/)) return 'delete'
+                    if (trimmed.matches(/^(?:move|relocate|transfer|sposta|spostare)\b.*/)) return 'move'
+                    if (trimmed.matches(/^(?:set|update|change|mark|imposta|metti|aggiorna|cambia)\b.*/)) return 'set'
                     if (trimmed.matches(/^(?:delete|remove|elimina|rimuovi)\b.*/)) return 'delete'
-                    if (trimmed.matches(/^(?:show|find|list|search|get|mostra|trova|elenca|cerca)\b.*/)) return 'read'
+                    if (trimmed.matches(/^(?:show|find|list|search|get|mostra|mostrami|mostrarmi|trova|elenca|cerca)\b.*/)) return 'read'
+                    if (trimmed.matches(/.*\b(?:sono\s+assegnati|are\s+assigned)\b.*/)) return 'read'
                     if (trimmed.matches(/.*\b(create|crea|creare|insert|inserisci|inserire|add|aggiungi)\b.*/)) return 'create'
                     if (trimmed.matches(/.*\b(link|connect|associate|attach|collega|connetti|associa)\b.*/)) return 'link'
-                    if (trimmed.matches(/.*\b(assign|allocate|assegna)\b.*/)) return 'assign'
-                    if (trimmed.matches(/.*\b(set|update|change|mark|move|imposta|metti|aggiorna|cambia|sposta|spostare)\b.*/)) return 'set'
+                    if (trimmed.matches(/.*\b(assign|allocate|assegna|assegnare|assegnarlo|assegnarla|assegnarli|assegnarle)\b.*/)) return 'assign'
+                    if (trimmed.matches(/.*\b(close|chiudi|chiudere|cancel|cancella|cancellare)\b.*/)) return 'delete'
+                    if (trimmed.matches(/.*\b(move|relocate|transfer|sposta|spostare)\b.*/)) return 'move'
+                    if (trimmed.matches(/.*\b(set|update|change|mark|imposta|impostare|metti|aggiorna|cambia)\b.*/)) return 'set'
                     if (trimmed.matches(/.*\b(delete|remove|elimina|rimuovi)\b.*/)) return 'delete'
-                    if (trimmed.matches(/.*\b(show|find|list|search|get|mostra|trova|elenca|cerca)\b.*/)) return 'read'
+                    if (trimmed.matches(/.*\b(show|find|list|search|get|mostra|mostrami|mostrarmi|trova|elenca|cerca)\b.*/)) return 'read'
                     return ''
                 }
                 Closure<Boolean> hasReferencePronoun = { String lowered ->
@@ -1027,9 +1043,10 @@
                             .replaceAll(/(?i)\be poi\b/, ';')
                             .replaceAll(/(?i)\bpoi\b/, ';')
                             .replaceAll(/(?i)\bafter that\b/, ';')
+                            .replaceAll(/(?i),\s*(assegnarlo|assegnarla|assegnarli|assegnarle|assegnare|impostare|spostare|mostrami|mostrarmi|mostrare)\b/, '; $1')
                     prepared = prepared
                             .replaceAll(/(?i)\band\s+(create|insert|add|assign|link|connect|associate|set|update|change|mark|move|delete|remove|show|find|list|search|get)\b/, '; $1')
-                            .replaceAll(/(?i)\be\s+(crea|inserisci|aggiungi|assegna|collega|connetti|associa|imposta|aggiorna|cambia|metti|sposta|elimina|rimuovi|mostra|trova|elenca|cerca)\b/, '; $1')
+                            .replaceAll(/(?i)\be\s+(crea|creare|inserisci|inserire|aggiungi|assegna|assegnare|assegnarlo|assegnarla|collega|connetti|associa|imposta|impostare|aggiorna|cambia|metti|sposta|spostare|elimina|rimuovi|mostra|mostrami|mostrarmi|mostrare|trova|elenca|cerca)\b/, '; $1')
                     prepared = prepared.replaceAll(/\.\s+/, '; ')
                     return prepared.split(/\s*;\s*/).findAll { it?.trim() } as List<String>
                 }
@@ -1067,7 +1084,7 @@
                     }
                     if (dateMentions) out.values.dateMentions = dateMentions.unique()
 
-                    Matcher dueDateMatcher = Pattern.compile(/(?i)\b(?:due date|required date|delivery date|ship date|data scadenza|data consegna)\s*(?:=|di|del|of)?\s*(\d{1,2}\/\d{1,2}\/\d{2,4})\b/).matcher(fragment)
+                    Matcher dueDateMatcher = Pattern.compile(/(?i)\b(?:due date|required date|delivery date|ship date|deadline|scadenza|data scadenza|data consegna)\s*(?:=|di|del|of|al|alla)?\s*(\d{1,2}\/\d{1,2}\/\d{2,4})\b/).matcher(fragment)
                     if (dueDateMatcher.find()) out.values.responseRequiredDate = dueDateMatcher.group(1)
 
                     Matcher hoursMatcher = Pattern.compile(/(?i)\b(?:standard weekly hours|weekly hours|hours per week|ore settimanali standard|ore settimanali)\s*(?:=|di|of)?\s*(\d+(?:[.,]\d+)?)\b/).matcher(fragment)
@@ -1082,13 +1099,36 @@
                     Matcher budgetMatcher = Pattern.compile(/(?i)\bbudget\s+([A-Za-z0-9][A-Za-z0-9 '\\-]{1,80}?)(?=\s*(?:,|with\b|for\b|and\b|then\b|$))/).matcher(fragment)
                     if (budgetMatcher.find()) out.references.budgetName = budgetMatcher.group(1).trim()
 
+                    Matcher roleMatcher = Pattern.compile(/(?i)\b(?:with\s+role|role|ruolo|position)\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*)\b/).matcher(fragment)
+                    if (roleMatcher.find()) out.references.roleName = roleMatcher.group(1).trim()
+
+                    Matcher projectNameMatcher = Pattern.compile(/(?i)\b(?:project|progetto|commessa)\s+([^,.;]+?)(?=(?:\s+with\b|\s+con\b|\s+for\b|,|\.|$))/).matcher(fragment)
+                    if (projectNameMatcher.find()) {
+                        String projectName = (projectNameMatcher.group(1) ?: '').trim()
+                        if (projectName && !projectName.equalsIgnoreCase('manager')) {
+                            if (fragment.toLowerCase().contains('progetto commessa ') &&
+                                    !projectName.toLowerCase().startsWith('commessa ')) {
+                                projectName = "Commessa ${projectName}".trim()
+                            }
+                            out.references.projectName = projectName
+                        }
+                    }
+
+                    Matcher requestNameMatcher = Pattern.compile(/(?i)\b(?:support\s+request|request|richiesta(?:\s+di\s+supporto)?)\s+([^,.;]+?)(?=(?:\s+with\b|\s+con\b|\s+for\b|,|\.|$))/).matcher(fragment)
+                    if (requestNameMatcher.find()) {
+                        String requestName = (requestNameMatcher.group(1) ?: '').trim()
+                        if (requestName) out.references.requestName = requestName
+                    }
+
                     List<String> accountCodes = []
                     Matcher labeledAccountMatcher = Pattern.compile(/(?i)(?:gl\s+accounts?|gl\s+account|accounting\s+account|conto\s+contabile(?:\s+codice)?)\s+((?:\d{3,}(?:-\d{3,})*)(?:\s*,\s*\d{3,}(?:-\d{3,})*)*)/).matcher(fragment)
                     if (labeledAccountMatcher.find()) {
                         String codesBlob = labeledAccountMatcher.group(1) ?: ''
                         Matcher codeMatcher = Pattern.compile(/\d{3,}(?:-\d{3,})*/).matcher(codesBlob)
                         while (codeMatcher.find()) accountCodes.add(codeMatcher.group())
-                    } else {
+                    } else if (lowered.contains('gl account') || lowered.contains('accounting account') ||
+                            lowered.contains('conto contabile') || lowered.contains('conti contabili') ||
+                            lowered.contains('account code')) {
                         Matcher inlineCodeMatcher = Pattern.compile(/\b\d{6,}(?:-\d{3,})*\b/).matcher(fragment)
                         while (inlineCodeMatcher.find()) {
                             String code = inlineCodeMatcher.group()
@@ -1120,8 +1160,11 @@
                         if (customerName) out.references.customerName = customerName
                     }
 
-                    Matcher assignedPartyMatcher = Pattern.compile(/(?i)\b(?:assigned\s+to|assegnat[oa]\s+a)\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)+)\b/).matcher(fragment)
-                    if (assignedPartyMatcher.find()) out.references.assignedPartyName = assignedPartyMatcher.group(1).trim()
+                    Matcher assignedPartyMatcher = Pattern.compile(/(?i)\b(?:assigned\s+to|are\s+assigned\s+to|assegnat[oa]\s+a|sono\s+assegnat[oi]\s+a|assign(?:\s+it)?\s+to|assegna(?:la|lo|li|le)?\s+a|assegnar(?:lo|la|li|le)\s+a)\s+([^,.;?]+?)(?=\s+(?:with\s+role|con\s+ruolo|role|ruolo)\b|[,.?]|$)/).matcher(fragment)
+                    if (assignedPartyMatcher.find()) {
+                        String assignedPartyName = (assignedPartyMatcher.group(1) ?: '').trim()
+                        if (assignedPartyName) out.references.assignedPartyName = assignedPartyName
+                    }
 
                     Matcher assignNameMatcher = Pattern.compile(/(?i)\b(?:assign(?:\s+it)?\s+to|assegna(?:la|lo|li|le)?\s+a)\s+(?:the\s+)?(?:new\s+)?(?:employee|person|impiegato|persona)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b/).matcher(fragment)
                     if (assignNameMatcher.find()) out.references.personName = assignNameMatcher.group(1).trim()
@@ -1133,6 +1176,32 @@
 
                     Matcher productMatcher = Pattern.compile(/(?i)\bproduct\s+([A-Z0-9_.-]+)\b/).matcher(fragment)
                     if (productMatcher.find()) out.references.productCode = productMatcher.group(1)
+
+                    Matcher assetMatcher = Pattern.compile(/(?i)\basset\s+([A-Z0-9_.:-]+)\b/).matcher(fragment)
+                    if (assetMatcher.find()) out.references.assetId = assetMatcher.group(1)
+
+                    Matcher facilityPhraseMatcher = Pattern.compile(/(?i)\b(?:from|dal|dalla|dallo)\s+([^,.;]+?)(?=(?:\s+alla?\s+locazione|\s+to\s+location|\s+in\s+stato|\s+and\b|\s+e\b|,|\.|\?|$))/).matcher(fragment)
+                    if (facilityPhraseMatcher.find()) {
+                        String facilityName = (facilityPhraseMatcher.group(1) ?: '').trim()
+                        if (facilityName) out.references.facilityId = facilityName
+                    } else {
+                        Matcher facilityMatcher = Pattern.compile(/(?i)\b(?:warehouse|magazzino|facility)\s+([^,.;]+?)(?=(?:\s+alla?\s+locazione|\s+to\s+location|\s+in\s+stato|\s+and\b|\s+e\b|,|\.|\?|$))/).matcher(fragment)
+                        if (facilityMatcher.find()) {
+                            String facilityName = (facilityMatcher.group(1) ?: '').trim()
+                            if (facilityName) out.references.facilityId = facilityName
+                        }
+                    }
+
+                    Matcher fromLocationMatcher = Pattern.compile(/(?i)\b(?:from|dalla|dallo)\s+(?:current\s+)?(?:location|locazione)\s+([A-Z0-9_.-]+)\b/).matcher(fragment)
+                    if (fromLocationMatcher.find()) out.references.fromLocationSeqId = fromLocationMatcher.group(1)
+
+                    Matcher toLocationMatcher = Pattern.compile(/(?i)\b(?:to|alla|al)\s+(?:the\s+)?(?:location|locazione)\s+([A-Z0-9_.-]+)\b/).matcher(fragment)
+                    if (toLocationMatcher.find()) {
+                        String targetLocation = toLocationMatcher.group(1)
+                        out.references.toLocationSeqId = targetLocation
+                        out.references.targetLocationSeqId = targetLocation
+                        if (!out.references.locationSeqId) out.references.locationSeqId = targetLocation
+                    }
 
                     Matcher quantityMatcher = Pattern.compile(/(?i)\b(?:quantity|qty|quantita'|quantita`|quantità)\s*(?:=|di|of)?\s*(\d+(?:[.,]\d+)?)\b/).matcher(fragment)
                     if (quantityMatcher.find()) out.values.quantity = quantityMatcher.group(1).replace(',', '.')
@@ -1211,6 +1280,38 @@
                     String current = targetObject ?: ''
                     Map references = (complements?.references instanceof Map) ? (Map) complements.references : [:]
                     Map values = (complements?.values instanceof Map) ? (Map) complements.values : [:]
+                    if (!current) {
+                        if (references.assetId || references.locationSeqId || references.toLocationSeqId ||
+                                references.targetLocationSeqId || references.fromLocationSeqId) {
+                            current = 'asset'
+                        } else if (references.budgetName || references.accountCode ||
+                                ((references.accountCodes instanceof List) && !((List) references.accountCodes).isEmpty()) ||
+                                values.fiscalYear || (values.budgetLines instanceof List && !((List) values.budgetLines).isEmpty())) {
+                            current = (verbLemma == 'read' || (values.budgetLines instanceof List && !((List) values.budgetLines).isEmpty())) ? 'budget item' : 'budget'
+                        } else if (references.customerName || references.productCode ||
+                                (values.lineItems instanceof List && !((List) values.lineItems).isEmpty()) ||
+                                values.quantity != null) {
+                            current = (verbLemma == 'create' && ((values.lineItems instanceof List && !((List) values.lineItems).isEmpty()) ||
+                                    references.productCode || values.quantity != null)) ? 'order item' : 'order'
+                        } else if (references.projectName) {
+                            current = (verbLemma == 'read') ? 'task' : 'project'
+                        } else if (references.personName && verbLemma == 'create') {
+                            current = 'person'
+                        }
+                    }
+                    if (verbLemma == 'read') {
+                        if (references.projectName && (current in ['milestone', 'task'])) return 'project'
+                        String loweredRaw = [
+                                complements?.raw,
+                                values?.freeText,
+                                references?.budgetName
+                        ].findAll { it }.join(' ').toLowerCase()
+                        boolean budgetChildRead = loweredRaw.contains('righe') || loweredRaw.contains('linee') ||
+                                loweredRaw.contains('lines') || loweredRaw.contains('items') ||
+                                loweredRaw.contains('details') || loweredRaw.contains('dettagli') ||
+                                loweredRaw.contains('conti') || loweredRaw.contains('accounts')
+                        if (references.budgetName && current == 'budget item' && !budgetChildRead) return 'budget'
+                    }
                     String aggregateRoot = (aggregatePatternIndex.rootByObject instanceof Map) ?
                             ((Map) aggregatePatternIndex.rootByObject)[current] as String : null
                     String aggregateAnchor = aggregateRoot ?: current
@@ -1555,6 +1656,15 @@
                         'request'   : ['item'] as Set<String>,
                         'project'   : ['task', 'milestone'] as Set<String>
                     ]
+                Map<String, Set<String>> semanticFamilyTerms = [
+                        'budget'   : ['budget', 'budgetitem', 'budget item', 'glaccount', 'gl account', 'accountcode', 'account code', 'fiscal', 'timeperiod', 'time period'] as Set<String>,
+                        'order'    : ['order', 'orderheader', 'order header', 'orderpart', 'order part', 'orderitem', 'order item', 'productstore', 'product store', 'customer', 'billto', 'shipto'] as Set<String>,
+                        'request'  : ['request', 'requestitem', 'request item', 'supportrequest', 'support request'] as Set<String>,
+                        'project'  : ['project', 'task', 'milestone', 'workeffort', 'work effort'] as Set<String>,
+                        'asset'    : ['asset', 'facility', 'location', 'inventory', 'onhold', 'on hold'] as Set<String>,
+                        'shipment' : ['shipment', 'shipmentitem', 'shipment item', 'package', 'delivery', 'deliver', 'receive'] as Set<String>,
+                        'party'    : ['party', 'person', 'organization', 'contact'] as Set<String>
+                ]
                 Closure<Set<String>> tokenizeArtifact = { String text ->
                     if (!text) return [] as Set<String>
                     String spaced = text
@@ -1566,20 +1676,43 @@
                     String name = operandName ?: ''
                     return name.endsWith('Id') || name.endsWith('SeqId') || name.endsWith('RelationshipId')
                 }
+                Closure<String> deriveServiceVerb = { String serviceName ->
+                    String current = normalize(serviceName)
+                    if (!current || !current.contains('#')) return ''
+                    String lhs = current.substring(0, current.indexOf('#'))
+                    String tail = lhs.contains('.') ? lhs.substring(lhs.lastIndexOf('.') + 1) : lhs
+                    return normalize(tail)
+                }
+                Closure<String> deriveServiceNoun = { String serviceName ->
+                    String current = normalize(serviceName)
+                    if (!current || !current.contains('#')) return ''
+                    return normalize(current.substring(current.indexOf('#') + 1))
+                }
+                Closure<String> deriveAuthzActionEnumId = { String currentServiceName ->
+                    String verb = deriveServiceVerb.call(currentServiceName)
+                    if (!verb) return null
+                    try {
+                        return ServiceDefinition.getVerbAuthzActionEnum(verb)?.name()
+                    } catch (Throwable ignored) {
+                        return null
+                    }
+                }
                 Closure<Boolean> candidateMatchesObject = { Map candidate, String targetObject ->
                     String normalizedTarget = normalize(targetObject).toLowerCase()
                     if (!normalizedTarget) return true
                     Set<String> aliases = objectAliasMap[normalizedTarget] ?: ([normalizedTarget.replaceAll(/\s+/, '')] as Set<String>)
                     Set<String> exclusionTerms = objectExclusionTerms[normalizedTarget] ?: ([] as Set<String>)
-                    List<String> rawParts = [
+                    List<String> structuralParts = [
                             candidate.serviceName,
                             candidate.noun,
                             candidate.actionNoun,
-                            candidate.description
+                            candidate.domainObject,
+                            candidate.actionObject,
+                            candidate.objectName
                     ].findAll { it } as List<String>
-                    String haystack = rawParts.join(' ').toLowerCase()
+                    String haystack = structuralParts.join(' ').toLowerCase()
                     String haystackCompact = haystack.replaceAll(/[^a-z0-9]+/, '')
-                    Set<String> candidateTerms = tokenizeArtifact(rawParts.join(' '))
+                    Set<String> candidateTerms = tokenizeArtifact(structuralParts.join(' '))
                     boolean matched = aliases.any { String alias ->
                         String aliasLower = alias.toLowerCase()
                         if (aliasLower.contains(' ')) {
@@ -1593,6 +1726,83 @@
                     if (!matched) return false
                     if (exclusionTerms && exclusionTerms.any { candidateTerms.contains(it) }) return false
                     return true
+                }
+                Closure<Set<String>> inferCommandSemanticFamilies = { Map command ->
+                    Set<String> families = [] as Set<String>
+                    Map refs = (command.complements?.references instanceof Map) ? (Map) command.complements.references : [:]
+                    Map values = (command.complements?.values instanceof Map) ? (Map) command.complements.values : [:]
+                    String targetObject = normalize(command.targetObjectText).toLowerCase()
+                    if (targetObject.contains('budget')) families << 'budget'
+                    if (targetObject.contains('order')) families << 'order'
+                    if (targetObject.contains('request')) families << 'request'
+                    if (targetObject.contains('project') || targetObject.contains('task') || targetObject.contains('milestone')) families << 'project'
+                    if (targetObject.contains('asset')) families << 'asset'
+                    if (targetObject.contains('shipment')) families << 'shipment'
+                    if (targetObject.contains('person') || targetObject.contains('party') || targetObject.contains('organization')) families << 'party'
+
+                    if (refs.budgetName || refs.accountCode || ((refs.accountCodes instanceof List) && !((List) refs.accountCodes).isEmpty()) ||
+                            values.fiscalYear || (values.budgetLines instanceof List && !((List) values.budgetLines).isEmpty())) families << 'budget'
+                    if (refs.customerName || refs.productCode || (values.lineItems instanceof List && !((List) values.lineItems).isEmpty()) ||
+                            values.quantity != null) families << 'order'
+                    if (refs.projectName || refs.assignedPartyName) families << 'project'
+                    if (refs.assetId || refs.locationSeqId || refs.toLocationSeqId || refs.targetLocationSeqId ||
+                            refs.fromLocationSeqId || refs.facilityId || refs.toFacilityId || refs.fromFacilityId) families << 'asset'
+                    if (refs.personName || refs.organizationName) families << 'party'
+                    return families
+                }
+                Closure<Set<String>> inferCandidateSemanticFamilies = { Map candidate ->
+                    List<String> structuralParts = [
+                            candidate.serviceName,
+                            candidate.noun,
+                            candidate.actionNoun,
+                            candidate.domainObject,
+                            candidate.actionObject,
+                            candidate.objectName
+                    ].findAll { it } as List<String>
+                    String rawText = structuralParts.join(' ').toLowerCase()
+                    Set<String> terms = tokenizeArtifact(rawText)
+                    Set<String> families = [] as Set<String>
+                    semanticFamilyTerms.each { String family, Set<String> hints ->
+                        boolean matched = hints.any { String hint ->
+                            String normalizedHint = hint.toLowerCase()
+                            if (normalizedHint.contains(' ')) return rawText.contains(normalizedHint)
+                            return terms.contains(normalizedHint) || rawText.contains(normalizedHint)
+                        }
+                        if (matched) families << family
+                    }
+                    return families
+                }
+                Closure<Set<String>> verbFamiliesForCommand = { Map command ->
+                    String verbLemma = normalize(command?.verbLemma).toLowerCase()
+                    if (verbLemma == 'read') return ['find', 'list', 'get', 'read', 'search', 'view'] as Set<String>
+                    if (verbLemma == 'create') return ['create', 'add', 'store'] as Set<String>
+                    if (verbLemma == 'delete') return ['delete', 'remove', 'cancel', 'close'] as Set<String>
+                    if (verbLemma in ['set', 'update', 'move']) return ['update', 'store', 'set', 'change', 'move'] as Set<String>
+                    return [] as Set<String>
+                }
+                Closure<String> operandStemForMapper = { String operandName ->
+                    String name = operandName ?: ''
+                    if (!name) return ''
+                    name = name.replaceFirst(/RelationshipId$/, '')
+                    name = name.replaceFirst(/SeqId$/, '')
+                    name = name.replaceFirst(/Id$/, '')
+                    name = name
+                            .replaceAll(/([a-z0-9])([A-Z])/, '$1 $2')
+                            .replaceAll(/([A-Z]+)([A-Z][a-z])/, '$1 $2')
+                            .trim()
+                    return name.toLowerCase()
+                }
+                Closure<Boolean> candidateCompatibleWithCommand = { Map candidate, Map command ->
+                    Set<String> requiredFamilies = inferCommandSemanticFamilies(command)
+                    String serviceVerbName = ''
+                    if (candidate?.serviceName) serviceVerbName = deriveServiceVerb.call(candidate.serviceName as String).toLowerCase()
+                    String actionVerbName = normalize(candidate?.actionVerb ?: candidate?.verb ?: serviceVerbName).toLowerCase()
+                    Set<String> allowedVerbs = verbFamiliesForCommand(command)
+                    if (allowedVerbs && actionVerbName && !allowedVerbs.contains(actionVerbName)) return false
+                    if (!requiredFamilies) return true
+                    Set<String> candidateFamilies = inferCandidateSemanticFamilies(candidate)
+                    if (!candidateFamilies) return true
+                    return !requiredFamilies.intersect(candidateFamilies).isEmpty()
                 }
                 int effectiveLimit = Math.max(1, (limitPerCommand ?: 5) as Integer)
                 List<Map> commands = (atomicCommands instanceof List) ? (List<Map>) atomicCommands : []
@@ -1608,8 +1818,7 @@
                             'complete#', 'submit#', 'set#', 'move#', 'change#'].any { lowered.contains(it) }
                 }
                 Closure<String> authzActionEnumIdForService = { String currentServiceName ->
-                    String verb = ServiceDefinition.getVerbFromName(currentServiceName ?: '')
-                    return ServiceDefinition.getVerbAuthzActionEnum(verb)?.name()
+                    return deriveAuthzActionEnumId(currentServiceName)
                 }
                 Closure<Boolean> hasServiceAccess = { String currentServiceName, String authzActionEnumId ->
                     if (!currentServiceName || !authzActionEnumId) return false
@@ -1642,7 +1851,9 @@
                 Closure<Integer> scoreCandidateForCommand = { Map candidate, Map command ->
                     String serviceName = normalize(candidate.serviceName).toLowerCase()
                     String noun = normalize(candidate.noun ?: candidate.actionNoun).toLowerCase()
-                    String description = normalize(candidate.description).toLowerCase()
+                    String serviceVerbName = candidate.serviceName ? deriveServiceVerb.call(candidate.serviceName as String).toLowerCase() : ''
+                    String actionVerbName = normalize(candidate.actionVerb ?: candidate.verb ?: serviceVerbName).toLowerCase()
+                    String domainObjectName = normalize(candidate.domainObject ?: candidate.actionObject ?: candidate.objectName).toLowerCase()
                     String verbLemma = normalize(command.verbLemma).toLowerCase()
                     String targetObject = normalize(command.targetObjectText).toLowerCase()
                     String targetCompact = targetObject?.replaceAll(/\s+/, '')
@@ -1651,16 +1862,26 @@
                     String verbAutoPrefix = (verbLemma in ['set', 'update', 'move']) ? 'update' : verbLemma
                     String targetEntityServiceName = targetEntityName ? "${verbAutoPrefix}#${targetEntityName}".toLowerCase() : ''
                     Map refs = (command.complements?.references instanceof Map) ? (Map) command.complements.references : [:]
+                    Set<String> requiredFamilies = inferCommandSemanticFamilies(command)
+                    Set<String> candidateFamilies = inferCandidateSemanticFamilies(candidate)
                     List commandDependencies = (command.dependencies instanceof List) ? (List) command.dependencies : []
                     int requiredOperandCount = (candidate.requiredOperandList instanceof Collection) ? ((Collection) candidate.requiredOperandList).size() : 0
                     List<String> producedIds = (candidate.producedIdOperandList instanceof List) ? (List<String>) candidate.producedIdOperandList : []
+                    boolean internalTechnicalService = serviceName.startsWith('org.moqui.agent.') || serviceName.startsWith('org.moqui.mcp.')
+                    boolean queryMentionsTechnicalDomain = ((command?.sourceFragment ?: '') as String).toLowerCase().matches(/.*\b(agent|mcp|math model|metamodel|telemetry|skill|tool)\b.*/)
 
                     int score = ((candidate.score ?: 0) as Integer)
+                    if (internalTechnicalService && !queryMentionsTechnicalDomain) score -= 240
+                    if (requiredFamilies && candidateFamilies) {
+                        Set<String> sharedFamilies = requiredFamilies.intersect(candidateFamilies)
+                        if (sharedFamilies) score += 30 * sharedFamilies.size()
+                        else score -= 220
+                    }
                     if (verbLemma && serviceName.contains("${verbLemma}#")) score += 20
                     if (targetObject) {
                         String nounCompact = noun.replaceAll(/\s+/, '')
                         if (nounCompact.contains(targetCompact)) score += 24
-                        else if (description.contains(targetObject)) score += 10
+                        else if (domainObjectName && domainObjectName.contains(targetObject)) score += 12
                         if (targetObject.indexOf(' ') < 0 && producedIds && verbLemma == 'create') {
                             String expectedRootId = "${targetCompact}Id".toString()
                             if (producedIds.contains(expectedRootId)) {
@@ -1676,8 +1897,18 @@
                     if (verbLemma in ['set', 'update', 'move'] && serviceName.contains('create#')) score -= 40
                     if (verbLemma == 'create' && serviceName.contains('delete#')) score -= 40
                     if (verbLemma == 'delete' && serviceName.contains('delete#')) score += 12
-                    if (verbLemma == 'read' && serviceName.contains('find#')) score += 6
-                    if (verbLemma == 'read' && serviceName.contains('list#')) score += 4
+                    if (verbLemma == 'read' && serviceName.contains('find#')) score += 18
+                    if (verbLemma == 'read' && serviceName.contains('list#')) score += 16
+                    if (verbLemma == 'read' && serviceName.contains('get#')) score += 12
+                    if (verbLemma == 'read' && !(actionVerbName in ['find', 'list', 'get', 'read', 'search', 'view'])) score -= 70
+                    if (verbLemma == 'create' && !(actionVerbName in ['create', 'add', 'store'])) score -= 80
+                    if (verbLemma == 'delete' && !(actionVerbName in ['delete', 'remove', 'cancel', 'close'])) score -= 90
+                    if (verbLemma in ['set', 'update', 'move'] && !(actionVerbName in ['update', 'store', 'set', 'change', 'move'])) score -= 70
+                    if (verbLemma == 'read' && Boolean.TRUE.equals(candidate.mutatesState)) score -= 160
+                    if (verbLemma == 'read' && (serviceName.contains('create#') || serviceName.contains('update#') || serviceName.contains('delete#') || serviceName.contains('assign#') || serviceName.contains('move#'))) score -= 140
+                    boolean asksForReport = (((command?.sourceFragment ?: '') as String).toLowerCase()).matches(/.*\b(report|summary|riepilogo|resoconto)\b.*/)
+                    if (!asksForReport && (noun.contains('report') || serviceName.contains('reportservices') || actionVerbName == 'run' || actionVerbName == 'calculate')) score -= 120
+                    if (asksForReport && (noun.contains('report') || serviceName.contains('report') || actionVerbName == 'run')) score += 20
                     if (refs.accountCode && (serviceName.contains('budgetitem') || noun.contains('budgetitem') || noun.contains('budget item'))) score += 8
                     if (refs.productCode && (noun.contains('orderitem') || noun.contains('order item'))) score += 14
                     if (refs.productCode && !((candidate.inParameterList instanceof List) && ((List<Map>) candidate.inParameterList).any { Map param -> (param.name as String) == 'productId' })) score -= 8
@@ -1686,6 +1917,11 @@
                             refs.fromLocationSeqId || refs.facilityId || refs.toFacilityId || refs.fromFacilityId
                     boolean hasStatusReference = (command.complements?.fields instanceof Map) && ((Map) command.complements.fields).status
                     List<Map> inParams = (candidate.inParameterList instanceof List) ? (List<Map>) candidate.inParameterList : []
+                    List<String> requiredIdOperands = (candidate.requiredIdOperandList instanceof List) ? (List<String>) candidate.requiredIdOperandList : []
+                    Set<String> targetAliases = objectAliasMap[targetObject] ?: ([] as Set<String>)
+                    Set<String> targetStems = ((targetAliases ?: [] as Set<String>).collect { String alias ->
+                        alias?.toLowerCase()?.replaceAll(/\s+/, '')
+                    }.findAll { it } as Set<String>) + (targetCompact ? [targetCompact] as Set<String> : [] as Set<String>)
                     boolean supportsAssigneeBinding = inParams.any { Map param ->
                         String loweredParamName = ((param.name ?: '') as String).toLowerCase()
                         loweredParamName in ['assigntopartyid', 'partyid', 'personid'] ||
@@ -1717,6 +1953,18 @@
                     if (refs.budgetName && noun.contains('budget')) score += 6
                     if (verbLemma == 'read' && !Boolean.TRUE.equals(candidate.mutatesState)) score += 4
                     if (verbLemma != 'read' && Boolean.TRUE.equals(candidate.mutatesState)) score += 4
+                    if (verbLemma == 'read' && requiredIdOperands) {
+                        Set<String> unrelatedIdentityStems = requiredIdOperands.collect { String operandName ->
+                            operandStemForMapper(operandName)?.replaceAll(/\s+/, '')
+                        }.findAll { String stem ->
+                            stem && !(targetStems?.contains(stem))
+                        } as Set<String>
+                        if (unrelatedIdentityStems && targetStems && unrelatedIdentityStems.every { String stem ->
+                            !(stem in ['rootworkeffort', 'workeffort', 'party', 'person', 'organization'])
+                        }) {
+                            score -= 120
+                        }
+                    }
                     if (targetEntityServiceName && serviceName == targetEntityServiceName) score += 36
                     if (targetEntityServiceName && serviceName != targetEntityServiceName &&
                             normalize(candidate.morphismRole) == 'entity_auto_service' &&
@@ -1735,6 +1983,12 @@
                     List<String> tokens = []
                     if (command.verbLemma) tokens << (command.verbLemma as String)
                     if (command.targetObjectText) tokens << (command.targetObjectText as String)
+                    if (command.sourceFragment) tokens << (command.sourceFragment as String)
+                    Map refs = (command.complements?.references instanceof Map) ? (Map) command.complements.references : [:]
+                    Map values = (command.complements?.values instanceof Map) ? (Map) command.complements.values : [:]
+                    [refs.customerName, refs.organizationCode, refs.projectName, refs.requestName, refs.budgetName,
+                     refs.assetId, refs.productCode, refs.accountCode, values.name, values.description, values.freeText]
+                            .findAll { it }.each { tokens << (it as String) }
                     return tokens.findAll { it }?.join(' ')
                 }
                 Closure<Map> synthesizeEntityAutoCandidate = { Map command ->
@@ -1836,7 +2090,7 @@
                                 categoryId       : row.categoryId,
                                 score            : 0
                         ]
-                        if (!candidateMatchesObject(candidate, targetObject)) return
+                        if (!candidateMatchesObject(candidate, targetObject) || !candidateCompatibleWithCommand(candidate, command)) return
                         Map enriched = enrichCandidate(candidate)
                         Map candidateCopy = new LinkedHashMap(enriched)
                         candidateCopy.commandScore = scoreCandidateForCommand(candidateCopy, command) + 10
@@ -1892,7 +2146,7 @@
                         candidateCopy.commandScore = scoreCandidateForCommand(candidateCopy, command)
                         return candidateCopy
                     }.findAll { Map candidate ->
-                        candidateMatchesObject(candidate, command.targetObjectText)
+                        candidateMatchesObject(candidate, command.targetObjectText) && candidateCompatibleWithCommand(candidate, command)
                     }.sort { Map a, Map b ->
                         int scoreCompare = ((b.commandScore ?: 0) as Integer) <=> ((a.commandScore ?: 0) as Integer)
                         if (scoreCompare != 0) return scoreCompare
@@ -2038,8 +2292,23 @@
                     if (['show', 'find', 'list', 'search', 'get ', 'schema', 'signature'].any { text.contains(it) }) return 'read-only'
                     return 'explanatory'
                 }
+                Closure<String> normalize = { Object value ->
+                    return value == null ? '' : value.toString().trim()
+                }
                 Closure<String> normalizePlannerQuery = { String text ->
                     return (text ?: '').toLowerCase()
+                }
+                Closure<String> deriveServiceVerb = { String serviceName ->
+                    String current = ((serviceName ?: '') as String).trim()
+                    if (!current || !current.contains('#')) return ''
+                    String lhs = current.substring(0, current.indexOf('#'))
+                    String tail = lhs.contains('.') ? lhs.substring(lhs.lastIndexOf('.') + 1) : lhs
+                    return tail?.trim() ?: ''
+                }
+                Closure<String> deriveServiceNoun = { String serviceName ->
+                    String current = ((serviceName ?: '') as String).trim()
+                    if (!current || !current.contains('#')) return ''
+                    return current.substring(current.indexOf('#') + 1)?.trim() ?: ''
                 }
                 Closure<Set<String>> tokenizePlanner = { String text ->
                     return text ? text.toLowerCase().split(/[^a-z0-9]+/).findAll { it && it.length() > 2 } as Set<String> : ([] as Set<String>)
@@ -2117,21 +2386,26 @@
                             'request', 'product'
                     ] as Set<String>)
                     if (!domainTokens) return 0
-                    String haystack = [
+                    String structuralHaystack = [
                             morphismSignature.serviceName,
                             morphismSignature.noun,
                             morphismSignature.actionNoun,
-                            morphismSignature.description
+                            morphismSignature.domainObject,
+                            morphismSignature.actionObject,
+                            morphismSignature.objectName
                     ].findAll { it }.join(' ').toLowerCase()
+                    String descriptiveHaystack = normalize(morphismSignature.description).toLowerCase()
                     int score = 0
-                    int matchCount = domainTokens.count { String term -> haystack.contains(term) }
+                    int matchCount = domainTokens.count { String term ->
+                        structuralHaystack.contains(term) || descriptiveHaystack.contains(term)
+                    }
                     int missingCount = domainTokens.size() - matchCount
                     if (matchCount > 0) score += matchCount * 8
                     if (missingCount > 0) score -= missingCount * 10
                     Set<String> activeStrongDomains = queryTokens.intersect(strongDomains)
                     Set<String> foreignStrongDomains = strongDomains - activeStrongDomains
                     foreignStrongDomains.each { String foreignDomain ->
-                        if (haystack.contains(foreignDomain)) score -= 12
+                        if (structuralHaystack.contains(foreignDomain)) score -= 12
                     }
                     return score
                 }
@@ -2161,6 +2435,15 @@
                             return 'asset'
                         case 'productId':
                             return 'product'
+                        case 'requestId':
+                            return 'request'
+                        case 'orderId':
+                        case 'orderPartSeqId':
+                            return 'salesOrderPart'
+                        case 'orderItemSeqId':
+                            return 'salesOrderItem'
+                        case 'rootWorkEffortId':
+                            return 'project'
                         case 'emplPositionClassId':
                             return 'emplPositionClass'
                         case 'emplPositionId':
@@ -2221,6 +2504,22 @@
                             ],
                             productId                   : [
                                     /(?i)\bproduct\s+([A-Z0-9_.-]+)\b/
+                            ],
+                            requestId                   : [
+                                    /(?i)\brequest\s+([A-Z0-9_.:-]+)\b/
+                            ],
+                            orderId                     : [
+                                    /(?i)\border\s+([A-Z0-9_.:-]+)\b/
+                            ],
+                            orderPartSeqId              : [
+                                    /(?i)\bpart\s+([A-Z0-9_.:-]+)\b/
+                            ],
+                            orderItemSeqId              : [
+                                    /(?i)\bitem\s+([A-Z0-9_.:-]+)\b/
+                            ],
+                            rootWorkEffortId            : [
+                                    /(?i)\bproject\s+([^,.;\n]+?)(?=(?:\s+with\b|\s+for\b|,|\.|$))/,
+                                    /(?i)\bcommessa\s+([^,.;\n]+?)(?=(?:\s+con\b|\s+for\b|,|\.|$))/
                             ],
                             emplPositionClassId         : [
                                     /(?i)\b(?:position class|position type|job class|job type|role)\s+([^,.;\n]+?)(?=(?:\s+with\b|\s+for\b|,|\.|$))/
@@ -2431,16 +2730,22 @@
                     if (!targetObject) return 0
 
                     Set<String> targetTokens = tokenizePlanner(targetObject)
-                    String haystack = [
+                    String structuralHaystack = [
                             morphismSignature.serviceName,
                             morphismSignature.noun,
                             morphismSignature.actionNoun,
-                            morphismSignature.description
+                            morphismSignature.domainObject,
+                            morphismSignature.actionObject,
+                            morphismSignature.objectName
                     ].findAll { it }.join(' ').toLowerCase()
+                    String descriptiveHaystack = normalize(morphismSignature.description).toLowerCase()
                     int score = 0
                     if (!targetTokens.isEmpty()) {
-                        int matchCount = targetTokens.count { String term -> haystack.contains(term) }
-                        if (matchCount > 0) score += matchCount * 14
+                        int structuralMatchCount = targetTokens.count { String term -> structuralHaystack.contains(term) }
+                        int descriptiveMatchCount = targetTokens.count { String term -> descriptiveHaystack.contains(term) }
+                        int matchCount = structuralMatchCount > 0 ? structuralMatchCount : (descriptiveMatchCount > 0 ? 1 : 0)
+                        if (structuralMatchCount > 0) score += structuralMatchCount * 14
+                        else if (descriptiveMatchCount > 0) score += 4
                         if (matchCount == targetTokens.size()) score += 24
                         if (matchCount == 0) score -= 32
                     }
@@ -2503,6 +2808,30 @@
                 }
                 selectedMorphism = candidateMorphisms ? (candidateMorphisms[0] as Map) : null
                 selectedService = selectedMorphism?.serviceName
+                Closure<Set<String>> finalAllowedVerbFamilies = { String verbLemma ->
+                    String loweredVerb = (verbLemma ?: '').toLowerCase()
+                    if (loweredVerb == 'read') return ['find', 'list', 'get', 'read', 'search', 'view'] as Set<String>
+                    if (loweredVerb == 'create') return ['create', 'add', 'store'] as Set<String>
+                    if (loweredVerb == 'delete') return ['delete', 'remove', 'cancel', 'close'] as Set<String>
+                    if (loweredVerb in ['set', 'update', 'move']) return ['update', 'store', 'set', 'change', 'move'] as Set<String>
+                    return [] as Set<String>
+                }
+                if (selectedService && primaryCommand) {
+                    String selectedVerb = deriveServiceVerb.call(selectedService as String).toLowerCase()
+                    Set<String> allowedSelectedVerbs = finalAllowedVerbFamilies((primaryCommand?.verbLemma ?: '') as String)
+                    if (allowedSelectedVerbs && selectedVerb && !allowedSelectedVerbs.contains(selectedVerb)) {
+                        state = 'semanticGap'
+                        authorizationResult = [
+                                authorized: false,
+                                reason: 'selected_service_verb_mismatch',
+                                selectedService: selectedService,
+                                requestedVerb: primaryCommand?.verbLemma,
+                                selectedVerb: selectedVerb,
+                                patternClassification: patternClassification
+                        ]
+                        return
+                    }
+                }
 
                 if (!atomicCommands && selectedService) {
                     String selectedServiceLc = (selectedService as String).toLowerCase()
@@ -2669,6 +2998,22 @@
                             if (paramName?.toLowerCase()?.contains('budget') && !projected[paramName] && !projected[lookupField]) {
                                 projected[lookupField] = references.budgetName
                             }
+                        }
+                    }
+                    if (references.projectName && inputs.any { Map param -> (param.name as String) == 'rootWorkEffortId' } &&
+                            !projected.rootWorkEffortId && !projected['__lookup__rootWorkEffortId']) {
+                        projected['__lookup__rootWorkEffortId'] = references.projectName
+                    }
+                    if (references.requestName && inputs.any { Map param -> (param.name as String) == 'requestId' } &&
+                            !projected.requestId && !projected['__lookup__requestId']) {
+                        projected['__lookup__requestId'] = references.requestName
+                    }
+                    if (values.name) {
+                        if (inputs.any { Map param -> (param.name as String) == 'rootWorkEffortId' } && !projected.rootWorkEffortId && !projected['__lookup__rootWorkEffortId']) {
+                            projected['__lookup__rootWorkEffortId'] = values.name
+                        }
+                        if (inputs.any { Map param -> (param.name as String) == 'requestId' } && !projected.requestId && !projected['__lookup__requestId']) {
+                            projected['__lookup__requestId'] = values.name
                         }
                     }
                     List<String> accountCodes = (references.accountCodes instanceof List) ? ((List) references.accountCodes).collect { it?.toString() }.findAll { it } : []
@@ -3038,16 +3383,18 @@
                     ]
                 }
                 Closure<Boolean> planDependencies
-                planDependencies = { Map morphism, int depth ->
-                    if (!morphism || depth > 4) return false
-                    List<String> morphismRequired = (morphism.requiredOperandList instanceof List) ? (List<String>) morphism.requiredOperandList : []
-                    List<String> unresolved = morphismRequired.findAll { String operandName ->
-                        Object resolvedValue = resolvedOperands[operandName]
-                        !resolvedValue && !plannedProducedOperands.contains(operandName)
-                    }
-                    unresolved.each { String operandName ->
-                        if (!isIdentityOperand(operandName)) return
-                        String stem = operandStem(operandName)
+	                planDependencies = { Map morphism, int depth ->
+	                    if (!morphism || depth > 4) return false
+                        String currentPlanningMode = ((patternClassification?.planningMode ?: '') as String)
+	                    List<String> morphismRequired = (morphism.requiredOperandList instanceof List) ? (List<String>) morphism.requiredOperandList : []
+	                    List<String> unresolved = morphismRequired.findAll { String operandName ->
+	                        Object resolvedValue = resolvedOperands[operandName]
+	                        !resolvedValue && !plannedProducedOperands.contains(operandName)
+	                    }
+	                    unresolved.each { String operandName ->
+	                        if (!isIdentityOperand(operandName)) return
+                            if (currentPlanningMode == 'read_projection') return
+	                        String stem = operandStem(operandName)
                         String compactStem = stem?.replace(' ', '')
                         List<Map> producerPool = candidateMorphisms.findAll { Map candidate ->
                             if (candidate.serviceName == morphism.serviceName) return false
@@ -3384,6 +3731,11 @@
                         case 'facilityId': return 'facility'
                         case 'assetId': return 'asset'
                         case 'productId': return 'product'
+                        case 'requestId': return 'request'
+                        case 'orderId':
+                        case 'orderPartSeqId': return 'salesOrderPart'
+                        case 'orderItemSeqId': return 'salesOrderItem'
+                        case 'rootWorkEffortId': return 'project'
                         case 'emplPositionClassId': return 'emplPositionClass'
                         case 'emplPositionId': return 'emplPosition'
                         case 'statusId': return 'status'
@@ -3419,6 +3771,13 @@
                         effectiveParameters[operandName] = lookupResult.recordId
                         return true
                     }
+                    List<Map> unresolvedLookups = (effectiveParameters.__unresolvedLookups instanceof List) ? (List<Map>) effectiveParameters.__unresolvedLookups : []
+                    unresolvedLookups.add([
+                            operandName: operandName,
+                            lookupKey  : lookupKey,
+                            lookupText : lookupText
+                    ])
+                    effectiveParameters.__unresolvedLookups = unresolvedLookups
                     return false
                 }
                 Closure<Object> normalizeTypedParameterValue = { Map param, Object rawValue ->
@@ -3470,6 +3829,17 @@
                 Closure<List<String>> validateSemanticAssertions = { Map planStep, List<Map> inParameterList, List<Map> preparedBatches ->
                     List<String> issues = []
                     List<Map> assertions = (planStep?.semanticAssertions instanceof List) ? (List<Map>) planStep.semanticAssertions : []
+                    preparedBatches.each { Map batch ->
+                        List<Map> unresolvedLookups = (batch.__unresolvedLookups instanceof List) ? (List<Map>) batch.__unresolvedLookups : []
+                        unresolvedLookups.each { Map unresolved ->
+                            String operandName = (unresolved.operandName ?: '') as String
+                            String lookupKey = (unresolved.lookupKey ?: '') as String
+                            String lookupText = (unresolved.lookupText ?: '') as String
+                            if (operandName && lookupKey && lookupText) {
+                                issues.add("Semantic lookup binding unresolved for ${operandName} on ${(planStep?.serviceName ?: '')}: ${lookupKey} '${lookupText}'")
+                            }
+                        }
+                    }
                     assertions.each { Map assertion ->
                         String type = (assertion.type ?: '') as String
                         List<String> paramNames = (assertion.paramNames instanceof List) ? (List<String>) assertion.paramNames : []
@@ -3544,6 +3914,8 @@
                     return
                 }
 
+                Map<String, Map> signatureByServiceName = [:]
+                Map previewParameters = new LinkedHashMap(currentParameters)
                 for (Map planStep in planSteps) {
                     String stepServiceName = (planStep?.serviceName ?: '') as String
                     if (!stepServiceName) continue
@@ -3566,6 +3938,96 @@
                         return
                     }
                     Map signature = (signatureResult?.morphism instanceof Map) ? (Map) signatureResult.morphism : [:]
+                    signatureByServiceName[stepServiceName] = signature
+                    List<Map> inParameterList = (signature.inParameterList instanceof List) ? (List<Map>) signature.inParameterList : []
+
+                    List<String> missingOperands = []
+                    Map stepBindings = (planStep?.stepBindings instanceof Map) ? new LinkedHashMap(planStep.stepBindings as Map) : [:]
+                    List<Map> parameterBatchList = (planStep?.parameterBatchList instanceof List) ? (List<Map>) planStep.parameterBatchList : []
+                    Map stepParameters = [:]
+                    inParameterList.each { Map param ->
+                        String paramName = (param?.name ?: '') as String
+                        boolean required = Boolean.TRUE.equals(param?.required)
+                        String lookupField = paramName ? "__lookup__${paramName}".toString() : null
+                        if (paramName && stepBindings.containsKey(paramName)) {
+                            stepParameters[paramName] = stepBindings[paramName]
+                        } else if (paramName && previewParameters.containsKey(paramName)) {
+                            stepParameters[paramName] = previewParameters[paramName]
+                        } else if (lookupField && stepBindings.containsKey(lookupField)) {
+                            stepParameters[lookupField] = stepBindings[lookupField]
+                        } else if (lookupField && previewParameters.containsKey(lookupField)) {
+                            stepParameters[lookupField] = previewParameters[lookupField]
+                        } else if (paramName && required) {
+                            missingOperands.add(paramName)
+                        }
+                    }
+                    if (missingOperands) {
+                        errors = ["Missing required operands for ${stepServiceName}: ${missingOperands.join(', ')}"]
+                        return
+                    }
+
+                    List<Map> previewBatches = parameterBatchList ? parameterBatchList : [[:]]
+                    List<Map> preparedPreviewBatches = []
+                    previewBatches.each { Map rawBatch ->
+                        Map prepared = new LinkedHashMap(stepParameters)
+                        if (rawBatch instanceof Map) prepared.putAll(rawBatch as Map)
+                        inParameterList.each { Map param ->
+                            String pName = (param?.name ?: '') as String
+                            if (pName) {
+                                resolveLookupOperandValue(prepared, pName)
+                                if (prepared.containsKey(pName)) prepared[pName] = normalizeTypedParameterValue(param, prepared[pName])
+                            }
+                        }
+                        preparedPreviewBatches.add(prepared)
+                    }
+                    List<String> semanticIssues = validateSemanticAssertions(planStep, inParameterList, preparedPreviewBatches)
+                    if (semanticIssues) {
+                        errors = semanticIssues
+                        return
+                    }
+
+                    List<String> producedOperandNames = []
+                    if (signature.producedOperandList instanceof List) {
+                        producedOperandNames.addAll(((List) signature.producedOperandList).collect { it?.toString() }.findAll { it })
+                    }
+                    if (signature.producedIdOperandList instanceof List) {
+                        producedOperandNames.addAll(((List) signature.producedIdOperandList).collect { it?.toString() }.findAll { it })
+                    }
+                    if (planStep?.producesOperands instanceof List) {
+                        producedOperandNames.addAll(((List) planStep.producesOperands).collect { it?.toString() }.findAll { it })
+                    }
+                    producedOperandNames.unique().each { String producedName ->
+                        if (producedName && !previewParameters.containsKey(producedName)) {
+                            previewParameters[producedName] = "__planned__${planStep.step ?: 0}__${producedName}"
+                        }
+                    }
+                }
+
+                for (Map planStep in planSteps) {
+                    String stepServiceName = (planStep?.serviceName ?: '') as String
+                    if (!stepServiceName) continue
+
+                    if (!ec.service.isServiceDefined(stepServiceName) && !entityAutoService(stepServiceName)) {
+                        errors = ["Service not defined for morphism step ${stepServiceName}."]
+                        return
+                    }
+                    if (!registeredMorphism(stepServiceName) && !entityAutoService(stepServiceName)) {
+                        errors = ["Service ${stepServiceName} is not registered in the morphism catalog."]
+                        return
+                    }
+
+                    Map signature = signatureByServiceName[stepServiceName]
+                    if (!(signature instanceof Map) || signature.isEmpty()) {
+                        Map signatureResult = ec.service.sync()
+                                .name('org.moqui.agent.AgentAlgebraicServices.get#MorphismSignature')
+                                .parameters([serviceName: stepServiceName]).call()
+                        if (ec.message.hasError()) {
+                            errors = [ec.message.errorsString]
+                            ec.message.clearErrors()
+                            return
+                        }
+                        signature = (signatureResult?.morphism instanceof Map) ? (Map) signatureResult.morphism : [:]
+                    }
                     List<Map> inParameterList = (signature.inParameterList instanceof List) ? (List<Map>) signature.inParameterList : []
                     List<String> missingOperands = []
                     Map stepBindings = (planStep?.stepBindings instanceof Map) ? new LinkedHashMap(planStep.stepBindings as Map) : [:]
@@ -3741,6 +4203,548 @@
                 success = true
                 resolvedParameters = currentParameters
                 finalResult = stepResults ? (stepResults[-1].result as Map) : [:]
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="record" noun="GeneratedXmlActionMorphism" authenticate="true">
+        <description>Persist a generated temporary Moqui service artifact and register a corresponding runtime morphism for traceability.</description>
+        <in-parameters>
+            <parameter name="prototypeKey" required="true"/>
+            <parameter name="serviceVerb" required="true"/>
+            <parameter name="serviceNoun" required="true"/>
+            <parameter name="serviceDescription"/>
+            <parameter name="generatedXmlActions" required="true" allow-html="any"/>
+            <parameter name="sourceObjectId" default="AgentXmlCtxObj"/>
+            <parameter name="targetObjectId" default="AgentXmlCtxObj"/>
+            <parameter name="requiredOperandsJson"/>
+            <parameter name="producedOperandsJson"/>
+            <parameter name="selectionDescription"/>
+            <parameter name="bindingDescription"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="success" type="Boolean"/>
+            <parameter name="generatedServiceLocation"/>
+            <parameter name="generatedServiceName"/>
+            <parameter name="generatedServiceFilePath"/>
+            <parameter name="morphismId"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import java.nio.charset.StandardCharsets
+                import java.nio.file.Files
+                import java.nio.file.Path
+                import java.nio.file.Paths
+                import java.nio.file.StandardOpenOption
+                import java.time.LocalDateTime
+                import java.time.format.DateTimeFormatter
+                import java.util.UUID
+
+                Closure<String> escapeXmlAttr = { Object value ->
+                    String text = value == null ? '' : value.toString()
+                    text = text.replace('&', '&amp;')
+                    text = text.replace('<', '&lt;')
+                    text = text.replace('>', '&gt;')
+                    text = text.replace('"', '&quot;')
+                    return text
+                }
+
+                success = false
+                String runtimePath = ec.factory.runtimePath
+                String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern('yyyyMMddHHmmssSSS'))
+                String shortId = UUID.randomUUID().toString().replace('-', '').substring(0, 12)
+                String sanitizedPrototypeKey = (prototypeKey ?: 'generated').replaceAll(/[^A-Za-z0-9]+/, '-').replaceAll(/^-+|-+$/, '')
+                String namespaceSegment = sanitizedPrototypeKey.replace('-', '.')
+                String namespacePath = sanitizedPrototypeKey.replace('-', '/')
+                Path baseDir = Paths.get(runtimePath, 'component', 'moqui-mcp', 'service', 'org', 'moqui', 'agent', 'generated')
+                        .resolve(namespacePath)
+                Files.createDirectories(baseDir)
+                String fileStem = "${sanitizedPrototypeKey.replace('-', '')}_${ts}_${shortId}"
+                String xmlFileName = "${fileStem}.xml"
+                Path xmlFilePath = baseDir.resolve(xmlFileName)
+
+                String generatedServiceNamespace = "org.moqui.agent.generated.${namespaceSegment}.${fileStem}"
+                generatedServiceName = "${generatedServiceNamespace}.${serviceVerb}#${serviceNoun}"
+                generatedServiceLocation = "component://moqui-mcp/service/org/moqui/agent/generated/${namespacePath}/${xmlFileName}"
+
+                String tempServiceXml = """<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="${escapeXmlAttr(serviceVerb)}" noun="${escapeXmlAttr(serviceNoun)}" authenticate="true">
+        <description>${escapeXmlAttr(serviceDescription ?: "Generated from prototype ${prototypeKey}")}</description>
+${generatedXmlActions}
+    </service>
+</services>
+""".trim() + '\n'
+
+                Files.write(xmlFilePath, tempServiceXml.getBytes(StandardCharsets.UTF_8),
+                        StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)
+                generatedServiceFilePath = xmlFilePath.toAbsolutePath().toString()
+
+                def generatedSd = ec.serviceFacade.getServiceDefinition(generatedServiceName)
+                if (generatedSd == null) {
+                    ec.message.addError("Generated xml-actions service could not be loaded by Moqui service facade: ${generatedServiceName}")
+                    return
+                }
+
+                morphismId = "AgTmpMorph_${shortId}"
+                String morphismSymbol = "${serviceVerb}#${sanitizedPrototypeKey}".take(60)
+                String morphismName = "generated::${sanitizedPrototypeKey.take(36)}::${shortId}"
+                String descriptionText = serviceDescription ?: "Runtime-generated xml-actions service ${generatedServiceName}."
+
+                ec.entity.makeValue('moqui.math.ct.Morphism').setAll([
+                        morphismId : morphismId,
+                        categoryId : 'AgentXmlActionsDsl',
+                        morphismTypeEnumId : 'MtGeneral',
+                        sourceObjectId : sourceObjectId ?: 'AgentXmlCtxObj',
+                        targetObjectId : targetObjectId ?: 'AgentXmlCtxObj',
+                        morphismName : morphismName,
+                        morphismSymbol : morphismSymbol,
+                        serviceName : generatedServiceName,
+                        description : descriptionText
+                ]).createOrUpdate()
+
+                List<Map> paramSpecs = [
+                        [parameterDefId:'AgMorphSourceDialectDef', symbolicValue:'generated-xml-actions'],
+                        [parameterDefId:'AgMorphSourceElementDef', symbolicValue:"${serviceVerb}#${serviceNoun}".toString()],
+                        [parameterDefId:'AgMorphStatementClassDef', symbolicValue:'generated_runtime_service'],
+                        [parameterDefId:'AgMorphCompositionPolicyDef', symbolicValue:'prototype'],
+                        [parameterDefId:'AgMorphMutatesStateDef', symbolicValue:'Y'],
+                        [parameterDefId:'AgMorphControlFlowDef', symbolicValue:'Y'],
+                        [parameterDefId:'AgMorphOpaqueDef', symbolicValue:'N'],
+                        [parameterDefId:'AgSrvSourceFileDef', textValue:generatedServiceLocation],
+                        [parameterDefId:'AgSrvSemanticDescriptionDef', textValue:descriptionText],
+                        [parameterDefId:'AgSrvSelectionDescriptionDef', textValue:(selectionDescription ?: descriptionText)],
+                        [parameterDefId:'AgSrvBindingDescriptionDef', textValue:(bindingDescription ?: 'Bindings are determined by the generated xml-actions service composition.')],
+                        [parameterDefId:'AgSrvRequiredOperandListDef', textValue:(requiredOperandsJson ?: '[]')],
+                        [parameterDefId:'AgSrvProducedOperandListDef', textValue:(producedOperandsJson ?: '[]')]
+                ]
+                int seq = 1
+                paramSpecs.each { Map spec ->
+                    String parameterId = "${morphismId}_${String.format('%03d', seq)}"
+                    Map valueMap = [
+                            parameterId : parameterId,
+                            parameterDefId : spec.parameterDefId,
+                            morphismId : morphismId,
+                            sequenceNum : seq as Long
+                    ]
+                    if (spec.containsKey('symbolicValue') && spec.symbolicValue != null) valueMap.symbolicValue = spec.symbolicValue
+                    if (spec.containsKey('textValue') && spec.textValue != null) valueMap.textValue = spec.textValue
+                    ec.entity.makeValue('moqui.math.Parameter').setAll(valueMap).createOrUpdate()
+                    seq++
+                }
+
+                success = true
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="execute" noun="ProjectAggregateXmlActionsPrototype" authenticate="true">
+        <description>Prototype executor that translates a project plus milestones plus tasks prompt into dynamic Moqui xml-actions and runs it inside the native ExecutionContext.</description>
+        <in-parameters>
+            <parameter name="queryText" required="true"/>
+            <parameter name="dryRun" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="success" type="Boolean"/>
+            <parameter name="projectPlan" type="Map"/>
+            <parameter name="generatedXmlActions" type="String"/>
+            <parameter name="generatedGroovy" type="String"/>
+            <parameter name="generatedServiceLocation" type="String"/>
+            <parameter name="generatedServiceFilePath" type="String"/>
+            <parameter name="generatedServiceName" type="String"/>
+            <parameter name="generatedMorphismId" type="String"/>
+            <parameter name="projectId"/>
+            <parameter name="milestoneIds" type="List"/>
+            <parameter name="taskIds" type="List"/>
+            <parameter name="errors" type="List"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import java.util.Locale
+                import java.util.regex.Matcher
+                import java.util.regex.Pattern
+                import org.moqui.impl.actions.XmlAction
+                import org.moqui.impl.context.ExecutionContextFactoryImpl
+                import org.moqui.impl.context.ExecutionContextImpl
+
+                Closure<String> escapeXml = { Object value ->
+                    String text = value == null ? '' : value.toString()
+                    text = text.replace('&', '&amp;')
+                    text = text.replace('<', '&lt;')
+                    text = text.replace('>', '&gt;')
+                    text = text.replace('"', '&quot;')
+                    return text
+                }
+                Closure<String> sq = { Object value ->
+                    String text = value == null ? '' : value.toString()
+                    text = text.replace("\\", "\\\\").replace("'", "\\'")
+                    return "'${text}'"
+                }
+
+                errors = []
+                success = false
+                milestoneIds = []
+                taskIds = []
+                projectPlan = [:]
+
+                String prompt = (queryText ?: '').trim()
+                if (!prompt) {
+                    errors.add('queryText is required')
+                    return
+                }
+
+                String flattened = prompt.replaceAll(/[\r\n]+/, ' ').replaceAll(/\s+/, ' ').trim()
+
+                Matcher projectMatcher = Pattern.compile(
+                        /(?i)\b(?:nuovo\s+progetto|progetto|commessa)\s+(.+?),\s*con\s+priorit[aà]\s+(\d+)/
+                ).matcher(flattened)
+                if (!projectMatcher.find()) {
+                    errors.add('Unable to parse project root from prompt.')
+                    return
+                }
+                String projectName = (projectMatcher.group(1) ?: '').trim()
+                Long priorityValue = ((projectMatcher.group(2) ?: '5') as String).toLong()
+
+                String purposeEnumId = 'WepPrProdDev'
+                Matcher purposeMatcher = Pattern.compile(/(?i)\bpurpose\s+([^,.;]+?)(?=(?:,|\.|$))/).matcher(flattened)
+                if (purposeMatcher.find()) {
+                    String purposeText = (purposeMatcher.group(1) ?: '').trim()
+                    if (!purposeText.equalsIgnoreCase('Product Development')) {
+                        errors.add("Unsupported purpose text for prototype: ${purposeText}")
+                        return
+                    }
+                }
+
+                Matcher milestoneMatcher = Pattern.compile(/(?i)\bmilestone\s+([^,.;]+?)\s+e\s+([^,.;]+?)\.(?:\s|$)/).matcher(flattened)
+                if (!milestoneMatcher.find()) {
+                    errors.add('Unable to parse the two milestone names from prompt.')
+                    return
+                }
+                String milestoneOneName = (milestoneMatcher.group(1) ?: '').trim()
+                String milestoneTwoName = (milestoneMatcher.group(2) ?: '').trim()
+
+                Matcher firstTasksMatcher = Pattern.compile(
+                        /(?i)\bsotto\s+al\s+primo\s+milestone\s+\d+\s+tasks?\s+con\s+nome\s+(.+?)\s+,\s*e\s+sotto\s+al\s+secondo\s+milestone/
+                ).matcher(flattened)
+                if (!firstTasksMatcher.find()) {
+                    errors.add('Unable to parse tasks under the first milestone.')
+                    return
+                }
+                String firstTasksText = (firstTasksMatcher.group(1) ?: '').trim()
+                List<String> milestoneOneTasks = firstTasksText.split(/\s+ed\s+/)
+                        .collect { (it ?: '').trim().replaceAll(/\s+$/, '') }
+                        .findAll { it } as List<String>
+
+                Matcher secondTasksMatcher = Pattern.compile(
+                        /(?i)\bsotto\s+al\s+secondo\s+milestone\s+i?\s*\d+\s+tasks?\s+(.+?)\.\s*Tutti\s+con\s+priorit[aà]/
+                ).matcher(flattened)
+                if (!secondTasksMatcher.find()) {
+                    errors.add('Unable to parse tasks under the second milestone.')
+                    return
+                }
+                String secondTasksText = (secondTasksMatcher.group(1) ?: '').trim()
+                List<String> milestoneTwoTasks = secondTasksText.split(/\s*,\s*/)
+                        .collect { (it ?: '').trim().replaceAll(/^\s*e\s+/, '') }
+                        .findAll { it } as List<String>
+                if (milestoneTwoTasks.size() == 2) {
+                    String firstCombined = milestoneTwoTasks[0]
+                    Matcher nestedTaskMatcher = Pattern.compile(/(?i)^(.+?)\s+e\s+(Installazione\s+software)\s*$/).matcher(firstCombined)
+                    if (nestedTaskMatcher.find()) {
+                        milestoneTwoTasks = [
+                                (nestedTaskMatcher.group(1) ?: '').trim(),
+                                (nestedTaskMatcher.group(2) ?: '').trim(),
+                                milestoneTwoTasks[1]
+                        ].findAll { it } as List<String>
+                    }
+                }
+
+                Matcher assigneeMatcher = Pattern.compile(
+                        /(?i)\bassegna\s+tutti\s+i\s+ta(?:ks|ks)\s+a\s+(.+?)\s+con\s+ruolo\s+([^,.;]+?)(?=(?:,|\.|$))/
+                ).matcher(flattened)
+                if (!assigneeMatcher.find()) {
+                    errors.add('Unable to parse assignee and role from prompt.')
+                    return
+                }
+                String assigneeName = (assigneeMatcher.group(1) ?: '').trim()
+                String assigneeRoleText = (assigneeMatcher.group(2) ?: '').trim()
+                String assignRoleTypeId = assigneeRoleText.equalsIgnoreCase('Project Manager') ? 'ProjectManager' : 'Manager'
+
+                if (milestoneOneTasks.size() != 2 || milestoneTwoTasks.size() != 3) {
+                    errors.add("Prototype expects exactly 2 tasks under milestone one and 3 tasks under milestone two; got ${milestoneOneTasks.size()} and ${milestoneTwoTasks.size()}.")
+                    return
+                }
+
+                projectPlan = [
+                        projectName : projectName,
+                        priority : priorityValue,
+                        purposeEnumId : purposeEnumId,
+                        assigneeName : assigneeName,
+                        assignRoleTypeId : assignRoleTypeId,
+                        milestones : [
+                                [name: milestoneOneName, tasks: milestoneOneTasks],
+                                [name: milestoneTwoName, tasks: milestoneTwoTasks]
+                        ]
+                ]
+
+                List<String> xmlLines = []
+                xmlLines << '<actions>'
+                xmlLines << '    <service-call name="org.moqui.agent.AgentExecutionServices.find#LookupRecord" out-map="assigneeLookup"'
+                xmlLines << "            in-map=\"[lookupKey:'party', lookupText:${sq(assigneeName)}]\"/>"
+                xmlLines << '    <if condition="!(assigneeLookup?.uniqueMatch &amp;&amp; assigneeLookup?.recordId)">'
+                xmlLines << "        <return error=\"true\" message=\"Assignee ${escapeXml(assigneeName)} was not found.\"/>"
+                xmlLines << '    </if>'
+                xmlLines << '    <set field="assigneePartyId" from="assigneeLookup.recordId"/>'
+                xmlLines << '    <service-call name="mantle.work.ProjectServices.create#Project" out-map="projectOut"'
+                xmlLines << "            in-map=\"[workEffortName:${sq(projectName)}, priority:${priorityValue}, purposeEnumId:${sq(purposeEnumId)}, assignToPartyId:assigneePartyId, assignRoleTypeId:${sq(assignRoleTypeId)}]\"/>"
+                xmlLines << '    <set field="projectId" from="projectOut.workEffortId"/>'
+                xmlLines << "    <set field=\"milestoneOneId\" from=\"projectId + '-MS1'\"/>"
+                xmlLines << "    <set field=\"milestoneTwoId\" from=\"projectId + '-MS2'\"/>"
+                xmlLines << '    <service-call name="mantle.work.ProjectServices.create#Milestone"'
+                xmlLines << "            in-map=\"[rootWorkEffortId:projectId, workEffortId:milestoneOneId, workEffortName:${sq(milestoneOneName)}, statusId:'WeInPlanning']\"/>"
+                xmlLines << '    <service-call name="mantle.work.ProjectServices.create#Milestone"'
+                xmlLines << "            in-map=\"[rootWorkEffortId:projectId, workEffortId:milestoneTwoId, workEffortName:${sq(milestoneTwoName)}, statusId:'WeInPlanning']\"/>"
+
+                int taskCounter = 1
+                milestoneOneTasks.each { String taskName ->
+                    xmlLines << "    <service-call name=\"mantle.work.TaskServices.create#Task\" out-map=\"taskOut${taskCounter}\""
+                    xmlLines << "            in-map=\"[rootWorkEffortId:projectId, milestoneWorkEffortId:milestoneOneId, workEffortName:${sq(taskName)}, priority:${priorityValue}, assignToPartyId:assigneePartyId, assignRoleTypeId:${sq(assignRoleTypeId)}]\"/>"
+                    taskCounter++
+                }
+                milestoneTwoTasks.each { String taskName ->
+                    xmlLines << "    <service-call name=\"mantle.work.TaskServices.create#Task\" out-map=\"taskOut${taskCounter}\""
+                    xmlLines << "            in-map=\"[rootWorkEffortId:projectId, milestoneWorkEffortId:milestoneTwoId, workEffortName:${sq(taskName)}, priority:${priorityValue}, assignToPartyId:assigneePartyId, assignRoleTypeId:${sq(assignRoleTypeId)}]\"/>"
+                    taskCounter++
+                }
+                List<String> taskRefs = (1..(taskCounter - 1)).collect { "taskOut${it}.workEffortId" }
+                xmlLines << '    <set field="milestoneIds" from="[milestoneOneId, milestoneTwoId]"/>'
+                xmlLines << "    <set field=\"taskIds\" from=\"[${taskRefs.join(', ')}]\"/>"
+                xmlLines << '    <set field="result" from="[projectId:projectId, milestoneIds:milestoneIds, taskIds:taskIds]"/>'
+                xmlLines << '</actions>'
+
+                generatedXmlActions = xmlLines.join('\n')
+
+                Map traceResult = ec.service.sync()
+                        .name('org.moqui.agent.AgentAlgebraicServices.record#GeneratedXmlActionMorphism')
+                        .parameters([
+                                prototypeKey         : 'project-aggregate',
+                                serviceVerb          : 'execute',
+                                serviceNoun          : "ProjectAggregate${projectName.replaceAll(/[^A-Za-z0-9]+/, '')}",
+                                serviceDescription   : "Runtime-generated xml-actions service for project aggregate prompt '${projectName}'. It creates a project root, two milestones, and ordered tasks inside the same Moqui execution context.",
+                                generatedXmlActions  : generatedXmlActions,
+                                sourceObjectId       : 'AgentXmlCtxObj',
+                                targetObjectId       : 'AgentXmlCtxObj',
+                                requiredOperandsJson : '["queryText"]',
+                                producedOperandsJson : '["projectId","milestoneIds","taskIds"]',
+                                selectionDescription : 'Select when the user asks to create a project root with milestones and tasks as a single rooted aggregate.',
+                                bindingDescription   : 'Bindings are resolved inside the generated xml-actions: assignee lookup first, then project creation, milestone creation, and task creation with propagated identifiers.'
+                        ]).call() ?: [:]
+                if (!Boolean.TRUE.equals(traceResult.success)) {
+                    errors.add('Unable to record generated project aggregate morphism.')
+                    return
+                }
+                generatedServiceLocation = traceResult.generatedServiceLocation as String
+                generatedServiceFilePath = traceResult.generatedServiceFilePath as String
+                generatedServiceName = traceResult.generatedServiceName as String
+                generatedMorphismId = traceResult.morphismId as String
+
+                XmlAction xmlAction = new XmlAction((ExecutionContextFactoryImpl) ec.factory, generatedXmlActions, 'agent://project-aggregate-xml-actions-prototype')
+                generatedGroovy = xmlAction.getGroovyString()
+                if (Boolean.TRUE.equals(dryRun)) {
+                    success = true
+                    return
+                }
+
+                xmlAction.run((ExecutionContextImpl) ec)
+                if (ec.message.hasError()) {
+                    errors.addAll((ec.message.errors ?: []) as List)
+                    ec.message.clearErrors()
+                    return
+                }
+
+                Map resultMap = (ec.context.get('result') instanceof Map) ? (Map) ec.context.get('result') : [:]
+                projectId = resultMap.projectId
+                milestoneIds = (resultMap.milestoneIds instanceof List) ? (List) resultMap.milestoneIds : []
+                taskIds = (resultMap.taskIds instanceof List) ? (List) resultMap.taskIds : []
+                success = projectId != null && milestoneIds && taskIds
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="execute" noun="SupportRequestXmlActionsPrototype" authenticate="true">
+        <in-parameters>
+            <parameter name="queryText" required="true"/>
+            <parameter name="dryRun" type="Boolean" default="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="success" type="Boolean"/>
+            <parameter name="errors" type="List"/>
+            <parameter name="generatedXmlActions" type="String"/>
+            <parameter name="generatedGroovy" type="String"/>
+            <parameter name="generatedServiceLocation" type="String"/>
+            <parameter name="generatedServiceFilePath" type="String"/>
+            <parameter name="generatedServiceName" type="String"/>
+            <parameter name="generatedMorphismId" type="String"/>
+            <parameter name="requestPlan" type="Map"/>
+            <parameter name="requestId" type="String"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import org.moqui.impl.actions.XmlAction
+                import org.moqui.impl.context.ExecutionContextFactoryImpl
+                import org.moqui.impl.context.ExecutionContextImpl
+                import org.moqui.util.MNode
+                import java.sql.Timestamp
+                import java.time.LocalDate
+                import java.time.ZoneId
+
+                String normalizedText = (queryText ?: '').trim()
+                errors = []
+                success = false
+                if (!normalizedText) {
+                    errors.add("Missing queryText for support request xml-actions prototype.")
+                    return
+                }
+
+                Closure<String> normalizeWhitespace = { String text ->
+                    return (text ?: '').replaceAll(/\s+/, ' ').trim()
+                }
+                Closure<String> escapeXml = { String text ->
+                    String value = text ?: ''
+                    value = value.replace('&', '&amp;')
+                    value = value.replace('<', '&lt;')
+                    value = value.replace('>', '&gt;')
+                    value = value.replace('"', '&quot;')
+                    value = value.replace("'", '&apos;')
+                    return value
+                }
+                Closure<String> extractPriority = { String text ->
+                    def m = text =~ /(?i)priorit[aà]\s*(\d+)/
+                    return m.find() ? m.group(1) : '1'
+                }
+                Closure<String> extractAssigneeName = { String text ->
+                    def m = text =~ /(?i)assegnat[oa]\s+a\s+([^,]+?)\s*,\s*con\s+nome/
+                    if (m.find()) return normalizeWhitespace(m.group(1))
+                    m = text =~ /(?i)assegnarl[oa]\s+a\s+([^,?.]+?)(?=(?:\s+e\s+impostare|\s+con\s+|\?|$))/
+                    if (m.find()) return normalizeWhitespace(m.group(1))
+                    m = text =~ /(?i)assign(?:ed)?\s+to\s+([^,]+?)\s*,\s*with\s+name/
+                    if (m.find()) return normalizeWhitespace(m.group(1))
+                    m = text =~ /(?i)assign(?:\s+it)?\s+to\s+([^,?.]+?)(?=(?:\s+and\s+set|\s+with\s+|\?|$))/
+                    return m.find() ? normalizeWhitespace(m.group(1)) : ''
+                }
+                Closure<String> extractRequestName = { String text ->
+                    def m = text =~ /(?i)con\s+nome\s+(.+?)\s+e\s+descrizione\s+/
+                    if (m.find()) return normalizeWhitespace(m.group(1))
+                    m = text =~ /(?i)with\s+name\s+(.+?)\s+and\s+description\s+/
+                    if (m.find()) return normalizeWhitespace(m.group(1))
+                    m = text =~ /(?i)(?:ticket|richiesta(?:\s+di\s+support)?|support request)\s+(?:urgente\s+)?per\s+(.+?)(?=(?:,\s*assegn|\s+assegn|\s+e\s+impostare|\s+con\s+data\s+scadenza|\?|$))/
+                    return m.find() ? normalizeWhitespace(m.group(1)) : ''
+                }
+                Closure<String> extractDescription = { String text ->
+                    def m = text =~ /(?i)e\s+descrizione\s+(.+?)\s+con\s+data\s+scadenza\s+/
+                    if (m.find()) return normalizeWhitespace(m.group(1))
+                    m = text =~ /(?i)and\s+description\s+(.+?)\s+with\s+due\s+date\s+/
+                    if (m.find()) return normalizeWhitespace(m.group(1))
+                    m = text =~ /(?i)(?:ticket|richiesta(?:\s+di\s+support)?|support request)\s+(?:urgente\s+)?per\s+(.+?)(?=(?:,\s*assegn|\s+assegn|\s+e\s+impostare|\s+con\s+data\s+scadenza|\?|$))/
+                    return m.find() ? normalizeWhitespace(m.group(1)) : ''
+                }
+                Closure<String> extractDueDateText = { String text ->
+                    def m = text =~ /(?i)(?:data\s+scadenza|scadenza\s+al|due\s+date|deadline)\s+(\d{2}\/\d{2}\/\d{4})/
+                    return m.find() ? m.group(1) : ''
+                }
+
+                String requestName = extractRequestName(normalizedText)
+                String description = extractDescription(normalizedText)
+                String assigneeName = extractAssigneeName(normalizedText)
+                String priorityValue = extractPriority(normalizedText)
+                String dueDateText = extractDueDateText(normalizedText)
+
+                if (!requestName || !description || !assigneeName || !dueDateText) {
+                    errors.add("Support request prototype could not parse the prompt safely. Parsed name=${requestName}, description=${description}, assignee=${assigneeName}, dueDate=${dueDateText}.")
+                    return
+                }
+
+                Map lookupResult = ec.service.sync()
+                        .name('org.moqui.agent.AgentExecutionServices.find#LookupRecord')
+                        .parameters([lookupKey: 'person', lookupText: assigneeName])
+                        .call() ?: [:]
+                String assignToPartyId = lookupResult.recordId as String
+                if (!assignToPartyId) {
+                    errors.add("Unable to resolve assignee [${assigneeName}] for support request prototype.")
+                    return
+                }
+
+                LocalDate dueDate = LocalDate.parse(dueDateText, java.time.format.DateTimeFormatter.ofPattern('dd/MM/yyyy'))
+                Timestamp responseRequiredDateValue = Timestamp.from(dueDate.atStartOfDay(ZoneId.of('UTC')).toInstant())
+                context.responseRequiredDateValue = responseRequiredDateValue
+                context.assignToPartyIdValue = assignToPartyId
+
+                requestPlan = [
+                        requestName : requestName,
+                        description : description,
+                        priority : priorityValue as Long,
+                        requestTypeEnumId : 'RqtSupport',
+                        assignToName : assigneeName,
+                        assignToPartyId : assignToPartyId,
+                        responseRequiredDateText : dueDateText
+                ]
+
+                String escapedRequestName = escapeXml(requestName)
+                String escapedDescription = escapeXml(description)
+
+                generatedXmlActions = """
+<actions>
+    <set field="requestName" value="${escapedRequestName}"/>
+    <set field="description" value="${escapedDescription}"/>
+    <set field="priority" value="${priorityValue}"/>
+    <set field="requestTypeEnumId" value="RqtSupport"/>
+    <set field="assignToPartyId" from="assignToPartyIdValue"/>
+    <set field="responseRequiredDate" from="responseRequiredDateValue"/>
+    <service-call name="mantle.request.RequestServices.create#Request" in-map="context" out-map="requestOut"/>
+    <set field="requestId" from="requestOut.requestId"/>
+</actions>
+""".trim()
+
+                Map traceResult = ec.service.sync()
+                        .name('org.moqui.agent.AgentAlgebraicServices.record#GeneratedXmlActionMorphism')
+                        .parameters([
+                                prototypeKey         : 'support-request',
+                                serviceVerb          : 'execute',
+                                serviceNoun          : "SupportRequest${requestName.replaceAll(/[^A-Za-z0-9]+/, '')}",
+                                serviceDescription   : "Runtime-generated xml-actions service for support request prompt '${requestName}'. It resolves the assignee, binds due date and request attributes, and creates the request inside one Moqui execution context.",
+                                generatedXmlActions  : generatedXmlActions,
+                                sourceObjectId       : 'AgentXmlCtxObj',
+                                targetObjectId       : 'AgentXmlCtxObj',
+                                requiredOperandsJson : '["queryText"]',
+                                producedOperandsJson : '["requestId"]',
+                                selectionDescription : 'Select when the user asks to create a support request with assignee, priority, description, and due date.',
+                                bindingDescription   : 'Bindings are resolved inside the generated xml-actions: assignee lookup first, then request creation with propagated context values.'
+                        ]).call() ?: [:]
+                if (!Boolean.TRUE.equals(traceResult.success)) {
+                    errors.add('Unable to record generated support request morphism.')
+                    return
+                }
+                generatedServiceLocation = traceResult.generatedServiceLocation as String
+                generatedServiceFilePath = traceResult.generatedServiceFilePath as String
+                generatedServiceName = traceResult.generatedServiceName as String
+                generatedMorphismId = traceResult.morphismId as String
+
+                XmlAction xmlAction = new XmlAction((ExecutionContextFactoryImpl) ec.factory, generatedXmlActions, 'agent://support-request-xml-actions-prototype')
+                generatedGroovy = xmlAction.getGroovyString()
+
+                if (Boolean.TRUE.equals(dryRun)) {
+                    success = true
+                    return
+                }
+
+                xmlAction.run((ExecutionContextImpl) ec)
+                if (ec.message.hasError()) {
+                    errors.addAll((ec.message.errors ?: []) as List)
+                    ec.message.clearErrors()
+                    return
+                }
+                requestId = context.requestId as String
+                success = !!requestId
             ]]></script>
         </actions>
     </service>

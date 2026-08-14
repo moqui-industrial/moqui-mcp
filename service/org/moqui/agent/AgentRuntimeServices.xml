@@ -650,6 +650,9 @@
                 Map preferredStructuredPlan = [:]
                 Map algebraicPlan = [:]
                 Map algebraicResolvedOperands = [:]
+                boolean llmOnlyPromptPlanning = org.moqui.agent.AgentToolSupport.isLlmOnlyPromptPlanningEnabled()
+                boolean inferredDryRun = org.moqui.agent.AgentToolSupport.looksLikeDryRunPrompt(queryText)
+                boolean effectiveDryRun = Boolean.TRUE.equals(dryRun) || inferredDryRun
                 Closure normalizeResolveOutcome = {
                     List<String> normalizedErrors = []
                     if (errors instanceof Collection) {
@@ -693,7 +696,7 @@
                                 parameters : [
                                         queryText : queryText,
                                         confirmed : confirmed,
-                                        dryRun : dryRun,
+                                        dryRun : effectiveDryRun,
                                         area : area,
                                         subArea : subArea,
                                         domainObject : domainObject,
@@ -723,10 +726,10 @@
 
                 preferredStructuredPlan = agentToolSupportClass.inferStructuredPromptPlan(
                         ec, queryText, (parameters instanceof Map ? (parameters as Map) : [:])) ?: [:]
-                if ((preferredStructuredPlan?.planType ?: '') == 'same_subject_multi_action') {
+                if (!llmOnlyPromptPlanning && (preferredStructuredPlan?.planType ?: '') == 'same_subject_multi_action') {
                     Map preferredStructuredResult = agentToolSupportClass.executeStructuredPromptPlan(
                             ec, queryText, (parameters instanceof Map ? (parameters as Map) : [:]),
-                            confirmed, dryRun, sessionId ?: ec.user.visitId)
+                            confirmed, effectiveDryRun, sessionId ?: ec.user.visitId)
                     if (preferredStructuredResult?.compositeExecution) {
                         resolvedDocumentId = ((preferredStructuredResult.compositeType ?: '') == 'asset_move_status') ?
                                 'agent-prompt://asset/assetdetail/updateasset' :
@@ -741,7 +744,72 @@
                     }
                 }
 
+                if (!llmOnlyPromptPlanning && agentToolSupportClass.looksLikeSupportRequestCreatePrompt(queryText)) {
+                    Map supportPrototypeResult = ec.service.sync()
+                            .name('org.moqui.agent.AgentAlgebraicServices.execute#SupportRequestXmlActionsPrototype')
+                            .parameters([
+                                    queryText : queryText,
+                                    dryRun : effectiveDryRun
+                            ]).call() ?: [:]
+                    if (supportPrototypeResult) {
+                        resolvedDocumentId = 'agent-xmlactions://support-request-prototype'
+                        resolvedDocument = [
+                                documentId : resolvedDocumentId,
+                                artifactTypeEnumId : 'AT_SERVICE',
+                                serviceName : 'org.moqui.agent.AgentAlgebraicServices.execute#SupportRequestXmlActionsPrototype',
+                                executionChannel : 'xml-actions'
+                        ]
+                        success = Boolean.TRUE.equals(supportPrototypeResult.success)
+                        executionResult = supportPrototypeResult
+                        if (supportPrototypeResult.messages instanceof List) messages.addAll(supportPrototypeResult.messages as List)
+                        if (supportPrototypeResult.errors instanceof List) errors.addAll(supportPrototypeResult.errors as List)
+                        if (success) errors.clear()
+                        logResolveAndExecute(success)
+                        return
+                    }
+                }
+
+                if (!llmOnlyPromptPlanning && agentToolSupportClass.looksLikeProjectAggregatePrompt(queryText)) {
+                    Map projectPrototypeResult = ec.service.sync()
+                            .name('org.moqui.agent.AgentAlgebraicServices.execute#ProjectAggregateXmlActionsPrototype')
+                            .parameters([
+                                    queryText : queryText,
+                                    dryRun : effectiveDryRun
+                            ]).call() ?: [:]
+                    if (projectPrototypeResult) {
+                        resolvedDocumentId = 'agent-xmlactions://project-aggregate-prototype'
+                        resolvedDocument = [
+                                documentId : resolvedDocumentId,
+                                artifactTypeEnumId : 'AT_SERVICE',
+                                serviceName : 'org.moqui.agent.AgentAlgebraicServices.execute#ProjectAggregateXmlActionsPrototype',
+                                executionChannel : 'xml-actions'
+                        ]
+                        success = Boolean.TRUE.equals(projectPrototypeResult.success)
+                        executionResult = projectPrototypeResult
+                        if (projectPrototypeResult.messages instanceof List) messages.addAll(projectPrototypeResult.messages as List)
+                        if (projectPrototypeResult.errors instanceof List) errors.addAll(projectPrototypeResult.errors as List)
+                        if (success) errors.clear()
+                        logResolveAndExecute(success)
+                        return
+                    }
+                }
+
                 boolean likelyMutatingPrompt = (queryText ?: '').toLowerCase().matches(/.*\b(create|new|insert|add|update|change|set|assign|move|delete|remove|close|approve|submit|crea|inserisci|aggiungi|aggiorna|cambia|imposta|assegna|sposta|elimina|rimuovi|chiudi)\b.*/)
+                if (!llmOnlyPromptPlanning && !likelyMutatingPrompt) {
+                    Map earlyDirectReadResult = agentToolSupportClass.executeDirectReadPromptPlan(
+                            ec, queryText, (((parameters instanceof Map) ? (parameters as Map) : [:]) + algebraicResolvedOperands))
+                    if (earlyDirectReadResult?.compositeExecution) {
+                        resolvedDocumentId = ((earlyDirectReadResult.compositeType ?: '') == 'asset_status_query') ?
+                                'agent-prompt://asset/assetdetail/assetstatusquery' :
+                                (earlyDirectReadResult.documentId ?: earlyDirectReadResult.executionResult?.documentId)
+                        success = Boolean.TRUE.equals(earlyDirectReadResult.success)
+                        executionResult = earlyDirectReadResult.executionResult as Map
+                        if (earlyDirectReadResult.messages) messages.addAll(earlyDirectReadResult.messages as List)
+                        if (earlyDirectReadResult.errors) errors.addAll(earlyDirectReadResult.errors as List)
+                        logResolveAndExecute(success)
+                        return
+                    }
+                }
                 boolean algebraicPlanningAttempted = false
                 try {
                     algebraicPlanningAttempted = true
@@ -874,7 +942,7 @@
                                     executionPlanGraph : (algebraicPlan.executionPlanGraph instanceof List) ? (List<Map>) algebraicPlan.executionPlanGraph : [],
                                     parameters : directAlgebraicParameters,
                                     confirmed : confirmed,
-                                    dryRun : dryRun,
+                                        dryRun : effectiveDryRun,
                                     internalDisableAuthzForSmokeTest : true
                             ]).call()
                     if (queryText.contains('ordine di vendita')) {
@@ -931,33 +999,22 @@
                     return
                 }
 
-                Map directAssetCompositeResult = agentToolSupportClass.executeStructuredPromptPlan(
-                        ec, queryText, (((parameters instanceof Map) ? (parameters as Map) : [:]) + algebraicResolvedOperands), confirmed, dryRun, sessionId ?: ec.user.visitId)
-                if (directAssetCompositeResult?.compositeExecution) {
-                    resolvedDocumentId = ((directAssetCompositeResult.compositeType ?: '') == 'asset_move_status') ?
-                            'agent-prompt://asset/assetdetail/updateasset' :
-                            (directAssetCompositeResult.documentId ?: directAssetCompositeResult.executionResult?.documentId)
-                    success = Boolean.TRUE.equals(directAssetCompositeResult.success)
-                    executionResult = directAssetCompositeResult.executionResult as Map
-                    if (directAssetCompositeResult.messages) messages.addAll(directAssetCompositeResult.messages as List)
-                    if (directAssetCompositeResult.errors) errors.addAll(directAssetCompositeResult.errors as List)
-                    if (success) errors.clear()
-                    logResolveAndExecute(success)
-                    return
-                }
+                if (!llmOnlyPromptPlanning) {
+                    Map directAssetCompositeResult = agentToolSupportClass.executeStructuredPromptPlan(
+                            ec, queryText, (((parameters instanceof Map) ? (parameters as Map) : [:]) + algebraicResolvedOperands), confirmed, effectiveDryRun, sessionId ?: ec.user.visitId)
 
-                Map directReadResult = agentToolSupportClass.executeDirectReadPromptPlan(
-                        ec, queryText, (((parameters instanceof Map) ? (parameters as Map) : [:]) + algebraicResolvedOperands))
-                if (directReadResult?.compositeExecution) {
-                    resolvedDocumentId = ((directReadResult.compositeType ?: '') == 'asset_status_query') ?
-                            'agent-prompt://asset/assetdetail/assetstatusquery' :
-                            (directReadResult.documentId ?: directReadResult.executionResult?.documentId)
-                    success = Boolean.TRUE.equals(directReadResult.success)
-                    executionResult = directReadResult.executionResult as Map
-                    if (directReadResult.messages) messages.addAll(directReadResult.messages as List)
-                    if (directReadResult.errors) errors.addAll(directReadResult.errors as List)
-                    logResolveAndExecute(success)
-                    return
+                    if (directAssetCompositeResult?.compositeExecution) {
+                        resolvedDocumentId = ((directAssetCompositeResult.compositeType ?: '') == 'asset_move_status') ?
+                                'agent-prompt://asset/assetdetail/updateasset' :
+                                (directAssetCompositeResult.documentId ?: directAssetCompositeResult.executionResult?.documentId)
+                        success = Boolean.TRUE.equals(directAssetCompositeResult.success)
+                        executionResult = directAssetCompositeResult.executionResult as Map
+                        if (directAssetCompositeResult.messages) messages.addAll(directAssetCompositeResult.messages as List)
+                        if (directAssetCompositeResult.errors) errors.addAll(directAssetCompositeResult.errors as List)
+                        if (success) errors.clear()
+                        logResolveAndExecute(success)
+                        return
+                    }
                 }
 
                 Map unsupportedWorkflow = agentToolSupportClass.detectUnsupportedMultiDomainWorkflow(queryText)
@@ -1070,6 +1127,15 @@
                                 .name('org.moqui.agent.AgentPromptServices.get#AgentDocument')
                                 .parameters([documentId : skillDrivenDocumentId])
                                 .call()?.document as Map
+                        if (!skillDrivenRootDoc) {
+                            skillDrivenRootDoc = [
+                                    documentId : skillDrivenDocumentId,
+                                    runtimeExecutable : true,
+                                    synthesizedFromSkillId : selectedSkill?.skillId,
+                                    synthesizedFromSkillTitle : selectedSkill?.title
+                            ]
+                            messages.add("Using synthesized aggregate root document for ${selectedSkill?.skillId ?: 'selected skill'} because ${skillDrivenDocumentId} is not available in the prompt registry.")
+                        }
                         if (Boolean.TRUE.equals(skillDrivenRootDoc?.runtimeExecutable)) {
                             resolvedDocumentId = skillDrivenDocumentId
                             resolvedDocument = skillDrivenRootDoc
@@ -1221,7 +1287,7 @@
                 if (parameters instanceof Map) mergedParameters.putAll(parameters as Map)
 
                 Map aggregateResult = agentToolSupportClass.executeRootChildHierarchyPlan(
-                        ec, queryText, topDoc, mergedParameters, confirmed, dryRun, sessionId ?: ec.user.visitId)
+                        ec, queryText, topDoc, mergedParameters, confirmed, effectiveDryRun, sessionId ?: ec.user.visitId)
                 if (aggregateResult?.compositeExecution) {
                     success = Boolean.TRUE.equals(aggregateResult.success)
                     executionResult = aggregateResult.executionResult as Map
@@ -1238,7 +1304,7 @@
                         documentId       : resolvedDocumentId,
                         parameters       : mergedParameters,
                         confirmed        : confirmed,
-                        dryRun           : dryRun,
+                        dryRun           : effectiveDryRun,
                         useSessionContext : true,
                         sessionId        : sessionId ?: ec.user.visitId
                     ]).call()

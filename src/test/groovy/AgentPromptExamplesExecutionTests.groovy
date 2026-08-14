@@ -169,12 +169,20 @@ class AgentPromptExamplesExecutionTests extends Specification {
 
         Map supportRow = results.find { it.id == 'support_request' }
         supportRow != null
-        supportRow.success == false
+        supportRow.success == true
         (supportRow.resolvedDocumentId as String) in [
                 'agent-morphism://mantle.request.RequestServices.create#Request',
                 'agent-morphism://create#mantle.request.Request'
         ]
-        ((supportRow.errors ?: []) as List).any { String err -> (err ?: '').contains('assignee_binding') || (err ?: '').contains('Semantic binding unsupported') }
+        ((supportRow.errors ?: []) as List).isEmpty()
+        String requestId = supportRow.executionResult?.resolvedParameters?.requestId ?: supportRow.executionResult?.finalResult?.requestId
+        requestId != null
+        def request = ec.entity.find('mantle.request.Request')
+                .condition('requestId', requestId)
+                .disableAuthz()
+                .one()
+        request != null
+        (request.requestName as String) == 'Cambio compressore'
 
         Map budgetRow = results.find { it.id == 'budget_create' }
         budgetRow != null

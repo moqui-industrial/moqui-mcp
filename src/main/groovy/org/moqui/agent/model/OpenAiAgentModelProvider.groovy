@@ -33,7 +33,9 @@ class OpenAiAgentModelProvider implements AgentModelProvider {
 
     @Override
     Map generateJson(String systemPrompt, Map userPayload, Map options) {
-        String apiKey = (options.apiKey ?: AgentConfigUtil.getPropertyOrEnv('moqui.agent.reranker.apiKey', 'OPENAI_API_KEY', '')).toString()
+        String apiKey = (options.apiKey
+            ?: AgentConfigUtil.getString('moqui.agent.chat.apiKey',
+                AgentConfigUtil.getPropertyOrEnv('moqui.agent.reranker.apiKey', 'OPENAI_API_KEY', ''))).toString()
         if (!apiKey) throw new IllegalStateException('Missing OpenAI API key for reranker')
 
         String model = (options.model ?: 'gpt-5').toString()

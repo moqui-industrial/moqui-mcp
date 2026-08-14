@@ -28,10 +28,15 @@ import java.time.Duration
  * OpenAI-compatible provider for both chat completions and embeddings.
  * Works with LiteLLM Proxy, vLLM, Ollama /v1/chat/completions, LocalAI, etc.
  *
- * Reranker configured via:
- *   moqui.agent.reranker.compat.baseUrl   (required)
- *   moqui.agent.reranker.compat.apiKey    (or env OPENAI_COMPATIBLE_API_KEY)
- *   moqui.agent.reranker.compat.apiKeyEnv (default: OPENAI_COMPATIBLE_API_KEY)
+ * Chat / JSON generation configured via:
+ *   moqui.agent.chat.compat.baseUrl       (preferred)
+ *   moqui.agent.chat.compat.apiKey        (or env OPENAI_COMPATIBLE_API_KEY)
+ *   moqui.agent.chat.compat.apiKeyEnv     (default: OPENAI_COMPATIBLE_API_KEY)
+ *
+ * Legacy fallback:
+ *   moqui.agent.reranker.compat.baseUrl
+ *   moqui.agent.reranker.compat.apiKey
+ *   moqui.agent.reranker.compat.apiKeyEnv
  *
  * Embedding configured via:
  *   moqui.agent.embedding.compat.baseUrl  (required)
@@ -48,17 +53,22 @@ class OpenAiCompatibleAgentModelProvider implements AgentModelProvider {
 
     @Override
     Map generateJson(String systemPrompt, Map userPayload, Map options) {
-        String baseUrl = trimTrailingSlash((options.baseUrl ?: AgentConfigUtil.getString('moqui.agent.reranker.compat.baseUrl', '')).toString())
-        if (!baseUrl) throw new IllegalStateException('Missing moqui.agent.reranker.compat.baseUrl for openai_compatible provider')
+        String baseUrl = trimTrailingSlash((options.baseUrl
+            ?: AgentConfigUtil.getString('moqui.agent.chat.compat.baseUrl',
+                AgentConfigUtil.getString('moqui.agent.reranker.compat.baseUrl', ''))).toString())
+        if (!baseUrl) throw new IllegalStateException('Missing moqui.agent.chat.compat.baseUrl (or legacy moqui.agent.reranker.compat.baseUrl) for openai_compatible provider')
 
-        String apiKeyEnvName = AgentConfigUtil.getString('moqui.agent.reranker.compat.apiKeyEnv', 'OPENAI_COMPATIBLE_API_KEY')
+        String apiKeyEnvName = AgentConfigUtil.getString('moqui.agent.chat.compat.apiKeyEnv',
+            AgentConfigUtil.getString('moqui.agent.reranker.compat.apiKeyEnv', 'OPENAI_COMPATIBLE_API_KEY'))
         String apiKey = (options.apiKey
-            ?: AgentConfigUtil.getString('moqui.agent.reranker.compat.apiKey', '')
+            ?: AgentConfigUtil.getString('moqui.agent.chat.compat.apiKey',
+                AgentConfigUtil.getString('moqui.agent.reranker.compat.apiKey', ''))
             ?: AgentConfigUtil.getEnv(apiKeyEnvName, '')
         ).toString().trim()
 
-        String model = (options.model ?: AgentConfigUtil.getString('moqui.agent.reranker.model', '')).toString()
-        if (!model) throw new IllegalStateException('moqui.agent.reranker.model must be set for openai_compatible provider')
+        String model = (options.model ?: AgentConfigUtil.getString('moqui.agent.chat.model',
+            AgentConfigUtil.getString('moqui.agent.reranker.model', ''))).toString()
+        if (!model) throw new IllegalStateException('moqui.agent.chat.model (or legacy moqui.agent.reranker.model) must be set for openai_compatible provider')
 
         int timeoutSeconds = Math.max((options.timeoutSeconds ?: 300) as Integer, 1)
         int maxOutputTokens = Math.max((options.maxOutputTokens ?: 1200) as Integer, 200)
