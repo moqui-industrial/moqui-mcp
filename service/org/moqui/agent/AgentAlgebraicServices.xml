@@ -1312,6 +1312,12 @@
                                 loweredRaw.contains('conti') || loweredRaw.contains('accounts')
                         if (references.budgetName && current == 'budget item' && !budgetChildRead) return 'budget'
                     }
+                    if (verbLemma == 'create') {
+                        boolean hasOrderLines = (values.lineItems instanceof List && !((List) values.lineItems).isEmpty())
+                        boolean hasBudgetLines = (values.budgetLines instanceof List && !((List) values.budgetLines).isEmpty())
+                        if (hasOrderLines && current in ['', 'order', 'order header', 'order part']) return 'order item'
+                        if (hasBudgetLines && current in ['', 'budget']) return 'budget item'
+                    }
                     String aggregateRoot = (aggregatePatternIndex.rootByObject instanceof Map) ?
                             ((Map) aggregatePatternIndex.rootByObject)[current] as String : null
                     String aggregateAnchor = aggregateRoot ?: current
@@ -1524,6 +1530,12 @@
                     }
                 }
 
+                boolean hasImplicitAggregateChildren = commands.any { Map cmd ->
+                    Map values = (cmd.complements?.values instanceof Map) ? (Map) cmd.complements.values : [:]
+                    return ((values.lineItems instanceof List) && !((List) values.lineItems).isEmpty()) ||
+                            ((values.budgetLines instanceof List) && !((List) values.budgetLines).isEmpty())
+                }
+
                 List<String> rootCandidates = targetObjects.findAll { String obj ->
                     !parentOf(obj)
                 } as List<String>
@@ -1567,7 +1579,10 @@
 	                } else if (targetObjects.size() == 1) {
                         String singleObj = targetObjects.first()
                         String singleRoot = rootOf(singleObj)
-                        if (singleRoot && singleRoot != singleObj) {
+                        if (hasImplicitAggregateChildren && singleRoot) {
+                            planningMode = 'aggregate_composition'
+                            aggregateRootObject = singleRoot
+                        } else if (singleRoot && singleRoot != singleObj) {
                             planningMode = 'aggregate_composition'
                             aggregateRootObject = singleRoot
                         } else {
@@ -4424,21 +4439,28 @@ ${generatedXmlActions}
                 String milestoneOneName = (milestoneMatcher.group(1) ?: '').trim()
                 String milestoneTwoName = (milestoneMatcher.group(2) ?: '').trim()
 
-                Matcher firstTasksMatcher = Pattern.compile(
-                        /(?i)\bsotto\s+al\s+primo\s+milestone\s+\d+\s+tasks?\s+con\s+nome\s+(.+?)\s+,\s*e\s+sotto\s+al\s+secondo\s+milestone/
-                ).matcher(flattened)
+                String lowerFlattened = flattened.toLowerCase(java.util.Locale.ROOT)
+                int firstMilestoneIdx = lowerFlattened.indexOf('sotto al primo milestone')
+                int secondMilestoneIdx = lowerFlattened.indexOf('sotto al secondo milestone')
+                if (firstMilestoneIdx < 0 || secondMilestoneIdx < 0 || secondMilestoneIdx <= firstMilestoneIdx) {
+                    errors.add('Unable to parse tasks under the first milestone.')
+                    return
+                }
+                String firstSegment = flattened.substring(firstMilestoneIdx, secondMilestoneIdx)
+                Matcher firstTasksMatcher = Pattern.compile(/(?i)\bcon\s+nome\s+(.+?)\s*,?\s*$/).matcher(firstSegment)
                 if (!firstTasksMatcher.find()) {
                     errors.add('Unable to parse tasks under the first milestone.')
                     return
                 }
                 String firstTasksText = (firstTasksMatcher.group(1) ?: '').trim()
-                List<String> milestoneOneTasks = firstTasksText.split(/\s+ed\s+/)
-                        .collect { (it ?: '').trim().replaceAll(/\s+$/, '') }
+                List<String> milestoneOneTasks = firstTasksText.split(/\s+ed\s+|\s+e\s+/)
+                        .collect { (it ?: '').trim().replaceAll(/\s*,\s*e\s*$/, '').replaceAll(/\s+$/, '') }
                         .findAll { it } as List<String>
 
+                String secondSegment = flattened.substring(secondMilestoneIdx)
                 Matcher secondTasksMatcher = Pattern.compile(
                         /(?i)\bsotto\s+al\s+secondo\s+milestone\s+i?\s*\d+\s+tasks?\s+(.+?)\.\s*Tutti\s+con\s+priorit[aà]/
-                ).matcher(flattened)
+                ).matcher(secondSegment)
                 if (!secondTasksMatcher.find()) {
                     errors.add('Unable to parse tasks under the second milestone.')
                     return
@@ -4460,7 +4482,7 @@ ${generatedXmlActions}
                 }
 
                 Matcher assigneeMatcher = Pattern.compile(
-                        /(?i)\bassegna\s+tutti\s+i\s+ta(?:ks|ks)\s+a\s+(.+?)\s+con\s+ruolo\s+([^,.;]+?)(?=(?:,|\.|$))/
+                        /(?i)\bassegna\s+tutti\s+i\s+\w+\s+a\s+(.+?)\s+con\s+ruolo\s+([^,.;]+?)(?=(?:,|\.|$))/
                 ).matcher(flattened)
                 if (!assigneeMatcher.find()) {
                     errors.add('Unable to parse assignee and role from prompt.')

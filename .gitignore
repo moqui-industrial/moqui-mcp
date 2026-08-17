@@ -8,3 +8,4 @@ __pycache__/
 tools/agent-indexer/output/
 tmp-generated-services/
 tmp-runtime-validation/
+service/org/moqui/agent/generated/
