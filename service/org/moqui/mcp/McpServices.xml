@@ -28,7 +28,6 @@
         </out-parameters>
         <actions>
             <script><![CDATA[
-                import org.moqui.agent.AgentConfigUtil
                 import org.moqui.context.ExecutionContext
                 import org.moqui.impl.context.UserFacadeImpl.UserInfo
                 
@@ -117,7 +116,9 @@
                     } catch (Exception ignored) {}
                 }
 
-                Map runtimeConfig = AgentConfigUtil.validateRuntimeConfiguration(ec, [checkIndexes: false])
+                Map runtimeConfig = ec.service.sync().name('org.moqui.harness.AgentFacadeServices.check#RuntimeConfiguration').parameters([
+                    checkIndexes: false
+                ]).call()
                 
                 result = [
                     protocolVersion: protocolVersion,
