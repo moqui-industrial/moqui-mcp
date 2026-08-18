@@ -155,12 +155,12 @@
                 Set<String> userGroupIdSet = (ec.user.userGroupIdSet ?: []) as Set
                 boolean isDebugUser = userGroupIdSet.contains('MCP_DEBUG') || userGroupIdSet.contains('ADMIN')
                 Map<String, String> toolMappings = [
-                    "moqui_search_artifacts" : "org.moqui.agent.RagServices.search#Artifacts",
-                    "moqui_get_artifact" : "org.moqui.agent.RagServices.get#Artifact",
-                    "moqui_search_all"   : "org.moqui.agent.AgentPromptServices.search#AllDocuments",
-                    "moqui_call_service_guarded": "org.moqui.agent.AgentRuntimeServices.call#ServiceGuarded",
-                    "moqui_discover_artifacts"   : "org.moqui.agent.AgentDiscoveryServices.discover#AndIndexArtifacts",
-                    "moqui_discovery_status"     : "org.moqui.agent.AgentDiscoveryServices.get#DiscoveryStatus"
+                    "moqui_search_artifacts" : "org.moqui.harness.AgentFacadeServices.search#Artifacts",
+                    "moqui_get_artifact" : "org.moqui.harness.AgentFacadeServices.get#Artifact",
+                    "moqui_search_all"   : "org.moqui.harness.AgentFacadeServices.search#AllDocuments",
+                    "moqui_call_service_guarded": "org.moqui.harness.AgentFacadeServices.call#ServiceGuarded",
+                    "moqui_discover_artifacts"   : "org.moqui.harness.AgentFacadeServices.discover#AndIndexArtifacts",
+                    "moqui_discovery_status"     : "org.moqui.harness.AgentFacadeServices.get#DiscoveryStatus"
                 ]
                 Map<String, Map> providerToolMappings = [:]
                 def jsonSlurper = new JsonSlurper()
@@ -275,7 +275,7 @@
                     visitInfo: visitInfo,
                     architecture: "Visit-based sessions"
                 ]
-                Map<String, Object> runtimeConfig = ec.service.sync().name('org.moqui.agent.AgentRuntimeServices.check#RuntimeConfiguration').parameters([
+                Map<String, Object> runtimeConfig = ec.service.sync().name('org.moqui.harness.AgentFacadeServices.check#RuntimeConfiguration').parameters([
                     checkIndexes: true
                 ]).call()
                 result.runtimeConfiguration = [
