@@ -57,7 +57,8 @@ Current status:
 - the component compiles and loads in Moqui
 - `/mcp` responds over MCP Streamable HTTP with a single `POST` endpoint
 - every request is stateless and must include `_meta.io.modelcontextprotocol/protocolVersion`, `_meta.io.modelcontextprotocol/clientCapabilities`, and the required MCP HTTP headers
-- the servlet uses the standard Moqui auth filter and can log in the configured MCP service account for local MCP calls
+- the servlet sits behind the standard Moqui auth filter and expects normal Moqui authentication from remote clients
+- trusted internal callers may optionally configure `-Dmoqui.mcp.serviceAccountUserId=<userId>` as an explicit fallback
 - SSE, subscriptions, and advanced notification streaming are not implemented yet
 
 It dispatches these MCP methods:
@@ -179,6 +180,30 @@ Today the component provides the notification creation tool, but not a full stre
 - `MCP-Protocol-Version` must match the body metadata protocol version
 - `Mcp-Method` must match the JSON-RPC method
 - `Mcp-Name` is required for `tools/call`, `resources/read`, and `prompts/get`
+
+## Authentication
+
+This endpoint uses standard Moqui web authentication.
+
+Recommended client options:
+
+- HTTP Basic Auth
+- `api_key` header with a valid Moqui login key
+- `login_key` header with a valid Moqui login key
+
+The component no longer assumes the demo `john.doe/moqui` account.
+For local development that account may still exist, but it is not part of the component contract.
+
+For browser-based or cross-origin clients, the servlet explicitly allows these headers:
+
+- `Authorization`
+- `api_key`
+- `login_key`
+- `MCP-Protocol-Version`
+- `Mcp-Method`
+- `Mcp-Name`
+
+See [docs/MCPInspector.md](docs/MCPInspector.md) for Inspector setup and [tools/mcp-smoke.sh](tools/mcp-smoke.sh) for a repeatable smoke test.
 
 ## Current Conformance Boundaries
 

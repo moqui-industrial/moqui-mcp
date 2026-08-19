@@ -167,8 +167,10 @@ class McpServlet extends HttpServlet {
 
     private void ensureAuthenticated(ExecutionContextImpl ec) {
         if (ec.user?.userId) return
-        String serviceUserId = System.getProperty("moqui.mcp.serviceAccountUserId", "john.doe")?.trim()
-        if (!serviceUserId) throw new IllegalStateException("Missing moqui.mcp.serviceAccountUserId")
+        String serviceUserId = System.getProperty("moqui.mcp.serviceAccountUserId")?.trim()
+        if (!serviceUserId) {
+            throw new IllegalStateException("MCP request is not authenticated. Use standard Moqui authentication (Basic Auth or api_key/login_key) or configure moqui.mcp.serviceAccountUserId for trusted internal calls.")
+        }
         UserFacadeImpl ufi = ec.userFacade
         if (!ufi.internalLoginUser(serviceUserId, false)) {
             throw new IllegalStateException("Could not log in MCP service account ${serviceUserId}: ${ec.message.errorsString}")
@@ -182,7 +184,7 @@ class McpServlet extends HttpServlet {
 
     private boolean handleCors(HttpServletRequest request, HttpServletResponse response) {
         response.setHeader("Access-Control-Allow-Origin", "*")
-        response.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, MCP-Protocol-Version, Mcp-Method, Mcp-Name")
+        response.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, api_key, login_key, MCP-Protocol-Version, Mcp-Method, Mcp-Name")
         response.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS")
         if ("OPTIONS".equalsIgnoreCase(request.method)) {
             response.status = HttpServletResponse.SC_NO_CONTENT
