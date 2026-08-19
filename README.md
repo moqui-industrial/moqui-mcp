@@ -28,13 +28,20 @@ The generic JSON-RPC entry service is:
 
 - `org.moqui.mcp.McpServices.mcp#Handle`
 
+Current status:
+
+- the logical MCP catalog is implemented in services
+- the component can be loaded and compiled in Moqui
+- a dedicated MCP transport endpoint such as stdio, Streamable HTTP, or SSE is not yet wired
+- `/mcp` is therefore not yet available to tools such as MCP Inspector
+
 It dispatches these MCP methods:
 
 - `server/discover`
 - `tools/list`
 - `tools/call`
 - `resources/list`
-- `resources/get`
+- `resources/read`
 - `prompts/list`
 - `prompts/get`
 - `subscriptions/listen`
