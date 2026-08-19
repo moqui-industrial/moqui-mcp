@@ -1,155 +1,75 @@
 # moqui-mcp
 
-`moqui-mcp` is a Moqui component that exposes Moqui capabilities through the Model Context Protocol (MCP).
+Lightweight MCP protocol component for Moqui.
 
-The project is still under active development. The current direction is to keep the agent layer thin and grounded in standard Moqui mechanisms:
+This component is intentionally narrow:
 
-- Moqui services, entities, screens, transitions, and authorization
-- `DataDocument` and `DataFeed` for declarative knowledge projection
-- OpenSearch for retrieval
-- Moqui graph entities for artifact topology and knowledge lineage
+- `tools` are Moqui services and registered MCP tool providers
+- `resources` are Moqui entity schemas, records, and DataDocument definitions
+- `prompts` are stored in Moqui Wiki pages
+- `notifications` are bridged from Moqui `NotificationMessage`
 
-An additional experimental direction is now active on the `algebraic-mcp-reboot` branch:
+## Scope
 
-- treat Moqui services as registered morphisms
-- treat entities and view-entities as authoritative state objects
-- compile prompts toward service signatures before any business-specific fallback
+`moqui-mcp` is the MCP-facing protocol layer. It should stay small.
 
-## Current Focus
+It should not contain:
 
-The component is evolving along three complementary layers:
+- agent planning engines
+- algebraic metamodel logic
+- skill orchestration logic
+- graph- or screen-first legacy layers
 
-1. Runtime MCP integration for external agent clients such as LibreChat
-2. Declarative retrieval over Moqui knowledge projected into OpenSearch
-3. Artifact understanding based on Moqui-native structures instead of hard-coded scripts
+Those responsibilities belong in other components such as `moqui-harness` and `moqui-math`.
 
-The long-term goal is not to create a parallel application runtime, but to let an agent understand and operate Moqui through Moqui itself.
+## Current Entry Point
 
-## Current Status
+The generic JSON-RPC entry service is:
 
-Current repository status:
+- `org.moqui.mcp.McpServices.mcp#Handle`
 
-- usable development component
-- MCP servlet and tool services integrated
-- LibreChat integration available
-- graph-based artifact knowledge foundation in place
-- OpenSearch-backed retrieval in place
-- still being refined for richer prompt decomposition and broader business coverage
+It dispatches these MCP methods:
 
-This repository should be considered a development repository, not a final production release.
+- `server/discover`
+- `tools/list`
+- `tools/call`
+- `resources/list`
+- `resources/get`
+- `prompts/list`
+- `prompts/get`
+- `subscriptions/listen`
 
-## Design Principles
+## Tool Model
 
-- Moqui remains the authoritative runtime
-- the database remains authoritative for business state
-- OpenSearch indexes derived knowledge, not source-of-truth business data
-- knowledge projection should move from custom scripts toward declarative Moqui `DataDocument` / `DataFeed` patterns
-- artifact topology should be modeled with `Graph`, `GraphVertex`, and `GraphEdge`
-- mesh/state-space modeling is intentionally deferred for now
+The built-in tools are:
 
-## Main Functional Areas
+- `moqui_search_data_documents`
+- `moqui_call_service`
+- `moqui_make_notification`
 
-- MCP endpoint and transport
-- runtime context and session context management
-- guarded execution and audit logging
-- agent prompt search and document retrieval
-- artifact graph extraction and graph seed loading
-- OpenSearch indexing and retrieval evaluation
+Additional tools may be exposed through standard Moqui `ServiceRegister` rows with:
 
-## Repository Layout
+- `serviceTypeEnumId = McpToolProvider`
 
-- [component.xml](component.xml): component descriptor
-- [MoquiConf.xml](MoquiConf.xml): component configuration
-- [entity](entity): component entities
-- [service](service): MCP, agent, runtime, and retrieval services
-- [screen](screen): Moqui app and LibreChat screens
-- [src](src): Groovy and Java implementation classes
-- [data](data): seed data, graph metadata, runtime metadata
-- [tools](tools): validation, indexing, OpenSearch, and support scripts
-- [docs](docs): architecture notes, plans, and working documentation
+## Prompt Model
 
-## Important Documents
+Prompts are read from wiki pages in wiki space:
 
-- [docs/moqui-mcp-architecture-summary.md](docs/moqui-mcp-architecture-summary.md)
-- [docs/ArtifactKnowledgeImplementationPlan.md](docs/ArtifactKnowledgeImplementationPlan.md)
-- [docs/ArtifactKnowledgeSourceInventory.md](docs/ArtifactKnowledgeSourceInventory.md)
-- [docs/graph-vs-mesh-decision.md](docs/graph-vs-mesh-decision.md)
-- [docs/librechat-e2e-test-plan.md](docs/librechat-e2e-test-plan.md)
+- `MCP_PROMPTS`
 
-## Build
+## Notification Model
 
-Build the component from the Moqui framework root:
+Subscriptions are stored in:
 
-```bash
-./gradlew :runtime:component:moqui-mcp:jar
-```
+- `moqui.mcp.McpSubscription`
 
-Some development tasks also exist in [build.gradle](build.gradle) for indexing, evaluation, and validation workflows.
+The runtime notification source is the Moqui standard `NotificationMessage` mechanism.
 
-## Deployment Notes
+## Architectural Direction
 
-The `moqui-mcp` component contains the Moqui-side integration:
+The component follows MCP 2026-07-28 and maps core primitives as follows:
 
-- MCP servlet and tool services
-- Moqui screens for Agent Chat / LibreChat
-- Moqui reverse proxy configuration for `/librechat/*`
-- agent retrieval, execution, and graph knowledge logic
-
-Docker deployment assets for the AI stack are intentionally maintained outside this component in the `moqui-deploy` repository, under the `ai/` profile. That profile is the current home for:
-
-- LibreChat Docker Compose
-- LibreChat MCP client configuration
-- dedicated OpenSearch and OpenSearch Dashboards Docker files
-- plugin bootstrap scripts and related local deploy assets
-
-This keeps `moqui-mcp` focused on component logic while `moqui-deploy` owns containerized deployment concerns.
-
-## Runtime Configuration Notes
-
-Some settings belong to the runtime environment instead of the component itself. In particular, local OpenSearch connection properties such as:
-
-- `elasticsearch_url`
-- `elasticsearch_user`
-- `elasticsearch_password`
-
-should normally be configured in runtime environment files such as `runtime/conf/MoquiDevConf.xml`, environment variables, or deployment-specific configuration, not hard-coded as component defaults in `MoquiConf.xml`.
-
-## OpenSearch Usage Notes
-
-`moqui-mcp` can work with different OpenSearch setups depending on the environment:
-
-- a local runtime node started directly from the Moqui environment
-- a dedicated containerized OpenSearch stack from `moqui-deploy/ai`
-- another externally managed OpenSearch service
-
-For local development, both of these patterns are acceptable:
-
-- direct local runtime endpoint such as `http://127.0.0.1:9202`
-- containerized endpoint exposed by the AI deploy profile
-
-The important rule is that the OpenSearch endpoint, credentials, and security mode belong to deployment configuration, not to the component source itself.
-
-If you switch between local runtime OpenSearch and the containerized AI profile, update only the runtime/deploy configuration that provides:
-
-- `elasticsearch_url`
-- `elasticsearch_user`
-- `elasticsearch_password`
-
-The `moqui-mcp` source code and component defaults should remain unchanged.
-
-## Development Notes
-
-- this repository is intentionally kept aligned with the runtime copy used during local Moqui development
-- generated output, build artifacts, and caches should stay out of version control
-- if a behavior can be modeled with standard Moqui metadata, prefer that over adding new hard-coded extraction logic
-
-## Near-Term Roadmap
-
-- continue shifting artifact knowledge from custom scripts toward declarative projections
-- improve prompt decomposition into entity, operation, and parameter intent
-- broaden coverage of common Moqui aggregate patterns
-- harden end-to-end testing across LibreChat, MCP, retrieval, and guarded execution
-
-## License
-
-See [LICENSE.md](LICENSE.md).
+- tools -> service execution and lookup/search services
+- resources -> entity/data/document resources
+- prompts -> wiki-backed templates
+- notifications -> Moqui notification bridge

@@ -1,147 +1,166 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- This software is in the public domain under CC0 1.0 Universal plus a 
-     Grant of Patent License.
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
 
-     To the extent possible under law, the author(s) have dedicated all
-     copyright and related and neighboring rights to this software to the
-     public domain worldwide. This software is distributed without any warranty.
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
 
-     You should have received a copy of the CC0 Public Domain Dedication
-     along with this software (see the LICENSE.md file). If not, see
-     <https://creativecommons.org/publicdomain/zero/1.0/>. -->
-
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<https://creativecommons.org/publicdomain/zero/1.0/>.
+-->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
           xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <!-- MCP Services using Moqui's built-in JSON-RPC support -->
-
-    <service verb="mcp" noun="Initialize" authenticate="true" allow-remote="true" transaction-timeout="30">
-        <description>Handle MCP initialize request using Moqui authentication</description>
+    <service verb="mcp" noun="Handle" authenticate="true" allow-remote="true" transaction-timeout="300">
+        <description>Generic MCP entrypoint for JSON-RPC requests. Dispatches core MCP protocol methods to Moqui services.</description>
         <in-parameters>
-            <parameter name="sessionId" required="false"/>
-            <parameter name="protocolVersion" required="true"/>
-            <parameter name="capabilities" type="Map"/>
-            <parameter name="clientInfo" type="Map"/>
+            <parameter name="method" required="true"/>
+            <parameter name="params" type="Map"/>
         </in-parameters>
         <out-parameters>
             <parameter name="result" type="Map"/>
         </out-parameters>
         <actions>
             <script><![CDATA[
-                import org.moqui.context.ExecutionContext
-                import org.moqui.impl.context.UserFacadeImpl.UserInfo
-                
-                ExecutionContext ec = context.ec
-                
-                // Permissions are handled by Moqui's artifact authorization system
-                // Users must be in appropriate MCP_* groups with access to the MCP artifact groups
-                
-                ec.logger.info("MCP Initialize for session ${sessionId}, user ${ec.user.userId}")
-                
-                // Validate protocol version - support common MCP versions with version negotiation
-                List<String> supportedVersions = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07", "2023-06-05"]
-                if (!supportedVersions.contains(protocolVersion)) {
-                    throw new Exception("Unsupported protocol version: ${protocolVersion}. Supported versions: ${supportedVersions.join(', ')}")
-                }
-
-                // Get current user context (if authenticated)
-                String userId = ec.user.userId
-                String userAccountId = userId ? userId : null
-
-                // Try to load root instructions from wiki
-                String instructions = null
-                try {
-                    EntityValue wikiPage = ec.entity.find("moqui.resource.wiki.WikiPage")
-                        .condition("wikiSpaceId", "MCP_AGENT_DOCS")
-                        .condition("pagePath", "root")
-                        .useCache(true)
-                        .one()
-
-                    if (wikiPage) {
-                        EntityValue wikiSpace = ec.entity.find("moqui.resource.wiki.WikiSpace")
-                            .condition("wikiSpaceId", wikiPage.wikiSpaceId)
-                            .one()
-
-                        if (wikiSpace) {
-                            String pageLocation = wikiSpace.rootPageLocation
-                            if (!pageLocation.endsWith('/')) pageLocation += '/'
-                            pageLocation += wikiPage.pagePath + '.md'
-
-                            String pageRef = ec.resource.getLocationReference(pageLocation)
-                            String wikiText = pageRef?.getText()
-                            if (wikiText) {
-                                instructions = wikiText
-                                ec.logger.info("MCP Initialize: Loaded root instructions from wiki")
-                            }
-                        }
-                    }
-                } catch (Exception e) {
-                    ec.logger.debug("Could not load root instructions from wiki: ${e.message}")
-                }
-
-                // Fallback to hardcoded instructions if wiki not available
-                if (!instructions) {
-                    instructions = "This server provides access to Moqui ERP through MCP. For create, update, assign, close, confirm, submit, delete, or other state-changing user requests, do not answer from general knowledge and do not only describe what you would do. You must call a Moqui tool. On the algebraic runtime path, first use moqui_plan_prompt_as_morphism. When needed, inspect candidates with moqui_search_morphisms and moqui_get_morphism_signature, derive transitive effects with moqui_derive_effective_service_effects, and inspect object schemas with moqui_search_objects and moqui_get_object_schema. For natural-language user intents that require registered Moqui skills, search authorized AgentSkills with moqui_search_agent_skills and load the selected skill with moqui_get_agent_skill. Prefer skill-first planning and algebraic morphism planning over legacy prompt-document search. Use moqui_resolve_agent_skill when you want a single best skill candidate. Treat moqui_search_agent_prompts → moqui_get_agent_document → moqui_execute_agent_prompt as a legacy fallback path only, for already-known prompt documents or temporary compatibility while the algebraic catalog is still being completed. If you execute a root create document directly for a composite request, include queryText so Moqui can decompose the aggregate. Use moqui_get_runtime_context and moqui_get_session_context to ground follow-up prompts. Do not bypass Moqui artifact authorization. Use moqui_check_artifact_access to verify access before mutating operations."
-                }
-                
-                // Build server capabilities - don't fetch actual tools/resources during init
-                // Tools and resources will be discovered via separate list requests per MCP spec
-                Map<String, Object> serverCapabilities = [
-                    tools: [listChanged: true],
-                    resources: [subscribe: true, listChanged: true],
-                    logging: [:]
+                Map<String, String> methodMap = [
+                    'server/discover'      : 'org.moqui.mcp.McpServices.server#Discover',
+                    'tools/list'           : 'org.moqui.mcp.McpServices.list#Tools',
+                    'tools/call'           : 'org.moqui.mcp.McpServices.call#Tool',
+                    'resources/list'       : 'org.moqui.mcp.McpServices.list#Resources',
+                    'resources/get'        : 'org.moqui.mcp.McpServices.get#Resource',
+                    'prompts/list'         : 'org.moqui.mcp.McpServices.list#Prompts',
+                    'prompts/get'          : 'org.moqui.mcp.McpServices.get#Prompt',
+                    'subscriptions/listen' : 'org.moqui.mcp.McpServices.subscriptions#Listen'
                 ]
-                
-                // Build server info with useful metadata
-                String moquiVersion = ec.factory.moquiVersion ?: "Unknown"
-                String runtimePath = ec.factory.runtimePath ?: "Unknown"
-                
-                Set<String> userGroupIdSet = (ec.user.userGroupIdSet ?: []) as Set
-                boolean isPrivileged = userGroupIdSet.contains('ADMIN') || userGroupIdSet.contains('MCP_DEBUG')
-
-                Map<String, Object> serverInfo = [
-                    name: "Moqui MCP Server",
-                    version: "2.0.2",
-                    moquiVersion: moquiVersion,
-                    currentUser: ec.user?.username,
-                    currentUserId: ec.user?.userId
-                ]
-                if (isPrivileged) {
-                    serverInfo.hostname = System.getenv("HOSTNAME") ?: System.getProperty("hostname", "Unknown")
-                    serverInfo.javaVersion = System.getProperty("java.version") ?: "Unknown"
-                    serverInfo.javaVendor = System.getProperty("java.vendor") ?: "Unknown"
-                    serverInfo.runtimePath = runtimePath
-                    try {
-                        serverInfo.serverStartTime = java.lang.management.ManagementFactory.getRuntimeMXBean().getStartTime()
-                    } catch (Exception ignored) {}
+                String serviceName = methodMap[method]
+                if (!serviceName) {
+                    ec.message.addError("Unsupported MCP method: ${method}")
+                    return
                 }
-
-                Map runtimeConfig = ec.service.sync().name('org.moqui.harness.AgentFacadeServices.check#RuntimeConfiguration').parameters([
-                    checkIndexes: false
-                ]).call()
-                
-                result = [
-                    protocolVersion: protocolVersion,
-                    capabilities: serverCapabilities,
-                    serverInfo: serverInfo,
-                    sessionId: sessionId,
-                    instructions: instructions,
-                    runtimeConfiguration: [
-                        status: runtimeConfig.status,
-                        warnings: runtimeConfig.warnings,
-                        details: runtimeConfig.details
-                    ]
-                ]
-                
-                ec.logger.info("MCP Initialize for user ${userId} (session ${sessionId}): capabilities negotiated")
+                Map callParams = (params instanceof Map) ? new LinkedHashMap(params) : [:]
+                Map svcRes = ec.service.sync().name(serviceName).parameters(callParams).call()
+                if (ec.message.hasError()) {
+                    String err = ec.message.errorsString
+                    ec.message.clearErrors()
+                    throw new IllegalArgumentException(err)
+                }
+                result = svcRes?.result ?: svcRes
             ]]></script>
         </actions>
     </service>
 
-    <service verb="mcp" noun="ToolsCall" authenticate="true" allow-remote="true" transaction-timeout="300">
-        <description>Handle MCP tools/call — dispatches to agent-oriented MCP tools</description>
+    <service verb="server" noun="Discover" authenticate="true" allow-remote="true">
+        <description>Return MCP discovery metadata for the Moqui MCP server.</description>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                result = [
+                    resultType: 'complete',
+                    supportedVersions: ['2026-07-28'],
+                    capabilities: [
+                        tools: [listChanged: true],
+                        resources: [listChanged: true],
+                        prompts: [:]
+                    ],
+                    _meta: [
+                        'io.modelcontextprotocol/serverInfo': [
+                            name: 'Moqui MCP Server',
+                            version: '3.0.0'
+                        ]
+                    ],
+                    ttlMs: 3600000,
+                    cacheScope: 'private'
+                ]
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="list" noun="Tools" authenticate="true" allow-remote="true">
+        <description>List MCP tools exposed by built-in Moqui services and registered provider services.</description>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                import groovy.json.JsonSlurper
+
+                List<Map> toolList = [
+                    [
+                        name: 'moqui_search_data_documents',
+                        title: 'Search Data Documents',
+                        description: 'Run text search against Moqui DataDocument indexes in OpenSearch. Use this for all business lookups before calling mutating services.',
+                        inputSchema: [
+                            type: 'object',
+                            properties: [
+                                indexName: [type: 'string', description: 'OpenSearch index name'],
+                                documentType: [type: 'string', description: 'Optional DataDocument identifier'],
+                                queryString: [type: 'string', description: 'Lucene/Elastic query string'],
+                                pageIndex: [type: 'integer'],
+                                pageSize: [type: 'integer']
+                            ],
+                            required: ['indexName', 'queryString']
+                        ]
+                    ],
+                    [
+                        name: 'moqui_call_service',
+                        title: 'Call Moqui Service',
+                        description: 'Invoke an existing Moqui service by full service name with explicit parameters. Use only after required identifiers and enumerations have been resolved.',
+                        inputSchema: [
+                            type: 'object',
+                            properties: [
+                                serviceName: [type: 'string', description: 'Full Moqui service name'],
+                                parameters: [type: 'object', description: 'Input parameter map']
+                            ],
+                            required: ['serviceName']
+                        ]
+                    ],
+                    [
+                        name: 'moqui_make_notification',
+                        title: 'Create Notification Message',
+                        description: 'Create a Moqui notification message using the standard NotificationMessage mechanism.',
+                        inputSchema: [
+                            type: 'object',
+                            properties: [
+                                topic: [type: 'string'],
+                                subTopic: [type: 'string'],
+                                userId: [type: 'string'],
+                                userGroupId: [type: 'string'],
+                                type: [type: 'string'],
+                                title: [type: 'string'],
+                                message: [type: 'object']
+                            ],
+                            required: ['topic']
+                        ]
+                    ]
+                ]
+
+                def jsonSlurper = new JsonSlurper()
+                ec.entity.find('moqui.service.ServiceRegister').condition('serviceTypeEnumId', 'McpToolProvider').useCache(true).list()?.each { providerReg ->
+                    try {
+                        Map cfg = [:]
+                        if (providerReg.configParameters) cfg = (Map) jsonSlurper.parseText(providerReg.configParameters)
+                        Map providerRes = ec.service.sync().name(providerReg.serviceName as String).call()
+                        List<Map> providerTools = (providerRes?.toolList ?: providerRes?.tools ?: []) as List<Map>
+                        toolList.addAll(providerTools)
+                    } catch (Throwable t) {
+                        ec.logger.warn("Unable to load MCP tools from provider ${providerReg.serviceRegisterId}: ${t.message}")
+                    }
+                }
+
+                result = [tools: toolList]
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="call" noun="Tool" authenticate="true" allow-remote="true" transaction-timeout="300">
+        <description>Call a built-in MCP tool or dispatch to a registered MCP tool provider.</description>
         <in-parameters>
-            <parameter name="sessionId" required="false"/>
             <parameter name="name" required="true"/>
             <parameter name="arguments" type="Map"/>
         </in-parameters>
@@ -153,264 +172,286 @@
                 import groovy.json.JsonBuilder
                 import groovy.json.JsonSlurper
                 ec.message.clearAll()
-                Set<String> userGroupIdSet = (ec.user.userGroupIdSet ?: []) as Set
-                boolean isDebugUser = userGroupIdSet.contains('MCP_DEBUG') || userGroupIdSet.contains('ADMIN')
-                Map<String, String> toolMappings = [
-                    "moqui_search_artifacts" : "org.moqui.harness.AgentFacadeServices.search#Artifacts",
-                    "moqui_get_artifact" : "org.moqui.harness.AgentFacadeServices.get#Artifact",
-                    "moqui_search_all"   : "org.moqui.harness.AgentFacadeServices.search#AllDocuments",
-                    "moqui_call_service_guarded": "org.moqui.harness.AgentFacadeServices.call#ServiceGuarded",
-                    "moqui_discover_artifacts"   : "org.moqui.harness.AgentFacadeServices.discover#AndIndexArtifacts",
-                    "moqui_discovery_status"     : "org.moqui.harness.AgentFacadeServices.get#DiscoveryStatus"
-                ]
-                Map<String, Map> providerToolMappings = [:]
+
+                Map args = (arguments instanceof Map) ? arguments : [:]
+
+                if (name == 'moqui_search_data_documents') {
+                    Map svcRes = ec.service.sync().name('mantle.GeneralServices.search#General').parameters(args).call()
+                    if (ec.message.hasError()) {
+                        String errText = ec.message.errorsString
+                        ec.message.clearErrors()
+                        result = [content: [[type: 'text', text: "Error: ${errText}"]], isError: true]
+                        return
+                    }
+                    Map payload = [
+                        documentList: svcRes.documentList ?: [],
+                        documentListCount: svcRes.documentListCount ?: 0,
+                        pageIndex: svcRes.documentListPageIndex,
+                        pageSize: svcRes.documentListPageSize
+                    ]
+                    result = [content: [[type: 'text', text: new JsonBuilder(payload).toString()]], isError: false]
+                    return
+                }
+
+                if (name == 'moqui_call_service') {
+                    String serviceName = args.serviceName as String
+                    Map serviceParameters = (args.parameters instanceof Map) ? (Map) args.parameters : [:]
+                    if (!serviceName) {
+                        result = [content: [[type: 'text', text: 'Error: serviceName is required']]], isError: true]
+                        return
+                    }
+                    Map svcRes = ec.service.sync().name(serviceName).parameters(serviceParameters).call()
+                    if (ec.message.hasError()) {
+                        String errText = ec.message.errorsString
+                        ec.message.clearErrors()
+                        result = [content: [[type: 'text', text: "Error: ${errText}"]], isError: true]
+                        return
+                    }
+                    result = [content: [[type: 'text', text: new JsonBuilder(svcRes).toString()]], isError: false]
+                    return
+                }
+
+                if (name == 'moqui_make_notification') {
+                    def nm = ec.makeNotificationMessage().topic(args.topic as String)
+                    if (args.subTopic) nm.subTopic(args.subTopic as String)
+                    if (args.userId) nm.userId(args.userId as String)
+                    if (args.userGroupId) nm.userGroupId(args.userGroupId as String)
+                    if (args.type) nm.type(args.type as String)
+                    if (args.title) nm.title(args.title as String)
+                    if (args.message instanceof Map) nm.message((Map) args.message)
+                    nm.send()
+                    result = [content: [[type: 'text', text: new JsonBuilder([status: 'sent', topic: args.topic]).toString()]], isError: false]
+                    return
+                }
+
                 def jsonSlurper = new JsonSlurper()
+                Map<String, Map> providerToolMappings = [:]
                 ec.entity.find('moqui.service.ServiceRegister').condition('serviceTypeEnumId', 'McpToolProvider').useCache(true).list()?.each { providerReg ->
                     try {
                         Map cfg = [:]
                         if (providerReg.configParameters) cfg = (Map) jsonSlurper.parseText(providerReg.configParameters)
                         String listServiceName = providerReg.serviceName
                         String callServiceName = cfg.callServiceName ?: providerReg.serviceName
-                        Map providerRes = ec.service.sync().name(listServiceName).parameters(sessionId ? [sessionId: sessionId] : [:]).call()
+                        Map providerRes = ec.service.sync().name(listServiceName).call()
                         List providerTools = (providerRes?.toolList ?: providerRes?.tools ?: []) as List
                         providerTools.each { Map toolDef ->
-                            if (toolDef?.name) providerToolMappings[toolDef.name as String] = [callServiceName: callServiceName, providerId: providerReg.serviceRegisterId]
+                            if (toolDef?.name) providerToolMappings[toolDef.name as String] = [callServiceName: callServiceName]
                         }
                     } catch (Throwable t) {
                         ec.logger.warn("Unable to load MCP tool provider ${providerReg.serviceRegisterId}: ${t.message}")
                     }
                 }
-                Set debugToolNames = ['moqui_search_artifacts', 'moqui_get_artifact', 'moqui_search_all', 'moqui_call_service_guarded',
-                                      'moqui_discover_artifacts', 'moqui_discovery_status', 'moqui_refresh_agent_skills', 'moqui_index_agent_skills'] as Set
-                try {
-                    String svc = toolMappings[name]
-                    Map providerEntry = providerToolMappings[name]
-                    if (debugToolNames.contains(name) && !isDebugUser) {
-                        result = [content: [[type: "text", text: "Tool not available for current user: ${name}"]], isError: true]
-                        return
-                    }
-                    if (!svc && providerEntry?.callServiceName) {
-                        Map<String, Object> providerCallParameters = [toolName: name]
-                        if (arguments instanceof Map) providerCallParameters.arguments = arguments
-                        if (sessionId) providerCallParameters.sessionId = sessionId
-                        Map providerResult = ec.service.sync().name(providerEntry.callServiceName as String).requireNewTransaction(true).parameters(providerCallParameters).call()
-                        if (ec.message.hasError()) {
-                            String errText = ec.message.errorsString
-                            ec.message.clearErrors()
-                            result = [content: [[type: "text", text: "Error: ${errText}"]], isError: true]
-                            return
-                        }
-                        Map<String, Object> actualProviderResult = providerResult?.result ?: providerResult
-                        result = (actualProviderResult instanceof Map && actualProviderResult.content instanceof List) ? actualProviderResult :
-                            [content: [[type: "text", text: new JsonBuilder(actualProviderResult).toString()]], isError: false]
-                        return
-                    }
-                    if (!svc) throw new Exception("Unknown tool: ${name}. Available: ${(toolMappings.keySet() + providerToolMappings.keySet()).sort().join(', ')}")
-                    Map<String, Object> toolParameters = [:]
-                    if (arguments instanceof Map) toolParameters.putAll(arguments)
-                    if (sessionId && !toolParameters.sessionId) toolParameters.sessionId = sessionId
-                    if (name == 'moqui_call_service_guarded') {
-                        if (!toolParameters.toolName) toolParameters.toolName = name
-                        if (!toolParameters.containsKey('directToolCall')) toolParameters.directToolCall = true
-                    }
-                    Map<String, Object> res = ec.service.sync().name(svc).requireNewTransaction(true).parameters(toolParameters).call()
-                    if (ec.message.hasError()) {
-                        String errText = ec.message.errorsString
-                        ec.message.clearErrors()
-                        result = [content: [[type: "text", text: "Error: ${errText}"]], isError: true]
-                        return
-                    }
-                    Map<String, Object> actual = res?.result ?: res
-                    result = (actual instanceof Map && actual.content instanceof List) ? actual :
-                        [content: [[type: "text", text: new JsonBuilder(actual).toString()]], isError: false]
-                } catch (Exception e) {
-                    result = [content: [[type: "text", text: "Error: ${e.message}"]], isError: true]
-                    ec.logger.error("MCP tool error", e)
+
+                Map providerEntry = providerToolMappings[name]
+                if (!providerEntry?.callServiceName) {
+                    result = [content: [[type: 'text', text: "Error: Unknown MCP tool ${name}"]], isError: true]
+                    return
                 }
+
+                Map providerCallParameters = [toolName: name, arguments: args]
+                Map providerResult = ec.service.sync().name(providerEntry.callServiceName as String).parameters(providerCallParameters).call()
+                if (ec.message.hasError()) {
+                    String errText = ec.message.errorsString
+                    ec.message.clearErrors()
+                    result = [content: [[type: 'text', text: "Error: ${errText}"]], isError: true]
+                    return
+                }
+                Map actualProviderResult = providerResult?.result ?: providerResult
+                result = (actualProviderResult instanceof Map && actualProviderResult.content instanceof List) ? actualProviderResult :
+                        [content: [[type: 'text', text: new JsonBuilder(actualProviderResult).toString()]], isError: false]
             ]]></script>
         </actions>
     </service>
 
-    <service verb="mcp" noun="Ping" authenticate="true" allow-remote="true" transaction-timeout="30">
-        <description>Handle MCP ping request — returns server health and session info</description>
+    <service verb="list" noun="Resources" authenticate="true" allow-remote="true" transaction-timeout="120">
+        <description>List core Moqui MCP resources: entity schemas and data document definitions.</description>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                List<Map> resourceList = []
+                for (String entityName in (ec.entity.getAllEntityNames() ?: [])) {
+                    resourceList.add([
+                        uri: "entity://${entityName}",
+                        name: entityName,
+                        mimeType: 'application/json',
+                        description: "Moqui entity schema for ${entityName}"
+                    ])
+                }
+                ec.entity.find('moqui.entity.document.DataDocument').useCache(true).list()?.each { dd ->
+                    resourceList.add([
+                        uri: "datadocument://${dd.dataDocumentId}",
+                        name: dd.dataDocumentId,
+                        mimeType: 'application/json',
+                        description: dd.description ?: "Moqui DataDocument ${dd.dataDocumentId}"
+                    ])
+                }
+                result = [resources: resourceList]
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Resource" authenticate="true" allow-remote="true" transaction-timeout="120">
+        <description>Get a resource by URI. Supports entity schema resources, single record resources, and data document definitions.</description>
         <in-parameters>
-            <parameter name="sessionId" required="false"/>
+            <parameter name="uri" required="true"/>
         </in-parameters>
         <out-parameters>
             <parameter name="result" type="Map"/>
         </out-parameters>
         <actions>
             <script><![CDATA[
-                // Get current user information
-                String currentUser = ec.user.username
-                String currentUserId = ec.user.userId
+                import java.net.URI
+                import java.net.URLDecoder
+                import groovy.json.JsonBuilder
 
-                // Try to get visit information if sessionId is provided
-                Map<String, Object> visitInfo = null
-                if (sessionId) {
-                    try {
-                        Map<String, Object> visit = ec.entity.find("moqui.server.Visit")
-                            .condition("visitId", sessionId)
-                            .one()
-
-                        if (visit) {
-                            visitInfo = [
-                                visitId: visit.visitId,
-                                userId: visit.userId,
-                                fromDate: visit.fromDate,
-                                lastUpdatedStamp: visit.lastUpdatedStamp
-                            ]
-                        }
-                    } catch (Exception e) {
-                        ec.logger.warn("Error getting visit info for sessionId ${sessionId}: ${e.message}")
+                Map<String, String> queryMap = [:]
+                URI parsedUri = new URI(uri)
+                if (parsedUri.query) {
+                    parsedUri.query.split('&').each { String pair ->
+                        List<String> kv = pair.split('=', 2) as List<String>
+                        String key = URLDecoder.decode(kv[0], 'UTF-8')
+                        String value = kv.size() > 1 ? URLDecoder.decode(kv[1], 'UTF-8') : ''
+                        queryMap[key] = value
                     }
                 }
 
-                result = [
-                    timestamp: ec.user.getNowTimestamp(),
-                    status: "healthy",
-                    version: "2.0.2",
-                    sessionId: sessionId,
-                    currentUser: currentUser,
-                    currentUserId: currentUserId,
-                    visitInfo: visitInfo,
-                    architecture: "Visit-based sessions"
-                ]
-                Map<String, Object> runtimeConfig = ec.service.sync().name('org.moqui.harness.AgentFacadeServices.check#RuntimeConfiguration').parameters([
-                    checkIndexes: true
-                ]).call()
-                result.runtimeConfiguration = [
-                    status: runtimeConfig.status,
-                    errors: runtimeConfig.errors,
-                    warnings: runtimeConfig.warnings,
-                    details: runtimeConfig.details
-                ]
-                if (runtimeConfig.status == 'error') result.status = 'degraded'
-                else if (runtimeConfig.status == 'warn') result.status = 'healthy_with_warnings'
-            ]]></script>
-        </actions>
-    </service>
-
-    <service verb="list" noun="Tools" authenticate="true" allow-remote="true" transaction-timeout="60">
-        <description>Return the list of available MCP tools</description>
-        <in-parameters>
-            <parameter name="sessionId" required="false"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="result" type="Map"/>
-        </out-parameters>
-        <actions>
-            <script><![CDATA[
-                import groovy.json.JsonSlurper
-                Set<String> userGroupIdSet = (ec.user.userGroupIdSet ?: []) as Set
-                boolean isDebugUser = userGroupIdSet.contains('MCP_DEBUG') || userGroupIdSet.contains('ADMIN')
-
-                List<Map<String, Object>> runtimeTools = [
-                ]
-
-                List debugTools = [
-                    [
-                        name: "moqui_search_artifacts",
-                        title: "Search Artifacts",
-                        description: "Privileged artifact search across indexed services, entities, XSD schemas and docs in moqui_artifacts_v1. Use for direct artifact discovery when no suitable skill or agent document covers the use case.",
-                        inputSchema: [
-                            type: "object",
-                            properties: [
-                                queryText: [type: "string", description: "Natural language query (e.g. 'create invoice for customer')"],
-                                artifactTypeList: [type: "array", items: [type: "string"], description: "Filter by type: service, entity, screen, xsd, doc"],
-                                componentNameList: [type: "array", items: [type: "string"], description: "Filter by component name"],
-                                searchMode: [type: "string", description: "Search mode: bm25, knn, hybrid (default: system property)"],
-                                limit: [type: "integer", description: "Max results (default 20)"]
-                            ],
-                            required: ["queryText"]
-                        ]
-                    ],
-                    [
-                        name: "moqui_get_artifact",
-                        title: "Get Artifact",
-                        description: "Privileged artifact inspection by type and name. Returns full artifact document from moqui_artifacts_v1 including XSD schema definitions, service parameters, and entity fields.",
-                        inputSchema: [
-                            type: "object",
-                            properties: [
-                                artifactType: [type: "string", description: "Artifact type: service, entity, screen, xsd, doc"],
-                                artifactName: [type: "string", description: "Canonical artifact name from moqui_search_artifacts results"]
-                            ],
-                            required: ["artifactType", "artifactName"]
-                        ]
-                    ],
-                    [
-                        name: "moqui_search_all",
-                        title: "Search All Documents",
-                        description: "Unified search across both moqui_agent_prompts_v1 (agent documents and knowledge documents) and moqui_artifacts_v1 (raw artifacts). Use when you need a comprehensive view of what is available for a given query.",
-                        inputSchema: [
-                            type: "object",
-                            properties: [
-                                queryText: [type: "string", description: "Natural language query"],
-                                limit: [type: "integer", description: "Max results per index (default 5)"],
-                                searchMode: [type: "string", description: "Search mode: bm25, knn, hybrid"]
-                            ],
-                            required: ["queryText"]
-                        ]
-                    ],
-                    [
-                        name: "moqui_call_service_guarded",
-                        title: "Call Service Guarded",
-                        description: "Privileged direct service execution with Moqui authz checks and confirmation for high-risk operations.",
-                        inputSchema: [
-                            type: "object",
-                            properties: [
-                                serviceName: [type: "string", description: "Service name in verb#noun format (e.g. 'mantle.account.InvoiceServices.create#Invoice')"],
-                                parameters: [type: "object", description: "Service input parameters"],
-                                confirmed: [type: "boolean", description: "Explicit confirmation required for high-risk operations"]
-                            ],
-                            required: ["serviceName"]
-                        ]
-                    ],
-                    [
-                        name: "moqui_discover_artifacts",
-                        title: "Discover and Index Artifacts",
-                        description: "Privileged runtime auto-discovery: scans component directories (service, entity, screen, XSD), extracts artifact metadata, and bulk-indexes into moqui_artifacts_v1. Requires ADMIN or MCP_INDEX_ADMIN.",
-                        inputSchema: [
-                            type: "object",
-                            properties: [
-                                componentNameList: [type: "array", items: [type: "string"], description: "Component names to scan (omit for all)"],
-                                artifactTypeList: [type: "array", items: [type: "string"], description: "Artifact types: service, entity, screen, xsd"],
-                                forceReindex: [type: "boolean", description: "Delete and recreate the index before indexing"],
-                                generateEmbeddings: [type: "boolean", description: "Generate embeddings via configured provider"],
-                                batchSize: [type: "integer", description: "Indexing batch size (default 100)"]
-                            ]
-                        ]
-                    ],
-                    [
-                        name: "moqui_discovery_status",
-                        title: "Discovery Index Status",
-                        description: "Returns document counts by artifact type and index health for moqui_artifacts_v1.",
-                        inputSchema: [
-                            type: "object",
-                            properties: [
-                                indexName: [type: "string", description: "Index name (default: moqui_artifacts_v1)"]
-                            ]
-                        ]
+                if (parsedUri.scheme == 'entity') {
+                    String entityName = parsedUri.host ?: parsedUri.schemeSpecificPart?.replaceFirst('^//', '')
+                    def entityDef = ec.entity.getEntityDefinition(entityName)
+                    List<Map> fieldList = []
+                    for (String fieldName in entityDef.getAllFieldNames()) {
+                        fieldList.add([name: fieldName, pk: entityDef.getPkFieldNames().contains(fieldName)])
+                    }
+                    List<Map> relationshipList = []
+                    entityDef.getRelationshipsInfo(false)?.each { relInfo ->
+                        relationshipList.add([
+                            name: relInfo.relationshipName,
+                            type: relInfo.type,
+                            relatedEntityName: relInfo.relatedEntityName,
+                            shortAlias: relInfo.shortAlias,
+                            title: relInfo.title
+                        ])
+                    }
+                    Map payload = [
+                        entityName: entityName,
+                        pkFieldNames: entityDef.getPkFieldNames(),
+                        fields: fieldList,
+                        relationships: relationshipList
                     ]
-                ]
-
-                List toolList = []
-                toolList.addAll(runtimeTools)
-                if (isDebugUser) toolList.addAll(debugTools)
-                def jsonSlurper = new JsonSlurper()
-                ec.entity.find('moqui.service.ServiceRegister').condition('serviceTypeEnumId', 'McpToolProvider').useCache(true).list()?.each { providerReg ->
-                    try {
-                        Map cfg = [:]
-                        if (providerReg.configParameters) cfg = (Map) jsonSlurper.parseText(providerReg.configParameters)
-                        String listServiceName = providerReg.serviceName
-                        Map providerRes = ec.service.sync().name(listServiceName).parameters(sessionId ? [sessionId: sessionId] : [:]).call()
-                        List providerTools = (providerRes?.toolList ?: providerRes?.tools ?: []) as List
-                        if (providerTools) toolList.addAll(providerTools)
-                    } catch (Throwable t) {
-                        ec.logger.warn("Unable to list MCP tools from provider ${providerReg.serviceRegisterId}: ${t.message}")
-                    }
+                    result = [resource: [uri: uri, mimeType: 'application/json', text: new JsonBuilder(payload).toString()]]
+                    return
                 }
-                result = [tools: toolList]
+
+                if (parsedUri.scheme == 'record') {
+                    String entityName = parsedUri.host ?: parsedUri.schemeSpecificPart?.replaceFirst('^//', '')
+                    def find = ec.entity.find(entityName)
+                    queryMap.each { k, v -> find.condition(k, v) }
+                    Map record = find.one()
+                    result = [resource: [uri: uri, mimeType: 'application/json', text: new JsonBuilder(record ?: [:]).toString()]]
+                    return
+                }
+
+                if (parsedUri.scheme == 'datadocument') {
+                    String dataDocumentId = parsedUri.host ?: parsedUri.schemeSpecificPart?.replaceFirst('^//', '')
+                    Map dd = ec.entity.find('moqui.entity.document.DataDocument').condition('dataDocumentId', dataDocumentId).useCache(true).one()
+                    result = [resource: [uri: uri, mimeType: 'application/json', text: new JsonBuilder(dd ?: [:]).toString()]]
+                    return
+                }
+
+                ec.message.addError("Unsupported resource URI: ${uri}")
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="list" noun="Prompts" authenticate="true" allow-remote="true">
+        <description>List prompt templates stored as Wiki pages in the configured MCP wiki space.</description>
+        <in-parameters>
+            <parameter name="wikiSpaceId" default-value="MCP_PROMPTS"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <entity-find entity-name="moqui.resource.wiki.WikiPage" list="wikiPageList" cache="true">
+                <econdition field-name="wikiSpaceId"/>
+            </entity-find>
+            <script><![CDATA[
+                List<Map> promptList = []
+                for (Map wikiPage in (wikiPageList ?: [])) {
+                    promptList.add([
+                        name: wikiPage.pagePath,
+                        title: wikiPage.pagePath,
+                        description: "Wiki-backed MCP prompt ${wikiPage.pagePath}"
+                    ])
+                }
+                result = [prompts: promptList]
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Prompt" authenticate="true" allow-remote="true" transaction-timeout="120">
+        <description>Get a prompt template from a Wiki page.</description>
+        <in-parameters>
+            <parameter name="name" required="true"/>
+            <parameter name="wikiSpaceId" default-value="MCP_PROMPTS"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <service-call name="org.moqui.impl.WikiServices.get#PublishedWikiPageText"
+                    in-map="[wikiSpaceId: wikiSpaceId, pagePath: name]" out-map="wikiResult"/>
+            <script><![CDATA[
+                String promptText = wikiResult?.pageText ?: wikiResult?.text ?: ''
+                result = [
+                    name: name,
+                    messages: [[role: 'system', content: [type: 'text', text: promptText]]]
+                ]
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="subscriptions" noun="Listen" authenticate="true" allow-remote="true">
+        <description>Register notification interest for a client session. The transport-specific bridge can use these rows to forward NotificationMessage events.</description>
+        <in-parameters>
+            <parameter name="sessionId" required="true"/>
+            <parameter name="subscriptionType" required="true"/>
+            <parameter name="topicPattern"/>
+            <parameter name="protocolVersion" default-value="2026-07-28"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                Map existing = ec.entity.find('moqui.mcp.McpSubscription')
+                        .condition('userId', ec.user.userId)
+                        .condition('sessionId', sessionId)
+                        .condition('subscriptionType', subscriptionType)
+                        .condition('topicPattern', topicPattern)
+                        .one()
+                if (existing) {
+                    existing.lastUpdatedDate = ec.user.nowTimestamp
+                    existing.statusId = 'McpSubActive'
+                    existing.update()
+                    result = [subscriptionId: existing.mcpSubscriptionId, status: 'updated']
+                } else {
+                    Map createMap = [
+                            mcpSubscriptionId: ec.entity.sequencedIdPrimary('moqui.mcp.McpSubscription', null, null),
+                            userId: ec.user.userId,
+                            sessionId: sessionId,
+                            subscriptionType: subscriptionType,
+                            topicPattern: topicPattern,
+                            protocolVersion: protocolVersion,
+                            statusId: 'McpSubActive',
+                            createdDate: ec.user.nowTimestamp,
+                            lastUpdatedDate: ec.user.nowTimestamp
+                    ]
+                    ec.entity.makeValue('moqui.mcp.McpSubscription').setAll(createMap).create()
+                    result = [subscriptionId: createMap.mcpSubscriptionId, status: 'created']
+                }
             ]]></script>
         </actions>
     </service>

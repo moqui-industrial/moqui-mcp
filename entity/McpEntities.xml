@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<https://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+
+    <entity entity-name="McpSubscription" package="moqui.mcp" use="transactional" cache="never">
+        <field name="mcpSubscriptionId" type="id" is-pk="true"/>
+        <field name="userId" type="id"/>
+        <field name="sessionId" type="text-medium"/>
+        <field name="subscriptionType" type="text-short"/>
+        <field name="topicPattern" type="text-medium"/>
+        <field name="protocolVersion" type="text-short"/>
+        <field name="statusId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="lastUpdatedDate" type="date-time"/>
+        <field name="lastDeliveredDate" type="date-time"/>
+
+        <index name="MCPSUB_USER_SESSION">
+            <index-field name="userId"/>
+            <index-field name="sessionId"/>
+        </index>
+        <index name="MCPSUB_STATUS">
+            <index-field name="statusId"/>
+        </index>
+
+        <relationship type="one-nofk" related="moqui.security.UserAccount" short-alias="user">
+            <key-map field-name="userId"/>
+        </relationship>
+        <relationship type="one-nofk" related="moqui.basic.StatusItem" short-alias="status">
+            <key-map field-name="statusId"/>
+        </relationship>
+    </entity>
+</entities>
