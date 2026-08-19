@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- No copyright or license for configuration file, details here are not considered a creative work. -->
+<moqui-conf xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/moqui-conf-3.xsd">
+
+    <webapp-list>
+        <webapp name="webroot">
+            <filter name="McpAuthFilter" class="org.moqui.impl.webapp.MoquiAuthFilter" async-supported="true">
+                <url-pattern>/mcp/*</url-pattern>
+            </filter>
+            <servlet name="McpServlet" class="org.moqui.mcp.McpServlet" load-on-startup="5" async-supported="true">
+                <url-pattern>/mcp/*</url-pattern>
+            </servlet>
+        </webapp>
+    </webapp-list>
+</moqui-conf>
