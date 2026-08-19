@@ -13,9 +13,6 @@ along with this software (see the LICENSE.md file). If not, see
 <https://creativecommons.org/publicdomain/zero/1.0/>.
 -->
 <entity-facade-xml type="seed">
-    <moqui.basic.StatusType statusTypeId="McpSubscriptionStatus" description="MCP Subscription Status"/>
-    <moqui.basic.StatusItem statusId="McpSubActive" statusTypeId="McpSubscriptionStatus" description="Active"/>
-    <moqui.basic.StatusItem statusId="McpSubClosed" statusTypeId="McpSubscriptionStatus" description="Closed"/>
     <moqui.resource.wiki.WikiSpace wikiSpaceId="MCP_PROMPTS"
             description="Wiki space for MCP prompt definitions"
             rootPageLocation="dbresource://WikiSpace/mcp-prompts.md"

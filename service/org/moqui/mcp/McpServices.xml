@@ -49,7 +49,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="call" noun="Tool" authenticate="true" allow-remote="true" transaction-timeout="300">
-        <description>Call a built-in MCP tool or dispatch to a registered MCP tool provider.</description>
+        <description>Call a built-in MCP tool.</description>
         <in-parameters>
             <parameter name="name" required="true"/>
             <parameter name="arguments" type="Map"/>
@@ -101,25 +101,6 @@ along with this software (see the LICENSE.md file). If not, see
         <actions><script><![CDATA[
             import org.moqui.mcp.McpClient
             result = new McpClient(ec).getPrompt(name as String, arguments instanceof Map ? (Map) arguments : [:])
-        ]]></script></actions>
-    </service>
-
-    <service verb="subscriptions" noun="Listen" authenticate="true" allow-remote="true">
-        <description>Register or refresh an MCP subscription record inside Moqui.</description>
-        <in-parameters>
-            <parameter name="mcpSubscriptionId"/>
-            <parameter name="userId"/>
-            <parameter name="sessionId"/>
-            <parameter name="subscriptionType"/>
-            <parameter name="topicPattern"/>
-            <parameter name="uriPattern"/>
-            <parameter name="protocolVersion"/>
-            <parameter name="statusId"/>
-        </in-parameters>
-        <out-parameters><parameter name="result" type="Map"/></out-parameters>
-        <actions><script><![CDATA[
-            import org.moqui.mcp.McpClient
-            result = new McpClient(ec).listenSubscription(context)
         ]]></script></actions>
     </service>
 </services>

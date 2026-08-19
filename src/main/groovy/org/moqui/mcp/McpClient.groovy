@@ -5,6 +5,8 @@ import org.moqui.context.ExecutionContext
 
 class McpClient {
     protected final ExecutionContext ec
+    static final String PROTOCOL_VERSION = '2026-07-28'
+    static final long CACHE_TTL_MS = 300000L
 
     McpClient(ExecutionContext ec) {
         this.ec = ec
@@ -17,25 +19,24 @@ class McpClient {
                 'tools/call'           : { Map p -> callTool((String) p.name, p.arguments instanceof Map ? (Map) p.arguments : [:]) },
                 'resources/list'       : { Map p -> listResources() },
                 'resources/read'       : { Map p -> readResource((String) p.uri) },
-                'resources/get'        : { Map p -> readResource((String) p.uri) },
                 'prompts/list'         : { Map p -> listPrompts() },
-                'prompts/get'          : { Map p -> getPrompt((String) p.name, p.arguments instanceof Map ? (Map) p.arguments : [:]) },
-                'subscriptions/listen' : { Map p -> listenSubscription(p) }
+                'prompts/get'          : { Map p -> getPrompt((String) p.name, p.arguments instanceof Map ? (Map) p.arguments : [:]) }
         ]
         Closure<Map> handler = handlers[method]
-        if (handler == null) throw new IllegalArgumentException("Unsupported MCP method: ${method}")
+        if (handler == null) throw new IllegalStateException("Unsupported MCP method: ${method}")
         return handler.call(params ?: [:])
     }
 
     Map serverDiscover() {
         return [
                 resultType       : 'complete',
-                supportedVersions: ['2026-07-28'],
+                supportedVersions: [PROTOCOL_VERSION],
                 capabilities     : [
-                        tools    : [listChanged: true],
-                        resources: [listChanged: true],
-                        prompts  : [:]
+                        tools    : [listChanged: false],
+                        resources: [listChanged: false],
+                        prompts  : [listChanged: false]
                 ],
+                instructions     : 'Use tools for mutations, resources for schema and document inspection, and prompts for wiki-backed Moqui guidance. Every request is stateless and must include protocol metadata.',
                 _meta            : [
                         'io.modelcontextprotocol/serverInfo': [
                                 name   : 'Moqui MCP Server',
@@ -43,7 +44,7 @@ class McpClient {
                         ]
                 ],
                 ttlMs            : 3600000,
-                cacheScope       : 'private'
+                cacheScope       : 'public'
         ]
     }
 
@@ -62,7 +63,8 @@ class McpClient {
                                         pageIndex   : [type: 'integer'],
                                         pageSize    : [type: 'integer']
                                 ],
-                                required  : ['indexName', 'queryString']
+                                required  : ['indexName', 'queryString'],
+                                additionalProperties: false
                         ]
                 ],
                 [
@@ -75,7 +77,8 @@ class McpClient {
                                         serviceName: [type: 'string', description: 'Full Moqui service name'],
                                         parameters : [type: 'object', description: 'Input parameter map']
                                 ],
-                                required  : ['serviceName']
+                                required  : ['serviceName'],
+                                additionalProperties: false
                         ]
                 ],
                 [
@@ -93,12 +96,18 @@ class McpClient {
                                         title      : [type: 'string'],
                                         message    : [type: 'object']
                                 ],
-                                required  : ['topic']
+                                required  : ['topic'],
+                                additionalProperties: false
                         ]
                 ]
         ]
 
-        return [tools: toolList]
+        return [
+                resultType: 'complete',
+                tools     : toolList,
+                ttlMs     : CACHE_TTL_MS,
+                cacheScope: 'private'
+        ]
     }
 
     Map callTool(String name, Map arguments) {
@@ -118,7 +127,7 @@ class McpClient {
         if (name == 'moqui_call_service') {
             String serviceName = args.serviceName as String
             Map serviceParameters = (args.parameters instanceof Map) ? (Map) args.parameters : [:]
-            if (!serviceName) return toolError('serviceName is required')
+            if (!serviceName) throw new IllegalArgumentException('serviceName is required')
             Map svcRes = ec.service.sync().name(serviceName).parameters(serviceParameters).call()
             return wrapToolResult(svcRes, svcRes)
         }
@@ -132,9 +141,14 @@ class McpClient {
             if (args.title) nm.title(args.title as String)
             if (args.message instanceof Map) nm.message((Map) args.message)
             nm.send()
-            return [content: [[type: 'text', text: new JsonBuilder([status: 'sent', topic: args.topic]).toString()]], isError: false]
+            return [
+                    resultType       : 'complete',
+                    content          : [[type: 'text', text: new JsonBuilder([status: 'sent', topic: args.topic]).toString()]],
+                    structuredContent: [status: 'sent', topic: args.topic],
+                    isError          : false
+            ]
         }
-        return toolError("Unknown MCP tool ${name}")
+        throw new IllegalArgumentException("Unknown MCP tool ${name}")
     }
 
     Map listResources() {
@@ -144,8 +158,8 @@ class McpClient {
             resources.add([
                     uri        : "entity://${entityName}",
                     name       : entityName,
-                    description: "Moqui entity schema for ${entityName}",
-                    mimeType   : 'application/json'
+                            description: "Moqui entity schema for ${entityName}",
+                            mimeType   : 'application/json'
             ])
         }
 
@@ -154,11 +168,16 @@ class McpClient {
                     uri        : "datadocument://${dd.dataDocumentId}",
                     name       : dd.dataDocumentId,
                     description: dd.documentName ?: dd.documentTitle ?: "DataDocument ${dd.dataDocumentId}",
-                    mimeType   : 'application/json'
+                            mimeType   : 'application/json'
             ])
         }
 
-        return [resources: resources]
+        return [
+                resultType: 'complete',
+                resources : resources,
+                ttlMs     : CACHE_TTL_MS,
+                cacheScope: 'private'
+        ]
     }
 
     Map readResource(String uri) {
@@ -166,6 +185,7 @@ class McpClient {
 
         if (uri.startsWith('entity://')) {
             String entityName = uri.substring('entity://'.length())
+            if (!ec.entity.isEntityDefined(entityName)) throw new IllegalArgumentException("Unknown entity resource ${entityName}")
             def ed = ec.entityFacade.getEntityDefinition(entityName)
             List<String> pkFieldNames = ed.getPkFieldNames()
             List<Map> fieldList = ed.getAllFieldNames().collect { String fieldName ->
@@ -187,6 +207,9 @@ class McpClient {
                 ]
             }
             return [
+                    resultType: 'complete',
+                    ttlMs     : CACHE_TTL_MS,
+                    cacheScope: 'private',
                     contents: [[
                             uri     : uri,
                             mimeType: 'application/json',
@@ -214,7 +237,11 @@ class McpClient {
             def find = ec.entity.find(entityName)
             conditions.each { String key, Object value -> find.condition(key, value) }
             def record = find.one()
+            if (!record) throw new IllegalArgumentException("Record resource not found for ${uri}")
             return [
+                    resultType: 'complete',
+                    ttlMs     : CACHE_TTL_MS,
+                    cacheScope: 'private',
                     contents: [[
                             uri     : uri,
                             mimeType: 'application/json',
@@ -226,9 +253,13 @@ class McpClient {
         if (uri.startsWith('datadocument://')) {
             String dataDocumentId = uri.substring('datadocument://'.length())
             def dd = ec.entity.find('moqui.entity.document.DataDocument').condition('dataDocumentId', dataDocumentId).one()
+            if (!dd) throw new IllegalArgumentException("Unknown data document resource ${dataDocumentId}")
             def fields = ec.entity.find('moqui.entity.document.DataDocumentField')
                     .condition('dataDocumentId', dataDocumentId).orderBy('sequenceNum').list()
             return [
+                    resultType: 'complete',
+                    ttlMs     : CACHE_TTL_MS,
+                    cacheScope: 'private',
                     contents: [[
                             uri     : uri,
                             mimeType: 'application/json',
@@ -261,54 +292,49 @@ class McpClient {
                     [
                             name       : wp.pagePath,
                             title      : wp.pageName ?: wp.pagePath,
-                            description: wp.pageName ?: wp.pagePath
+                            description: wp.pageName ?: wp.pagePath,
+                            arguments  : []
                     ]
                 }
-        return [prompts: promptList]
+        return [
+                resultType: 'complete',
+                prompts   : promptList,
+                ttlMs     : CACHE_TTL_MS,
+                cacheScope: 'private'
+        ]
     }
 
     Map getPrompt(String name, Map arguments) {
         if (!name) throw new IllegalArgumentException('Prompt name is required')
         Map res = ec.service.sync().name('org.moqui.impl.WikiServices.get#PublishedWikiPageText')
                 .parameters([wikiSpaceId: 'MCP_PROMPTS', pagePath: name]).call()
+        if (!res?.pageText) throw new IllegalArgumentException("Unknown prompt ${name}")
         return [
+                resultType : 'complete',
                 description: name,
                 messages   : [[
                         role   : 'user',
-                        content: [[type: 'text', text: (res.pageText ?: '') as String]]
+                        content: [type: 'text', text: (res.pageText ?: '') as String]
                 ]]
         ]
-    }
-
-    Map listenSubscription(Map parameters) {
-        String subscriptionId = parameters.mcpSubscriptionId as String ?: ec.entity.sequencedIdPrimary('McpSubscription', 1L, 20L)
-        def sub = ec.entity.find('moqui.mcp.McpSubscription').condition('mcpSubscriptionId', subscriptionId).one()
-        if (!sub) {
-            sub = ec.entity.makeValue('moqui.mcp.McpSubscription')
-            sub.set('mcpSubscriptionId', subscriptionId)
-            sub.set('createdDate', ec.user.nowTimestamp)
-        }
-        sub.set('userId', parameters.userId ?: ec.user.userId)
-        sub.set('sessionId', parameters.sessionId ?: ec.web?.getSession()?.getId())
-        sub.set('subscriptionType', parameters.subscriptionType ?: 'resource')
-        sub.set('topicPattern', parameters.topicPattern ?: parameters.uriPattern ?: '*')
-        sub.set('protocolVersion', parameters.protocolVersion ?: '2026-07-28')
-        sub.set('statusId', parameters.statusId ?: 'McpSubActive')
-        sub.set('lastUpdatedDate', ec.user.nowTimestamp)
-        sub.createOrUpdate()
-        return [subscriptionId: subscriptionId, status: sub.statusId]
     }
 
     protected Map wrapToolResult(Map serviceResult, Object payload) {
         if (ec.message.hasError()) {
             String errText = ec.message.errorsString
             ec.message.clearErrors()
-            return [content: [[type: 'text', text: "Error: ${errText}"]], isError: true]
+            return [
+                    resultType       : 'complete',
+                    content          : [[type: 'text', text: "Error: ${errText}"]],
+                    structuredContent: [error: errText],
+                    isError          : true
+            ]
         }
-        return [content: [[type: 'text', text: new JsonBuilder(payload).toString()]], isError: false]
-    }
-
-    protected Map toolError(String message) {
-        return [content: [[type: 'text', text: "Error: ${message}"]], isError: true]
+        return [
+                resultType       : 'complete',
+                content          : [[type: 'text', text: new JsonBuilder(payload).toString()]],
+                structuredContent: payload,
+                isError          : false
+        ]
     }
 }
