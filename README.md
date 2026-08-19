@@ -1,12 +1,12 @@
 # moqui-mcp
 
-Minimal MCP protocol component for Moqui.
+Minimal MCP protocol component for Moqui aligned to MCP `2026-07-28`.
 
 This component is intentionally narrow and reusable:
 
 - `tools` expose selected Moqui service operations and lookup helpers
-- `resources` expose Moqui entities, records, and DataDocument definitions
-- `prompts` are stored in Moqui Wiki pages
+- `resources` expose Moqui entities, deterministic entity records, and DataDocument definitions
+- `prompts` are either stored in Moqui Wiki pages or derived at runtime from Moqui screens/transitions
 - `notifications` are bridged from Moqui `NotificationMessage`
 
 ## Scope
@@ -18,14 +18,19 @@ It should not contain:
 - agent planning engines
 - algebraic metamodel logic
 - skill orchestration logic
-- graph- or screen-first legacy layers
+- morphism composition
+- workflow state or replanning
+- legacy screen-first agent runtime logic
 
 Those responsibilities belong in other components such as `moqui-harness` and `moqui-math`.
 
 ## Internal Structure
 
-- `src/main/groovy/org/moqui/mcp/McpClient.groovy` contains MCP protocol behavior and Moqui integration logic.
-- `service/org/moqui/mcp/McpServices.xml` is a thin service facade over `McpClient`, following the same general client-plus-services pattern used by other Moqui components.
+- `src/main/groovy/org/moqui/mcp/McpClient.groovy` contains MCP protocol dispatch and Moqui integration logic.
+- `src/main/groovy/org/moqui/mcp/MoquiResourceProvider.groovy` owns resources and resource templates.
+- `src/main/groovy/org/moqui/mcp/CompositePromptProvider.groovy` merges wiki-backed and screen-derived prompts.
+- `src/main/groovy/org/moqui/mcp/ScreenInteractionCompiler.groovy` compiles runtime `ScreenDefinition` data into prompt descriptors.
+- `service/org/moqui/mcp/McpServices.xml` is a thin service facade over `McpClient`.
 - `src/main/groovy/org/moqui/mcp/McpServlet.groovy` exposes the MCP Streamable HTTP endpoint on `/mcp`.
 - `MoquiConf.xml` wires the `/mcp/*` filter and servlet in standard Moqui webapp configuration.
 
@@ -35,7 +40,7 @@ This component maps MCP primitives to standard Moqui concepts as follows:
 
 - `tools` -> Moqui services and explicit lookup helpers
 - `resources` -> entity schema resources, entity record resources, and DataDocument definition resources
-- `prompts` -> wiki-backed prompt templates
+- `prompts` -> wiki-backed prompt templates plus screen-derived interaction contracts
 - `notifications` -> Moqui notification bridge
 
 The component does not embed planning, workflow composition, or business reasoning.
@@ -47,7 +52,7 @@ The generic JSON-RPC entry service is still available:
 
 - `org.moqui.mcp.McpServices.mcp#Handle`
 
-The MCP transport endpoint is now available at:
+The MCP transport endpoint is available at:
 
 - `/mcp`
 
@@ -59,7 +64,7 @@ Current status:
 - every request is stateless and must include `_meta.io.modelcontextprotocol/protocolVersion`, `_meta.io.modelcontextprotocol/clientCapabilities`, and the required MCP HTTP headers
 - the servlet sits behind the standard Moqui auth filter and expects normal Moqui authentication from remote clients
 - trusted internal callers may optionally configure `-Dmoqui.mcp.serviceAccountUserId=<userId>` as an explicit fallback
-- SSE, subscriptions, and advanced notification streaming are not implemented yet
+- SSE, subscriptions, and advanced notification streaming are not implemented
 
 It dispatches these MCP methods:
 
@@ -67,15 +72,18 @@ It dispatches these MCP methods:
 - `tools/list`
 - `tools/call`
 - `resources/list`
+- `resources/templates/list`
 - `resources/read`
 - `prompts/list`
 - `prompts/get`
+- `completion/complete`
 
 ## Tool Model
 
 The protocol layer always exposes these built-in tools:
 
 - `moqui_search_data_documents`
+- `moqui_get_service_metadata`
 - `moqui_call_service`
 - `moqui_make_notification`
 
@@ -92,6 +100,18 @@ It delegates to Moqui search services over OpenSearch-backed DataDocuments and i
 
 The intent is that agents resolve business identifiers first through document search, and only then call mutating services with explicit parameters.
 
+### `moqui_get_service_metadata`
+
+This tool returns the authoritative Moqui service contract for a full service name.
+
+It includes:
+
+- service identity and path
+- authenticate / allow-remote flags
+- generated input JSON Schema
+- generated output JSON Schema
+- base description when present in the service definition
+
 ### `moqui_call_service`
 
 This tool invokes an existing Moqui service by full service name with an explicit parameter map.
@@ -101,7 +121,7 @@ Typical uses:
 
 - call a known business service after required identifiers have been resolved
 - execute deterministic service operations from an external MCP client
-- bridge an MCP planner or harness to Moqui-native service execution
+- bridge a harness or another planner to Moqui-native service execution
 
 ### `moqui_make_notification`
 
@@ -109,17 +129,25 @@ This tool creates a standard Moqui `NotificationMessage`.
 It is the current notification bridge exposed through MCP.
 
 There is no dynamic tool-provider loading in this component.
-If a future integration needs more MCP tools, they should be added explicitly in `McpClient` and documented here instead of being discovered indirectly from legacy runtime metadata.
+If a future integration needs more MCP tools, they should be added explicitly in `McpClient` and documented here.
 
 ## Resource Model
 
-The component currently exposes three resource families.
+The component exposes canonical resource templates and resource reads.
+
+### Resource templates
+
+Current URI templates:
+
+- `moqui://entity-def/{entityName}`
+- `moqui://entity/{entityName}/{primaryKeyToken}`
+- `moqui://data-document/{dataDocumentId}`
 
 ### Entity schema resources
 
 URI format:
 
-- `entity://<full.entity.name>`
+- `moqui://entity-def/<full.entity.name>`
 
 These resources return structural metadata about an entity, including:
 
@@ -136,16 +164,16 @@ These are schema resources, not record resources.
 
 URI format:
 
-- `record://<full.entity.name>?field=value&field2=value2`
+- `moqui://entity/<full.entity.name>/<primaryKeyToken>`
 
-These resources return an actual entity record selected by explicit conditions.
-They are intended for deterministic record inspection when the caller already knows the entity and key conditions.
+These resources return an actual entity record selected by a complete primary key token.
+The component does not treat arbitrary query conditions as canonical record resources.
 
 ### DataDocument resources
 
 URI format:
 
-- `datadocument://<dataDocumentId>`
+- `moqui://data-document/<dataDocumentId>`
 
 These resources return DataDocument definition metadata, including:
 
@@ -160,11 +188,45 @@ This is especially useful for clients that need to understand which denormalized
 
 ## Prompt Model
 
-Prompts are read from wiki pages in wiki space:
+Prompts come from two sources.
+
+### Wiki-backed prompts
+
+Prompts can be read from wiki pages in wiki space:
 
 - `MCP_PROMPTS`
 
 This keeps prompt content in standard Moqui-managed data instead of filesystem-only prompt files.
+
+### Screen-derived prompts
+
+The component also derives prompts at runtime from Moqui screen transitions when the transition is safely reducible to a single bound service call.
+
+Current rules:
+
+- only service-bound transitions are exposed as automatic prompts
+- automatic/internal transitions such as `actions`, `formSelectColumns`, `formSaveFind`, and `screenDoc` are excluded
+- each derived prompt carries:
+  - originating `screenLocation`
+  - `transitionName`
+  - bound `serviceName`
+  - argument list derived from the target service contract plus explicit transition/path parameters
+
+Current boundary:
+
+- transitions with custom XML Actions or multi-step logic are not yet exposed as executable MCP prompts
+- those interactions remain future work and may eventually bind to a dedicated `moqui_execute_screen_transition` tool
+
+### Prompt arguments and elicitation
+
+For screen-derived prompts:
+
+- `prompts/get` evaluates provided arguments
+- if required arguments are missing, the server returns `resultType: input_required`
+- the response includes a simple `elicitation/create` form schema and an opaque `requestState`
+- the client may retry `prompts/get` with `inputResponses` and `requestState`
+
+This keeps `moqui-mcp` stateless while still supporting multi-round prompt completion.
 
 ## Notification Model
 
@@ -213,15 +275,19 @@ Implemented:
 
 - stateless Streamable HTTP transport
 - `server/discover`
-- tool, resource, and prompt catalog methods
+- tool, resource, resource-template, prompt, and completion catalog methods
 - strict header and protocol-version validation
 - Moqui-authenticated execution
+- wiki-backed prompts
+- screen-derived prompts for direct service-bound transitions
+- deterministic primary-key-based entity record resources
 
 Not implemented:
 
 - subscriptions
 - list-changed notifications
 - streaming notification delivery
+- generic execution of complex screen transitions with custom XML Actions
 - harness-side planning or workflow execution
 - dynamic registration of arbitrary external tool providers
 
@@ -234,3 +300,5 @@ Use other components for higher-level behavior:
 - `moqui-harness` for planning, orchestration, validation, and business execution policy
 - `moqui-math` for mathematical or categorical models
 - search/DataDocument definitions in Mantle or other components for rich OpenSearch lookup
+
+See [docs/HarnessBoundary.md](docs/HarnessBoundary.md) for the explicit architectural split between `moqui-mcp` and `moqui-harness`.

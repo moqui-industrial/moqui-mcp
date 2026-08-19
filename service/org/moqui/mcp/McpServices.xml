@@ -66,7 +66,16 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script><![CDATA[
             import org.moqui.mcp.McpClient
-            result = new McpClient(ec).listResources()
+            result = new McpClient(ec).handle('resources/list', [:])
+        ]]></script></actions>
+    </service>
+
+    <service verb="list" noun="ResourceTemplates" authenticate="true" allow-remote="true">
+        <description>List Moqui MCP resource templates.</description>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script><![CDATA[
+            import org.moqui.mcp.McpClient
+            result = new McpClient(ec).handle('resources/templates/list', [:])
         ]]></script></actions>
     </service>
 
@@ -78,7 +87,7 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script><![CDATA[
             import org.moqui.mcp.McpClient
-            result = new McpClient(ec).readResource(uri as String)
+            result = new McpClient(ec).handle('resources/read', [uri: uri])
         ]]></script></actions>
     </service>
 
@@ -87,7 +96,7 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script><![CDATA[
             import org.moqui.mcp.McpClient
-            result = new McpClient(ec).listPrompts()
+            result = new McpClient(ec).handle('prompts/list', [:])
         ]]></script></actions>
     </service>
 
@@ -100,7 +109,21 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script><![CDATA[
             import org.moqui.mcp.McpClient
-            result = new McpClient(ec).getPrompt(name as String, arguments instanceof Map ? (Map) arguments : [:])
+            result = new McpClient(ec).handle('prompts/get', [name: name, arguments: arguments instanceof Map ? (Map) arguments : [:]])
+        ]]></script></actions>
+    </service>
+
+    <service verb="complete" noun="PromptArgument" authenticate="true" allow-remote="true">
+        <description>Resolve prompt or resource argument completions.</description>
+        <in-parameters>
+            <parameter name="ref" type="Map" required="true"/>
+            <parameter name="argument" type="Map" required="true"/>
+            <parameter name="context" type="Map"/>
+        </in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script><![CDATA[
+            import org.moqui.mcp.McpClient
+            result = new McpClient(ec).handle('completion/complete', [ref: ref, argument: argument, context: context])
         ]]></script></actions>
     </service>
 </services>

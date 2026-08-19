@@ -18,7 +18,7 @@ class McpServlet extends HttpServlet {
     protected final static Logger logger = LoggerFactory.getLogger(McpServlet.class)
 
     static final String PROTOCOL_VERSION = '2026-07-28'
-    static final Map SERVER_INFO = [name: 'moqui-mcp', version: '3.0.0']
+    static final Map SERVER_INFO = [name: 'moqui-mcp', version: '3.1.0']
 
     private final JsonSlurper jsonSlurper = new JsonSlurper()
 

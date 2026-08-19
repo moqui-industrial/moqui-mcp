@@ -2,45 +2,61 @@ package org.moqui.mcp
 
 import groovy.json.JsonBuilder
 import org.moqui.context.ExecutionContext
+import org.moqui.impl.service.ServiceDefinition
+import org.moqui.impl.util.RestSchemaUtil
 
 class McpClient {
     protected final ExecutionContext ec
     static final String PROTOCOL_VERSION = '2026-07-28'
     static final long CACHE_TTL_MS = 300000L
 
+    protected final MoquiResourceProvider resourceProvider
+    protected final CompositePromptProvider promptProvider
+
     McpClient(ExecutionContext ec) {
         this.ec = ec
+        this.resourceProvider = new MoquiResourceProvider(ec)
+        this.promptProvider = new CompositePromptProvider(ec)
     }
 
     Map handle(String method, Map params) {
+        Map requestParams = params ?: [:]
         Map<String, Closure<Map>> handlers = [
-                'server/discover'      : { Map p -> serverDiscover() },
-                'tools/list'           : { Map p -> listTools() },
-                'tools/call'           : { Map p -> callTool((String) p.name, p.arguments instanceof Map ? (Map) p.arguments : [:]) },
-                'resources/list'       : { Map p -> listResources() },
-                'resources/read'       : { Map p -> readResource((String) p.uri) },
-                'prompts/list'         : { Map p -> listPrompts() },
-                'prompts/get'          : { Map p -> getPrompt((String) p.name, p.arguments instanceof Map ? (Map) p.arguments : [:]) }
+                'server/discover'         : { Map p -> serverDiscover() },
+                'tools/list'              : { Map p -> listTools() },
+                'tools/call'              : { Map p -> callTool((String) p.name, p.arguments instanceof Map ? (Map) p.arguments : [:]) },
+                'resources/list'          : { Map p -> resourceProvider.listResources(p) },
+                'resources/templates/list': { Map p -> resourceProvider.listResourceTemplates(p) },
+                'resources/read'          : { Map p -> resourceProvider.readResource((String) p.uri, p) },
+                'prompts/list'            : { Map p -> promptProvider.listPrompts(p) },
+                'prompts/get'             : { Map p -> promptProvider.getPrompt((String) p.name, p) },
+                'completion/complete'     : { Map p -> complete(p) }
         ]
         Closure<Map> handler = handlers[method]
-        if (handler == null) throw new IllegalStateException("Unsupported MCP method: ${method}")
-        return handler.call(params ?: [:])
+        if (handler == null) throw new IllegalArgumentException("Unsupported MCP method: ${method}")
+        return handler.call(requestParams)
     }
+
+    Map listResources() { resourceProvider.listResources([:]) }
+    Map readResource(String uri) { resourceProvider.readResource(uri, [:]) }
+    Map listPrompts() { promptProvider.listPrompts([:]) }
+    Map getPrompt(String name, Map arguments) { promptProvider.getPrompt(name, [arguments: arguments ?: [:]]) }
 
     Map serverDiscover() {
         return [
                 resultType       : 'complete',
                 supportedVersions: [PROTOCOL_VERSION],
                 capabilities     : [
-                        tools    : [listChanged: false],
-                        resources: [listChanged: false],
-                        prompts  : [listChanged: false]
+                        tools      : [listChanged: false],
+                        resources  : [listChanged: false],
+                        prompts    : [listChanged: false],
+                        completions: [:]
                 ],
-                instructions     : 'Use tools for mutations, resources for schema and document inspection, and prompts for wiki-backed Moqui guidance. Every request is stateless and must include protocol metadata.',
+                instructions     : 'Use tools for mutations, resources for schema and document inspection, and prompts for Moqui guidance. Every request is stateless and must include protocol metadata.',
                 _meta            : [
                         'io.modelcontextprotocol/serverInfo': [
                                 name   : 'Moqui MCP Server',
-                                version: '3.0.0'
+                                version: '3.1.0'
                         ]
                 ],
                 ttlMs            : 3600000,
@@ -64,6 +80,19 @@ class McpClient {
                                         pageSize    : [type: 'integer']
                                 ],
                                 required  : ['indexName', 'queryString'],
+                                additionalProperties: false
+                        ]
+                ],
+                [
+                        name       : 'moqui_get_service_metadata',
+                        title      : 'Get Service Metadata',
+                        description: 'Return service definition metadata, including input and output JSON Schema derived from the Moqui service definition.',
+                        inputSchema: [
+                                type      : 'object',
+                                properties: [
+                                        serviceName: [type: 'string', description: 'Full Moqui service name']
+                                ],
+                                required  : ['serviceName'],
                                 additionalProperties: false
                         ]
                 ],
@@ -124,6 +153,26 @@ class McpClient {
             ])
         }
 
+        if (name == 'moqui_get_service_metadata') {
+            String serviceName = args.serviceName as String
+            if (!serviceName) throw new IllegalArgumentException('serviceName is required')
+            ServiceDefinition sd = ec.serviceFacade.getServiceDefinition(serviceName)
+            if (sd == null) throw new IllegalArgumentException("Unknown service ${serviceName}")
+            Map payload = [
+                    serviceName: sd.serviceName,
+                    verb       : sd.verb,
+                    noun       : sd.noun,
+                    path       : sd.path,
+                    authenticate: sd.authenticate,
+                    allowRemote: sd.allowRemote,
+                    inSchema   : RestSchemaUtil.getJsonSchemaMapIn(sd),
+                    outSchema  : RestSchemaUtil.getJsonSchemaMapOut(sd)
+            ]
+            String description = sd.serviceNode.first('description')?.text
+            if (description) payload.description = description
+            return wrapToolResult([:], payload)
+        }
+
         if (name == 'moqui_call_service') {
             String serviceName = args.serviceName as String
             Map serviceParameters = (args.parameters instanceof Map) ? (Map) args.parameters : [:]
@@ -151,171 +200,23 @@ class McpClient {
         throw new IllegalArgumentException("Unknown MCP tool ${name}")
     }
 
-    Map listResources() {
-        List<Map> resources = []
+    Map complete(Map params) {
+        Map ref = params.ref instanceof Map ? (Map) params.ref : [:]
+        Map argument = params.argument instanceof Map ? (Map) params.argument : [:]
+        String argName = argument.name as String
+        String argValue = (argument.value as String) ?: ''
+        if (!argName) throw new IllegalArgumentException('completion argument.name is required')
 
-        ((Collection<String>) ec.entity.getAllEntityNames()).toList().sort().each { String entityName ->
-            resources.add([
-                    uri        : "entity://${entityName}",
-                    name       : entityName,
-                            description: "Moqui entity schema for ${entityName}",
-                            mimeType   : 'application/json'
-            ])
+        if (ref.type == 'ref/resource') {
+            return resourceProvider.complete((String) ref.uri, argName, argValue, params.context instanceof Map ? (Map) params.context : [:])
         }
-
-        ec.entity.find('moqui.entity.document.DataDocument').useCache(true).list()?.each { dd ->
-            resources.add([
-                    uri        : "datadocument://${dd.dataDocumentId}",
-                    name       : dd.dataDocumentId,
-                    description: dd.documentName ?: dd.documentTitle ?: "DataDocument ${dd.dataDocumentId}",
-                            mimeType   : 'application/json'
-            ])
+        if (ref.type == 'ref/prompt') {
+            return promptProvider.complete(ref, argName, argValue, params.context instanceof Map ? (Map) params.context : [:])
         }
 
         return [
                 resultType: 'complete',
-                resources : resources,
-                ttlMs     : CACHE_TTL_MS,
-                cacheScope: 'private'
-        ]
-    }
-
-    Map readResource(String uri) {
-        if (!uri) throw new IllegalArgumentException('Resource URI is required')
-
-        if (uri.startsWith('entity://')) {
-            String entityName = uri.substring('entity://'.length())
-            if (!ec.entity.isEntityDefined(entityName)) throw new IllegalArgumentException("Unknown entity resource ${entityName}")
-            def ed = ec.entityFacade.getEntityDefinition(entityName)
-            List<String> pkFieldNames = ed.getPkFieldNames()
-            List<Map> fieldList = ed.getAllFieldNames().collect { String fieldName ->
-                def fieldNode = ed.getFieldNode(fieldName)
-                [
-                        name     : fieldName,
-                        type     : fieldNode?.attribute('type'),
-                        isPk     : pkFieldNames.contains(fieldName),
-                        notNull  : fieldNode?.attribute('not-null') == 'true',
-                        encrypted: fieldNode?.attribute('encrypt') == 'true'
-                ]
-            }
-            List<Map> relList = ed.getRelationshipsInfo(false).collect { relInfo ->
-                [
-                        type        : relInfo.type,
-                        title       : relInfo.title,
-                        relatedEntity: relInfo.relatedEntityName,
-                        shortAlias  : relInfo.shortAlias
-                ]
-            }
-            return [
-                    resultType: 'complete',
-                    ttlMs     : CACHE_TTL_MS,
-                    cacheScope: 'private',
-                    contents: [[
-                            uri     : uri,
-                            mimeType: 'application/json',
-                            text    : new JsonBuilder([
-                                    entityName   : entityName,
-                                    packageName  : ed.getFullEntityName(),
-                                    fieldList    : fieldList,
-                                    relationshipList: relList
-                            ]).toString()
-                    ]]
-            ]
-        }
-
-        if (uri.startsWith('record://')) {
-            String withoutScheme = uri.substring('record://'.length())
-            List<String> parts = withoutScheme.split('\\?', 2) as List<String>
-            String entityName = parts[0]
-            Map<String, Object> conditions = [:]
-            if (parts.size() > 1 && parts[1]) {
-                parts[1].split('&').each { String pair ->
-                    List<String> kv = pair.split('=', 2) as List<String>
-                    conditions[kv[0]] = kv.size() > 1 ? java.net.URLDecoder.decode(kv[1], 'UTF-8') : ''
-                }
-            }
-            def find = ec.entity.find(entityName)
-            conditions.each { String key, Object value -> find.condition(key, value) }
-            def record = find.one()
-            if (!record) throw new IllegalArgumentException("Record resource not found for ${uri}")
-            return [
-                    resultType: 'complete',
-                    ttlMs     : CACHE_TTL_MS,
-                    cacheScope: 'private',
-                    contents: [[
-                            uri     : uri,
-                            mimeType: 'application/json',
-                            text    : new JsonBuilder(record ?: [:]).toString()
-                    ]]
-            ]
-        }
-
-        if (uri.startsWith('datadocument://')) {
-            String dataDocumentId = uri.substring('datadocument://'.length())
-            def dd = ec.entity.find('moqui.entity.document.DataDocument').condition('dataDocumentId', dataDocumentId).one()
-            if (!dd) throw new IllegalArgumentException("Unknown data document resource ${dataDocumentId}")
-            def fields = ec.entity.find('moqui.entity.document.DataDocumentField')
-                    .condition('dataDocumentId', dataDocumentId).orderBy('sequenceNum').list()
-            return [
-                    resultType: 'complete',
-                    ttlMs     : CACHE_TTL_MS,
-                    cacheScope: 'private',
-                    contents: [[
-                            uri     : uri,
-                            mimeType: 'application/json',
-                            text    : new JsonBuilder([
-                                    dataDocument: dd,
-                                    summary     : [
-                                            dataDocumentId    : dd?.dataDocumentId,
-                                            documentName      : dd?.documentName,
-                                            documentTitle     : dd?.documentTitle,
-                                            indexName         : dd?.indexName,
-                                            primaryEntityName : dd?.primaryEntityName,
-                                            manualDataService : dd?.manualDataServiceName,
-                                            manualMappingService: dd?.manualMappingServiceName
-                                    ],
-                                    fieldList: fields
-                            ]).toString()
-                    ]]
-            ]
-        }
-
-        throw new IllegalArgumentException("Unsupported resource URI: ${uri}")
-    }
-
-    Map listPrompts() {
-        List promptList = ec.entity.find('moqui.resource.wiki.WikiPage')
-                .condition('wikiSpaceId', 'MCP_PROMPTS')
-                .orderBy('pagePath')
-                .list()
-                .collect { wp ->
-                    [
-                            name       : wp.pagePath,
-                            title      : wp.pageName ?: wp.pagePath,
-                            description: wp.pageName ?: wp.pagePath,
-                            arguments  : []
-                    ]
-                }
-        return [
-                resultType: 'complete',
-                prompts   : promptList,
-                ttlMs     : CACHE_TTL_MS,
-                cacheScope: 'private'
-        ]
-    }
-
-    Map getPrompt(String name, Map arguments) {
-        if (!name) throw new IllegalArgumentException('Prompt name is required')
-        Map res = ec.service.sync().name('org.moqui.impl.WikiServices.get#PublishedWikiPageText')
-                .parameters([wikiSpaceId: 'MCP_PROMPTS', pagePath: name]).call()
-        if (!res?.pageText) throw new IllegalArgumentException("Unknown prompt ${name}")
-        return [
-                resultType : 'complete',
-                description: name,
-                messages   : [[
-                        role   : 'user',
-                        content: [type: 'text', text: (res.pageText ?: '') as String]
-                ]]
+                completion: [values: [], total: 0, hasMore: false]
         ]
     }
 
