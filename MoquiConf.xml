@@ -3,14 +3,48 @@
 <moqui-conf xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/moqui-conf-3.xsd">
 
+    <default-property name="librechat_host" value="127.0.0.1"/>
+    <default-property name="librechat_port" value="3081"/>
+
     <webapp-list>
         <webapp name="webroot">
             <filter name="McpAuthFilter" class="org.moqui.impl.webapp.MoquiAuthFilter" async-supported="true">
                 <url-pattern>/mcp/*</url-pattern>
             </filter>
+            <filter name="LibreChatAuthFilter" class="org.moqui.impl.webapp.MoquiAuthFilter" async-supported="true">
+                <url-pattern>/librechat/*</url-pattern>
+            </filter>
             <servlet name="McpServlet" class="org.moqui.mcp.McpServlet" load-on-startup="5" async-supported="true">
                 <url-pattern>/mcp/*</url-pattern>
             </servlet>
+            <servlet name="LibreChatProxy" class="org.eclipse.jetty.ee11.proxy.ProxyServlet$Transparent" load-on-startup="6" async-supported="true">
+                <init-param name="proxyTo" value="http://${librechat_host}:${librechat_port}"/>
+                <init-param name="prefix" value="/librechat"/>
+                <url-pattern>/librechat/*</url-pattern>
+            </servlet>
         </webapp>
     </webapp-list>
+
+    <screen-facade>
+        <screen location="component://webroot/screen/webroot/apps.xml">
+            <subscreens-item name="agent" menu-title="Agent Chat" menu-index="97"
+                    location="component://moqui-mcp/screen/agent.xml"/>
+        </screen>
+        <screen location="component://webroot/screen/webroot/vapps.xml">
+            <subscreens-item name="agent" menu-title="Agent Chat" menu-index="97"
+                    location="component://moqui-mcp/screen/agent.xml"/>
+        </screen>
+        <screen location="component://webroot/screen/webroot/qapps.xml">
+            <subscreens-item name="agent" menu-title="Agent Chat" menu-index="97"
+                    location="component://moqui-mcp/screen/agent.xml"/>
+        </screen>
+        <screen location="component://webroot/screen/webroot.xml">
+            <subscreens-item name="message" menu-include="false"
+                    location="component://moqui-mcp/screen/mcp.xml"/>
+            <subscreens-item name="sse" menu-include="false"
+                    location="component://moqui-mcp/screen/mcp.xml"/>
+            <subscreens-item name="LibreChat" menu-title="LibreChat" menu-include="false"
+                    location="component://moqui-mcp/screen/agent/LibreChat.xml"/>
+        </screen>
+    </screen-facade>
 </moqui-conf>

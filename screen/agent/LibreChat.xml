@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
+        require-authentication="true" menu-title="LibreChat">
+
+    <actions>
+        <set field="librechatUrl" value="/librechat/"/>
+        <set field="librechatDirectUrl" value="http://127.0.0.1:3081/librechat/"/>
+    </actions>
+
+    <widgets>
+        <render-mode>
+            <text type="html,vuet,qvt"><![CDATA[
+                <div style="padding:0 0 12px 0;">
+                    <a href="${librechatUrl}" target="_blank" rel="noopener">Open proxied LibreChat in a new tab</a>
+                    <span style="padding:0 8px; color:#999;">|</span>
+                    <a href="${librechatDirectUrl}" target="_blank" rel="noopener">Open direct LibreChat</a>
+                </div>
+                <div style="width:100%; height:calc(100vh - 120px);">
+                    <iframe
+                        src="${librechatUrl}"
+                        style="width:100%; height:100%; border:none; border-radius:8px; background:white;"
+                        allow="clipboard-read; clipboard-write; microphone; camera">
+                    </iframe>
+                </div>
+            ]]></text>
+        </render-mode>
+    </widgets>
+</screen>
