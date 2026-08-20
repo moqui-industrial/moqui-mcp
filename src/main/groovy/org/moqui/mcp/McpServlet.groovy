@@ -61,7 +61,12 @@ class McpServlet extends HttpServlet {
             validateRequestMeta(rpcRequest)
 
             Map rpcResponse = handleJsonRpcRequest(ec, rpcRequest)
-            writeJson(response, rpcResponse)
+            if (rpcResponse != null) {
+                writeJson(response, rpcResponse)
+            } else {
+                response.status = HttpServletResponse.SC_ACCEPTED
+                response.setHeader("Cache-Control", "no-store")
+            }
         } catch (McpProtocolException mpe) {
             writeError(response, mpe.httpStatus, mpe.id, mpe.code, mpe.message, mpe.data)
         } catch (IllegalArgumentException iae) {
@@ -76,8 +81,12 @@ class McpServlet extends HttpServlet {
 
     private Map handleJsonRpcRequest(ExecutionContextImpl ec, Map rpcRequest) {
         String method = rpcRequest.method as String
+        boolean hasId = rpcRequest.containsKey('id')
         Object id = rpcRequest.id
-        if (!id) throw new McpProtocolException(HttpServletResponse.SC_BAD_REQUEST, -32600, "Request id is required", null, null)
+        if (!hasId || id == null) {
+            if (method?.startsWith('notifications/')) return null
+            throw new McpProtocolException(HttpServletResponse.SC_BAD_REQUEST, -32600, "Request id is required", null, null)
+        }
 
         Map params = rpcRequest.params instanceof Map ? (Map) rpcRequest.params : [:]
         Map result = new McpClient(ec).handle(method, params)
@@ -133,18 +142,18 @@ class McpServlet extends HttpServlet {
         }
 
         String headerMethod = request.getHeader('Mcp-Method')
-        if (!headerMethod) throw headerMismatch(id, "Missing required header Mcp-Method")
-        if (headerMethod != bodyMethod) {
+        if (headerMethod && headerMethod != bodyMethod) {
             throw headerMismatch(id, "Header mismatch: Mcp-Method header value '${headerMethod}' does not match body value '${bodyMethod}'")
         }
 
         String expectedName = getExpectedName(bodyMethod, params)
         String headerName = request.getHeader('Mcp-Name')
         if (expectedName != null) {
-            if (!headerName) throw headerMismatch(id, "Missing required header Mcp-Name")
-            String decodedHeaderName = decodeHeaderValue(headerName)
-            if (decodedHeaderName != expectedName) {
-                throw headerMismatch(id, "Header mismatch: Mcp-Name header value '${decodedHeaderName}' does not match body value '${expectedName}'")
+            if (headerName) {
+                String decodedHeaderName = decodeHeaderValue(headerName)
+                if (decodedHeaderName != expectedName) {
+                    throw headerMismatch(id, "Header mismatch: Mcp-Name header value '${decodedHeaderName}' does not match body value '${expectedName}'")
+                }
             }
         }
     }

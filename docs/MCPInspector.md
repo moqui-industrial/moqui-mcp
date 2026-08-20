@@ -17,6 +17,35 @@ Recommended for enterprise clients:
 
 Do not rely on the demo `john.doe/moqui` account outside local development.
 
+## Importable Local Config
+
+For this workspace you can import a ready-made Inspector config file instead of entering the server manually:
+
+```text
+runtime/component/moqui-mcp/tools/inspector/moqui-mcp-inspector-local.json
+```
+
+It is configured for:
+
+- Streamable HTTP transport
+- URL `http://localhost:8081/mcp`
+- protocol era `modern`
+- local Basic authentication for the development user
+
+In Inspector use:
+
+1. `Add Servers`
+2. `Import from client config`
+3. select `moqui-mcp-inspector-local.json`
+
+If the imported server still connects in legacy mode, start Inspector directly with the config file instead:
+
+```bash
+runtime/component/moqui-mcp/tools/inspector/run-inspector-local.sh
+```
+
+This forces Inspector to load the exact server definition from disk, including the `modern` protocol era.
+
 If you need a non-interactive system identity, configure a dedicated service account and authenticate normally through Moqui, or set:
 
 ```bash
@@ -38,16 +67,21 @@ When connecting to Moqui:
 3. Point it to:
 
 ```text
-http://localhost:8080/mcp
+http://localhost:8081/mcp
 ```
 
 4. Send these headers on every request:
 
 ```text
 MCP-Protocol-Version: 2026-07-28
+Authorization: Basic ...
+```
+
+Optional consistency headers:
+
+```text
 Mcp-Method: <json-rpc method>
 Mcp-Name: <tool/resource/prompt name when required>
-Authorization: Basic ...
 ```
 
 If you prefer login keys instead of Basic Auth:
@@ -74,7 +108,7 @@ Successful sequence:
 
 1. `server/discover`
 2. `tools/list`
-3. `resources/read` on `entity://mantle.party.Person`
+3. `resources/read` on `moqui://entity-def/mantle.party.Person`
 
 Expected behavior:
 
@@ -93,7 +127,7 @@ Use:
 Environment variables:
 
 ```bash
-MCP_BASE_URL=http://localhost:8080/mcp
+MCP_BASE_URL=http://localhost:8081/mcp
 MCP_BASIC_USER=my.user
 MCP_BASIC_PASSWORD=my.password
 ```
@@ -101,7 +135,7 @@ MCP_BASIC_PASSWORD=my.password
 or:
 
 ```bash
-MCP_BASE_URL=http://localhost:8080/mcp
+MCP_BASE_URL=http://localhost:8081/mcp
 MCP_LOGIN_KEY=<login-key>
 ```
 

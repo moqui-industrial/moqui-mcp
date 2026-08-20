@@ -31,43 +31,50 @@ class MoquiResourceProvider {
             ])
         }
 
-        return [
+        Map page = McpPaginationSupport.paginate(resources.sort { a, b -> (a.uri ?: '') <=> (b.uri ?: '') }, params, 'resources')
+        Map result = [
                 resultType: 'complete',
-                resources : resources,
+                resources : page.resources,
                 ttlMs     : McpClient.CACHE_TTL_MS,
                 cacheScope: 'private'
         ]
+        if (page.nextCursor) result.nextCursor = page.nextCursor
+        return result
     }
 
     Map listResourceTemplates(Map params) {
-        return [
-                resultType       : 'complete',
-                resourceTemplates: [
-                        [
-                                name       : 'moqui-entity-definition',
-                                title      : 'Moqui Entity Definition',
-                                description: 'Read Moqui entity definition metadata by full entity name.',
-                                uriTemplate: 'moqui://entity-def/{entityName}',
-                                mimeType   : 'application/json'
-                        ],
-                        [
-                                name       : 'moqui-entity-record',
-                                title      : 'Moqui Entity Record',
-                                description: 'Read a deterministic Moqui entity record by full entity name and complete primary key token.',
-                                uriTemplate: 'moqui://entity/{entityName}/{primaryKeyToken}',
-                                mimeType   : 'application/json'
-                        ],
-                        [
-                                name       : 'moqui-data-document',
-                                title      : 'Moqui Data Document',
-                                description: 'Read DataDocument definition metadata by dataDocumentId.',
-                                uriTemplate: 'moqui://data-document/{dataDocumentId}',
-                                mimeType   : 'application/json'
-                        ]
+        List<Map> templates = [
+                [
+                        name       : 'moqui-entity-definition',
+                        title      : 'Moqui Entity Definition',
+                        description: 'Read Moqui entity definition metadata by full entity name.',
+                        uriTemplate: 'moqui://entity-def/{entityName}',
+                        mimeType   : 'application/json'
                 ],
+                [
+                        name       : 'moqui-entity-record',
+                        title      : 'Moqui Entity Record',
+                        description: 'Read a deterministic Moqui entity record by full entity name and complete primary key token.',
+                        uriTemplate: 'moqui://entity/{entityName}/{primaryKeyToken}',
+                        mimeType   : 'application/json'
+                ],
+                [
+                        name       : 'moqui-data-document',
+                        title      : 'Moqui Data Document',
+                        description: 'Read DataDocument definition metadata by dataDocumentId.',
+                        uriTemplate: 'moqui://data-document/{dataDocumentId}',
+                        mimeType   : 'application/json'
+                ]
+        ]
+        Map page = McpPaginationSupport.paginate(templates, params, 'resourceTemplates')
+        Map result = [
+                resultType       : 'complete',
+                resourceTemplates: page.resourceTemplates,
                 ttlMs            : McpClient.CACHE_TTL_MS,
                 cacheScope       : 'private'
         ]
+        if (page.nextCursor) result.nextCursor = page.nextCursor
+        return result
     }
 
     Map readResource(String uri, Map params) {

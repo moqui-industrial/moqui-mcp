@@ -18,12 +18,16 @@ class CompositePromptProvider {
             Map result = provider.listPrompts(params)
             if (result?.prompts instanceof Collection) prompts.addAll((Collection<Map>) result.prompts)
         }
-        return [
+        prompts = prompts.sort { a, b -> (a.name ?: '') <=> (b.name ?: '') }
+        Map page = McpPaginationSupport.paginate(prompts, params, 'prompts')
+        Map result = [
                 resultType: 'complete',
-                prompts   : prompts.sort { a, b -> (a.name ?: '') <=> (b.name ?: '') },
+                prompts   : page.prompts,
                 ttlMs     : McpClient.CACHE_TTL_MS,
                 cacheScope: 'private'
         ]
+        if (page.nextCursor) result.nextCursor = page.nextCursor
+        return result
     }
 
     Map getPrompt(String name, Map params) {

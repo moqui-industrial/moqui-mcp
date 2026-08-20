@@ -4,7 +4,7 @@ Minimal MCP protocol component for Moqui aligned to MCP `2026-07-28`.
 
 This component is intentionally narrow and reusable:
 
-- `tools` expose selected Moqui service operations and lookup helpers
+- `tools` expose selected Moqui service operations, lookup helpers, and the Moqui service catalog itself
 - `resources` expose Moqui entities, deterministic entity records, and DataDocument definitions
 - `prompts` are either stored in Moqui Wiki pages or derived at runtime from Moqui screens/transitions
 - `notifications` are bridged from Moqui `NotificationMessage`
@@ -61,10 +61,10 @@ Current status:
 - the logical MCP catalog is implemented in code and exposed through Moqui services
 - the component compiles and loads in Moqui
 - `/mcp` responds over MCP Streamable HTTP with a single `POST` endpoint
-- every request is stateless and must include `_meta.io.modelcontextprotocol/protocolVersion`, `_meta.io.modelcontextprotocol/clientCapabilities`, and the required MCP HTTP headers
+- every request is stateless and must include `_meta.io.modelcontextprotocol/protocolVersion` and `_meta.io.modelcontextprotocol/clientCapabilities`
 - the servlet sits behind the standard Moqui auth filter and expects normal Moqui authentication from remote clients
 - trusted internal callers may optionally configure `-Dmoqui.mcp.serviceAccountUserId=<userId>` as an explicit fallback
-- SSE, subscriptions, and advanced notification streaming are not implemented
+- SSE and advanced notification streaming are not implemented
 
 It dispatches these MCP methods:
 
@@ -74,6 +74,8 @@ It dispatches these MCP methods:
 - `resources/list`
 - `resources/templates/list`
 - `resources/read`
+- `resources/subscribe`
+- `resources/unsubscribe`
 - `prompts/list`
 - `prompts/get`
 - `completion/complete`
@@ -85,7 +87,17 @@ The protocol layer always exposes these built-in tools:
 - `moqui_search_data_documents`
 - `moqui_get_service_metadata`
 - `moqui_call_service`
+- `moqui_execute_screen_transition`
 - `moqui_make_notification`
+
+In addition, `tools/list` exposes the discovered Moqui services themselves as first-class MCP tools.
+Each service tool uses the full Moqui service name, for example:
+
+- `mantle.GeneralServices.lookup#ById`
+- `mantle.GeneralServices.search#MantleFiltered`
+- `mantle.order.OrderServices.place#Order`
+
+The input schema for each service tool is derived from the authoritative Moqui `ServiceDefinition`.
 
 ### `moqui_search_data_documents`
 
@@ -127,6 +139,18 @@ Typical uses:
 
 This tool creates a standard Moqui `NotificationMessage`.
 It is the current notification bridge exposed through MCP.
+
+### Service tools as first-class MCP tools
+
+The server exposes real Moqui services directly in `tools/list`, not only the generic `moqui_call_service` wrapper.
+
+Use cases:
+
+- generic MCP clients can discover callable business operations directly
+- hosts can inspect the per-service JSON Schema and render input forms
+- prompts and harness code can bind directly to concrete Moqui services
+
+The low-level wrapper `moqui_call_service` remains useful for internal bindings and dynamic execution, but external clients should prefer the concrete service tool when possible.
 
 There is no dynamic tool-provider loading in this component.
 If a future integration needs more MCP tools, they should be added explicitly in `McpClient` and documented here.
@@ -228,10 +252,44 @@ For screen-derived prompts:
 
 This keeps `moqui-mcp` stateless while still supporting multi-round prompt completion.
 
+### Example screen-derived round trip
+
+1. Call `prompts/get` for a screen-derived prompt name.
+2. Read `_meta.org.moqui/promptBinding`.
+3. Execute the referenced tool with the resolved parameters.
+
+Example binding payload:
+
+```json
+{
+  "toolName": "moqui_execute_screen_transition",
+  "screenLocation": "component://SimpleScreens/screen/SimpleScreens/Facility/EditFacility.xml",
+  "transitionName": "getFacilityList",
+  "parameters": {
+    "facilityName": "Retail"
+  }
+}
+```
+
+Then call `tools/call` with:
+
+```json
+{
+  "name": "moqui_execute_screen_transition",
+  "arguments": {
+    "screenLocation": "component://SimpleScreens/screen/SimpleScreens/Facility/EditFacility.xml",
+    "transitionName": "getFacilityList",
+    "parameters": {
+      "facilityName": "Retail"
+    }
+  }
+}
+```
+
 ## Notification Model
 
 The runtime notification source is the Moqui standard `NotificationMessage` mechanism.
-Today the component provides the notification creation tool, but not a full streaming notification transport.
+Today the component provides the notification creation tool and resource subscription registration, but not a full streaming notification transport.
 
 ## Supported MCP 2026-07-28 Behavior
 
@@ -240,8 +298,10 @@ Today the component provides the notification creation tool, but not a full stre
 - `ping` is not implemented because it is no longer part of the current spec
 - `Mcp-Session-Id` is not used because the protocol is stateless
 - `MCP-Protocol-Version` must match the body metadata protocol version
-- `Mcp-Method` must match the JSON-RPC method
-- `Mcp-Name` is required for `tools/call`, `resources/read`, and `prompts/get`
+- `Mcp-Method` is optional for JSON-RPC `POST` requests and, when present, must match the JSON-RPC method
+- `Mcp-Name` is optional for JSON-RPC `POST` requests and, when present, must match the selected tool name, prompt name, or resource URI
+- `tools/list`, `resources/list`, `resources/templates/list`, and `prompts/list` support `cursor` and `pageSize`
+- `resources/subscribe` and `resources/unsubscribe` register resource interest for the authenticated principal, but do not yet emit server-pushed `notifications/resources/updated` events
 
 ## Authentication
 
@@ -255,6 +315,12 @@ Recommended client options:
 
 The component no longer assumes the demo `john.doe/moqui` account.
 For local development that account may still exist, but it is not part of the component contract.
+
+## Inspector and Client Notes
+
+- After changing the tool catalog, reconnect the MCP client so it refreshes `tools/list`.
+- If a client sends header `Mcp-Name`, it must equal the selected tool name, prompt name, or resource URI.
+- If a client sends header `Mcp-Method`, it must equal the JSON-RPC method in the request body.
 
 For browser-based or cross-origin clients, the servlet explicitly allows these headers:
 

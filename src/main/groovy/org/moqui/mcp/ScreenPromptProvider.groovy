@@ -5,10 +5,12 @@ import org.moqui.context.ExecutionContext
 class ScreenPromptProvider {
     protected final ExecutionContext ec
     protected final ScreenInteractionCompiler compiler
+    protected final PromptLookupResolver lookupResolver
 
     ScreenPromptProvider(ExecutionContext ec) {
         this.ec = ec
         this.compiler = new ScreenInteractionCompiler(ec)
+        this.lookupResolver = new PromptLookupResolver(ec)
     }
 
     boolean hasPrompt(String name) {
@@ -51,9 +53,11 @@ class ScreenPromptProvider {
         Map responseValues = PromptSupport.extractInputResponseMap(params)
         responseValues.each { k, v -> if (v != null) arguments[k as String] = v.toString() }
 
-        List<Map> missingArguments = descriptor.arguments.findAll { Map arg ->
-            Boolean.TRUE == arg.required && !arguments[arg.name as String]
-        }
+        Map resolution = lookupResolver.resolveArguments(descriptor, arguments)
+        Map<String, String> resolvedArguments = (Map<String, String>) resolution.arguments
+        Map<String, Map> resolutionMeta = (Map<String, Map>) resolution.resolutionMeta
+
+        List<Map> missingArguments = descriptor.arguments.findAll { Map arg -> Boolean.TRUE == arg.required && !resolvedArguments[arg.name as String] }
         if (missingArguments) {
             Map schemaProps = [:]
             missingArguments.each { Map arg ->
@@ -65,7 +69,7 @@ class ScreenPromptProvider {
             }
             return [
                     resultType   : 'input_required',
-                    requestState : PromptSupport.encodeRequestState([promptName: name, arguments: arguments]),
+                    requestState : PromptSupport.encodeRequestState([promptName: name, arguments: resolvedArguments]),
                     inputRequests: [
                             'screen-input': [
                                     method: 'elicitation/create',
@@ -83,13 +87,37 @@ class ScreenPromptProvider {
             ]
         }
 
-        String bindingText = "Call tool moqui_call_service with serviceName=${descriptor.serviceName} and parameters=${arguments}."
+        Map promptBinding
+        String bindingText
+        if (descriptor.executionMode == 'transition') {
+            promptBinding = [
+                    toolName          : 'moqui_execute_screen_transition',
+                    screenLocation    : descriptor.screenLocation,
+                    rootScreenLocation: descriptor.rootScreenLocation,
+                    relativeScreenPath: descriptor.relativeScreenPath,
+                    transitionName    : descriptor.transitionName,
+                    transitionMethod  : descriptor.transitionMethod,
+                    parameters        : resolvedArguments
+            ]
+            bindingText = "Call tool moqui_execute_screen_transition with screenLocation=${descriptor.screenLocation}, transitionName=${descriptor.transitionName}, parameters=${resolvedArguments}."
+        } else {
+            promptBinding = [
+                    toolName      : 'moqui_call_service',
+                    serviceName   : descriptor.serviceName,
+                    parameters    : resolvedArguments,
+                    screenLocation: descriptor.screenLocation,
+                    transitionName: descriptor.transitionName
+            ]
+            bindingText = "Call tool moqui_call_service with serviceName=${descriptor.serviceName} and parameters=${resolvedArguments}."
+        }
         String messageText = """\
 Use the screen-derived interaction ${descriptor.title}.
 Screen: ${descriptor.screenLocation}
 Transition: ${descriptor.transitionName}
-Bound service: ${descriptor.serviceName}
-Resolved arguments: ${arguments}
+Execution mode: ${descriptor.executionMode}
+${descriptor.serviceName ? "Bound service: ${descriptor.serviceName}" : ""}
+Resolved arguments: ${resolvedArguments}
+Resolved lookups: ${resolutionMeta}
 
 ${bindingText}
 """.stripIndent().trim()
@@ -102,19 +130,16 @@ ${bindingText}
                                       content: [type: 'text', text: messageText]
                               ]],
                 _meta      : [
-                        'org.moqui/promptBinding': [
-                                toolName      : 'moqui_call_service',
-                                serviceName   : descriptor.serviceName,
-                                parameters    : arguments,
-                                screenLocation: descriptor.screenLocation,
-                                transitionName: descriptor.transitionName
-                        ]
+                        'org.moqui/promptBinding': promptBinding,
+                        'org.moqui/resolutionMeta': resolutionMeta
                 ]
         ]
     }
 
     Map complete(String promptName, String argumentName, String argumentValue, Map context) {
-        return PromptSupport.emptyCompletion()
+        Map descriptor = getPromptDescriptorMap()[promptName]
+        if (descriptor == null) return PromptSupport.emptyCompletion()
+        return lookupResolver.completeArgument(argumentName, argumentValue, context, descriptor)
     }
 
     protected List<Map> compilePromptList() {

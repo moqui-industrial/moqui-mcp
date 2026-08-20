@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "moqui-mcp-local-8081": {
+      "type": "http",
+      "url": "http://localhost:8081/mcp",
+      "protocolEra": "modern",
+      "headers": {
+        "Authorization": "Basic am9obi5kb2U6bW9xdWk="
+      }
+    }
+  }
+}
