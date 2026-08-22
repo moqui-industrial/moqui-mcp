@@ -4,7 +4,7 @@ import groovy.json.JsonOutput
 
 class PromptSupport {
     static Map emptyCompletion() {
-        return [resultType: 'complete', completion: [values: [], total: 0, hasMore: false]]
+        return [completion: [values: [], total: 0, hasMore: false]]
     }
 
     static String encodeRequestState(Map state) {

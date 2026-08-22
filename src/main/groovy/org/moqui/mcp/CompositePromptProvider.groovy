@@ -40,7 +40,7 @@ class CompositePromptProvider {
 
     Map complete(Map ref, String argumentName, String argumentValue, Map context) {
         String promptName = ref.name as String
-        if (!promptName) return [resultType: 'complete', completion: [values: [], total: 0, hasMore: false]]
+        if (!promptName) return [completion: [values: [], total: 0, hasMore: false]]
         for (Object provider in promptProviders) {
             if (provider.hasPrompt(promptName)) return provider.complete(promptName, argumentName, argumentValue, context)
         }

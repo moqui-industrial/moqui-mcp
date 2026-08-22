@@ -1,8 +1,8 @@
 package org.moqui.mcp
 
 class McpPaginationSupport {
-    static final int DEFAULT_PAGE_SIZE = 100
-    static final int MAX_PAGE_SIZE = 250
+    static final int DEFAULT_PAGE_SIZE = 1000
+    static final int MAX_PAGE_SIZE = 10000
 
     static int normalizePageSize(Object rawPageSize) {
         int pageSize = DEFAULT_PAGE_SIZE

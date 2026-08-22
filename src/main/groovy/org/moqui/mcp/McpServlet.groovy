@@ -18,6 +18,7 @@ class McpServlet extends HttpServlet {
     protected final static Logger logger = LoggerFactory.getLogger(McpServlet.class)
 
     static final String PROTOCOL_VERSION = '2026-07-28'
+    static final Set<String> SUPPORTED_PROTOCOL_VERSIONS = ['2026-07-28', '2025-11-25'] as Set
     static final Map SERVER_INFO = [name: 'moqui-mcp', version: '3.1.0']
 
     private final JsonSlurper jsonSlurper = new JsonSlurper()
@@ -48,7 +49,7 @@ class McpServlet extends HttpServlet {
         ExecutionContextImpl ec = ecfi.getEci()
         try {
             ec.initWebFacade(webappName, request, response)
-            ensureAuthenticated(ec)
+            ensureAuthenticated(ec, request)
 
             Object payload = parseRequestBody(requestBody)
             if (!(payload instanceof Map)) {
@@ -60,7 +61,7 @@ class McpServlet extends HttpServlet {
             validateHttpHeaders(request, rpcRequest)
             validateRequestMeta(rpcRequest)
 
-            Map rpcResponse = handleJsonRpcRequest(ec, rpcRequest)
+            Map rpcResponse = handleJsonRpcRequest(ec, rpcRequest, request)
             if (rpcResponse != null) {
                 writeJson(response, rpcResponse)
             } else {
@@ -79,7 +80,7 @@ class McpServlet extends HttpServlet {
         }
     }
 
-    private Map handleJsonRpcRequest(ExecutionContextImpl ec, Map rpcRequest) {
+    private Map handleJsonRpcRequest(ExecutionContextImpl ec, Map rpcRequest, HttpServletRequest request) {
         String method = rpcRequest.method as String
         boolean hasId = rpcRequest.containsKey('id')
         Object id = rpcRequest.id
@@ -89,7 +90,9 @@ class McpServlet extends HttpServlet {
         }
 
         Map params = rpcRequest.params instanceof Map ? (Map) rpcRequest.params : [:]
-        Map result = new McpClient(ec).handle(method, params)
+        Map result = new McpClient(ec, [
+                clientProfile: resolveClientProfile(request)
+        ]).handle(method, params)
         Map resultMeta = (result._meta instanceof Map) ? new LinkedHashMap((Map) result._meta) : [:]
         resultMeta['io.modelcontextprotocol/serverInfo'] = SERVER_INFO
         result._meta = resultMeta
@@ -98,19 +101,38 @@ class McpServlet extends HttpServlet {
     }
 
     private void validateRequestMeta(Map rpcRequest) {
+        String method = rpcRequest.method as String
         Map params = rpcRequest.params instanceof Map ? (Map) rpcRequest.params : [:]
         Map meta = params._meta instanceof Map ? (Map) params._meta : null
-        if (!meta) throw new McpProtocolException(HttpServletResponse.SC_BAD_REQUEST, -32602, "Request params._meta is required", rpcRequest.id, null)
+        if (!meta) {
+            if (method == 'initialize') {
+                String initVersion = normalizeProtocolVersionValue(params.protocolVersion as String)
+                if (initVersion && !SUPPORTED_PROTOCOL_VERSIONS.contains(initVersion)) {
+                    throw new McpProtocolException(
+                            HttpServletResponse.SC_BAD_REQUEST,
+                            -32022,
+                            "Unsupported protocol version",
+                            rpcRequest.id,
+                            [supported: SUPPORTED_PROTOCOL_VERSIONS as List, requested: initVersion]
+                    )
+                }
+                if (params.capabilities != null && !(params.capabilities instanceof Map)) {
+                    throw new McpProtocolException(HttpServletResponse.SC_BAD_REQUEST, -32602, "initialize params.capabilities must be an object", rpcRequest.id, null)
+                }
+                return
+            }
+            return
+        }
 
-        String bodyVersion = meta['io.modelcontextprotocol/protocolVersion'] as String
+        String bodyVersion = normalizeProtocolVersionValue(meta['io.modelcontextprotocol/protocolVersion'] as String)
         if (!bodyVersion) throw new McpProtocolException(HttpServletResponse.SC_BAD_REQUEST, -32602, "Missing _meta.io.modelcontextprotocol/protocolVersion", rpcRequest.id, null)
-        if (bodyVersion != PROTOCOL_VERSION) {
+        if (!SUPPORTED_PROTOCOL_VERSIONS.contains(bodyVersion)) {
             throw new McpProtocolException(
                     HttpServletResponse.SC_BAD_REQUEST,
                     -32022,
                     "Unsupported protocol version",
                     rpcRequest.id,
-                    [supported: [PROTOCOL_VERSION], requested: bodyVersion]
+                    [supported: SUPPORTED_PROTOCOL_VERSIONS as List, requested: bodyVersion]
             )
         }
 
@@ -122,21 +144,21 @@ class McpServlet extends HttpServlet {
     private void validateHttpHeaders(HttpServletRequest request, Map rpcRequest) {
         Object id = rpcRequest.id
         String bodyMethod = rpcRequest.method as String
-        String headerVersion = request.getHeader('MCP-Protocol-Version')
+        String headerVersion = normalizeProtocolVersionValue(request.getHeader('MCP-Protocol-Version'))
         if (!headerVersion) throw headerMismatch(id, "Missing required header MCP-Protocol-Version")
-        if (headerVersion != PROTOCOL_VERSION) {
+        if (!SUPPORTED_PROTOCOL_VERSIONS.contains(headerVersion)) {
             throw new McpProtocolException(
                     HttpServletResponse.SC_BAD_REQUEST,
                     -32022,
                     "Unsupported protocol version",
                     id,
-                    [supported: [PROTOCOL_VERSION], requested: headerVersion]
+                    [supported: SUPPORTED_PROTOCOL_VERSIONS as List, requested: headerVersion]
             )
         }
 
         Map params = rpcRequest.params instanceof Map ? (Map) rpcRequest.params : [:]
         Map meta = params._meta instanceof Map ? (Map) params._meta : [:]
-        String bodyVersion = meta['io.modelcontextprotocol/protocolVersion'] as String
+        String bodyVersion = normalizeProtocolVersionValue((meta['io.modelcontextprotocol/protocolVersion'] ?: params.protocolVersion) as String)
         if (bodyVersion && bodyVersion != headerVersion) {
             throw headerMismatch(id, "Header mismatch: MCP-Protocol-Version header value '${headerVersion}' does not match body value '${bodyVersion}'")
         }
@@ -174,16 +196,39 @@ class McpServlet extends HttpServlet {
         return value
     }
 
-    private void ensureAuthenticated(ExecutionContextImpl ec) {
+    private static String normalizeProtocolVersionValue(String rawValue) {
+        if (!rawValue) return rawValue
+        List<String> parts = rawValue.split(',').collect { it?.trim() }.findAll { it }
+        if (parts.isEmpty()) return null
+        return parts[0]
+    }
+
+    private void ensureAuthenticated(ExecutionContextImpl ec, HttpServletRequest request) {
         if (ec.user?.userId) return
-        String serviceUserId = System.getProperty("moqui.mcp.serviceAccountUserId")?.trim()
-        if (!serviceUserId) {
-            throw new IllegalStateException("MCP request is not authenticated. Use standard Moqui authentication (Basic Auth or api_key/login_key) or configure moqui.mcp.serviceAccountUserId for trusted internal calls.")
+        boolean serviceEnabled = (System.getProperty("moqui.mcp.serviceAccountEnabled", "true") ?: "true").toBoolean()
+        String serviceUserId = System.getProperty("moqui.mcp.serviceAccountUserId", "john.doe")?.trim()
+        if (serviceEnabled && serviceUserId && isLocalRequest(request)) {
+            UserFacadeImpl ufi = ec.userFacade
+            if (!ufi.internalLoginUser(serviceUserId, false)) {
+                throw new IllegalStateException("Could not log in MCP service account ${serviceUserId}: ${ec.message.errorsString}")
+            }
+            return
         }
-        UserFacadeImpl ufi = ec.userFacade
-        if (!ufi.internalLoginUser(serviceUserId, false)) {
-            throw new IllegalStateException("Could not log in MCP service account ${serviceUserId}: ${ec.message.errorsString}")
-        }
+        throw new IllegalStateException("MCP request is not authenticated. Use standard Moqui authentication (Basic Auth or api_key/login_key) or configure moqui.mcp.serviceAccountUserId for trusted local calls.")
+    }
+
+    private static boolean isLocalRequest(HttpServletRequest request) {
+        String remoteAddr = request?.getRemoteAddr() ?: ""
+        return remoteAddr == "127.0.0.1" || remoteAddr == "0:0:0:0:0:0:0:1" || remoteAddr == "::1" || remoteAddr == "localhost"
+    }
+
+    private static String resolveClientProfile(HttpServletRequest request) {
+        String explicitProfile = request?.getHeader('X-Moqui-Mcp-Profile')?.trim()
+        if (explicitProfile) return explicitProfile
+
+        String userAgent = request?.getHeader('User-Agent') ?: ''
+        if (userAgent.toLowerCase().contains('librechat')) return 'librechat'
+        return 'default'
     }
 
     private Object parseRequestBody(String bodyText) {
@@ -193,7 +238,7 @@ class McpServlet extends HttpServlet {
 
     private boolean handleCors(HttpServletRequest request, HttpServletResponse response) {
         response.setHeader("Access-Control-Allow-Origin", "*")
-        response.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, api_key, login_key, MCP-Protocol-Version, Mcp-Method, Mcp-Name")
+        response.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, api_key, login_key, MCP-Protocol-Version, Mcp-Method, Mcp-Name, X-Moqui-Mcp-Profile")
         response.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS")
         if ("OPTIONS".equalsIgnoreCase(request.method)) {
             response.status = HttpServletResponse.SC_NO_CONTENT
