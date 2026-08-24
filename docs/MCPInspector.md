@@ -110,6 +110,51 @@ Successful sequence:
 2. `tools/list`
 3. `resources/read` on `moqui://entity-def/mantle.party.Person`
 
+## Prompt Contract Validation
+
+For screen-derived prompts, Inspector is best used as a protocol workbench, not as a full conversational client.
+
+Recommended validation loop:
+
+1. `prompts/list`
+2. choose a screen-derived prompt
+3. `prompts/get`
+4. for lookup-backed arguments, use `completion/complete`
+5. if needed, inspect the `lookup://...` resources returned by the prompt contract
+6. execute the final action through `tools/call`
+7. verify the resulting record through `resources/read`
+
+Important: Inspector does not automatically perform lookup -> fill form -> submit as a business client would. The prompt contract tells the client what to do; Inspector lets you validate each protocol step explicitly.
+
+### Validated Examples
+
+These flows were validated directly against the running Moqui instance:
+
+- `FindProduct.NewProductForm.createProduct`
+  - resolve `ownerPartyId`
+  - resolve `productTypeEnumId`
+  - submit through `moqui_call_service`
+
+- `FindOrder.CreateSalesOrder.createOrder`
+  - resolve `vendorPartyId`
+  - resolve `customerPartyId`
+  - resolve `productStoreId`
+  - resolve `facilityId`
+  - submit through `moqui_call_service`
+
+- `MoveAsset.EnterMoveAssetForm.completeMove`
+  - resolve `facilityId`
+  - resolve `locationSeqId`
+  - submit through `moqui_execute_screen_transition` or the bound service call
+
+### Why `prompts/list` and `moqui_search_prompt_catalog` both exist
+
+- `prompts/list` is the MCP-native runtime prompt catalog.
+- `moqui_search_prompt_catalog` is the OpenSearch/DataDocument-backed discovery tool for finding prompts by business language.
+
+Use `prompts/list` when you already know the area or exact screen family.
+Use `moqui_search_prompt_catalog` when the client needs prompt discovery by natural-language intent.
+
 Expected behavior:
 
 - request without auth: blocked by Moqui auth filter

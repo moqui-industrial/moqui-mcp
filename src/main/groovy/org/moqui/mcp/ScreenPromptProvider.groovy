@@ -19,7 +19,6 @@ class ScreenPromptProvider {
 
     Map listPrompts(Map params) {
         return [
-                resultType : 'complete',
                 prompts   : compilePromptList().collect { Map descriptor ->
                     [
                             name       : descriptor.name,
@@ -76,13 +75,15 @@ class ScreenPromptProvider {
         if (missingArguments || unresolvedLookupArguments) {
             Map elicitationSpec = buildElicitationRequest(descriptor, resolvedArguments, missingArguments, unresolvedLookupArguments)
             return [
-                    resultType   : 'input_required',
                     requestState : PromptSupport.encodeRequestState([promptName: name, arguments: resolvedArguments]),
                     inputRequests: [
                             'screen-input': [
                                     method: 'elicitation/create',
                                     params: elicitationSpec
                             ]
+                    ],
+                    _meta        : [
+                            'org.moqui/resultType': 'input_required'
                     ]
             ]
         }
@@ -133,15 +134,15 @@ ${bindingText}
         promptMessages.addAll(buildLookupResourceMessages(lookupBindings))
 
         return [
-                resultType : 'complete',
                 description: descriptor.description,
                 messages   : promptMessages,
                 _meta      : [
-                        'org.moqui/promptBinding': promptBinding,
-                        'org.moqui/resolutionMeta': resolutionMeta,
-                        'org.moqui/lookupBindings': lookupBindings,
+                        'org.moqui/resultType'      : 'complete',
+                        'org.moqui/promptBinding'   : promptBinding,
+                        'org.moqui/resolutionMeta'  : resolutionMeta,
+                        'org.moqui/lookupBindings'  : lookupBindings,
                         'org.moqui/resourceBindings': buildResourceBindings(lookupBindings),
-                        'org.moqui/lookupResources': buildLookupResourceHints(lookupBindings)
+                        'org.moqui/lookupResources' : buildLookupResourceHints(lookupBindings)
                 ]
         ]
     }
@@ -237,6 +238,10 @@ ${bindingText}
         Map<String, Map> promptMap = [:]
         compilePromptList().each { Map descriptor -> promptMap[descriptor.name as String] = descriptor }
         return promptMap
+    }
+
+    Map getPromptDescriptor(String name) {
+        return getPromptDescriptorMap()[name]
     }
 
     protected List<Map> buildLookupBindings(Map descriptor) {

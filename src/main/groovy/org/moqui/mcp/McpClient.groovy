@@ -154,6 +154,38 @@ class McpClient {
                         ]
                 ],
                 [
+                        name       : 'moqui_search_prompt_catalog',
+                        title      : 'Search Prompt Catalog',
+                        description: 'Search the Moqui prompt catalog in OpenSearch. Use this to discover screen-derived prompts by business intent before calling moqui_get_prompt_contract or prompts/get.',
+                        inputSchema: [
+                                type      : 'object',
+                                properties: [
+                                        queryText        : [type: 'string', description: 'Free-text query for prompt discovery'],
+                                        area             : [type: 'string', description: 'Optional functional area filter'],
+                                        actionKind       : [type: 'string', description: 'Optional action kind filter'],
+                                        runtimeExecutable: [type: 'boolean', description: 'Filter prompts that are executable at runtime'],
+                                        limit            : [type: 'integer', description: 'Maximum number of prompt descriptors to return']
+                                ],
+                                required  : ['queryText'],
+                                additionalProperties: false
+                        ]
+                ],
+                [
+                        name       : 'moqui_refresh_prompt_catalog',
+                        title      : 'Refresh Prompt Catalog',
+                        description: 'Rebuild the semantic OpenSearch catalog for MCP prompts. Use this after screen or wiki prompt changes.',
+                        inputSchema: [
+                                type      : 'object',
+                                properties: [
+                                        indexName    : [type: 'string', description: 'Optional override for the prompt catalog index name'],
+                                        recreateIndex: [type: 'boolean', description: 'Delete and recreate the prompt catalog index before indexing'],
+                                        includeScreen: [type: 'boolean', description: 'Include screen-derived prompts'],
+                                        includeWiki  : [type: 'boolean', description: 'Include wiki-backed prompts']
+                                ],
+                                additionalProperties: false
+                        ]
+                ],
+                [
                         name       : 'moqui_search_data_documents',
                         title      : 'Search Data Documents',
                         description: 'Run text search against Moqui DataDocument indexes in OpenSearch. Use this for all business lookups before calling mutating services.',
@@ -240,7 +272,7 @@ class McpClient {
         ec.message.clearAll()
 
         if (name == 'moqui_search_data_documents') {
-            Map svcRes = ec.service.sync().name('mantle.GeneralServices.search#General').parameters(args).call()
+            Map svcRes = ec.service.sync().name('org.moqui.search.SearchServices.search#DataDocuments').parameters(args).call()
             return wrapToolResult(svcRes, [
                     documentList     : svcRes.documentList ?: [],
                     documentListCount: svcRes.documentListCount ?: 0,
@@ -249,8 +281,74 @@ class McpClient {
             ])
         }
 
+        if (name == 'moqui_search_prompt_catalog') {
+            String queryText = (args.queryText as String)?.trim()
+            if (!queryText) throw new IllegalArgumentException('queryText is required')
+            int limit = args.limit instanceof Number ? Math.max(((Number) args.limit).intValue(), 1) : 20
+            int fetchSize = Math.max(limit * 10, 50)
+            Map promptResult = promptProvider.listPrompts([pageSize: 10000])
+            List<Map> runtimePrompts = promptResult.prompts instanceof Collection ? (Collection<Map>) promptResult.prompts : []
+            List<Map> runtimeMatches = runtimePrompts.findAll { Map prompt ->
+                matchesPromptQuery(prompt, queryText)
+            }.collect { Map prompt ->
+                makeRuntimePromptSearchRow(prompt)
+            }
+
+            Map svcArgs = [
+                    indexName  : 'moqui_agent_prompts_v1',
+                    queryString: buildPromptCatalogQuery(queryText, args),
+                    pageIndex  : 0,
+                    pageSize   : fetchSize
+            ]
+            Map svcRes = ec.service.sync().name('org.moqui.search.SearchServices.search#DataDocuments').parameters(svcArgs).call()
+            if (!ec.message.hasError() && svcRes.documentList instanceof Collection && !((Collection) svcRes.documentList).isEmpty()) {
+                List<Map> openSearchRows = ((Collection<Map>) svcRes.documentList).collect { Map doc ->
+                    String runtimePromptName = resolveRuntimePromptName(doc, runtimePrompts)
+                    [
+                            documentId       : doc._id ?: doc.documentId ?: doc.id,
+                            name             : doc.promptName ?: doc.name ?: runtimePromptName,
+                            canonicalPrompt  : doc.canonicalPrompt,
+                            description      : doc.humanExplanation ?: doc.description,
+                            area             : doc.area,
+                            subArea          : doc.subArea,
+                            actionKind       : doc.actionKind,
+                            runtimeExecutable: doc.runtimeExecutable,
+                            preferredService : doc.preferredService,
+                            sourceScreenPath : doc.sourceScreenPath,
+                            transitionNames  : doc.transitionNames ?: [],
+                            promptVariants   : doc.promptVariants ?: [],
+                            score            : doc._score,
+                            source           : 'opensearch'
+                    ]
+                }
+                Map<String, Map> mergedByKey = [:]
+                (openSearchRows + runtimeMatches).each { Map row ->
+                    String key = (row.name ?: row.documentId ?: row.canonicalPrompt ?: UUID.randomUUID().toString()) as String
+                    Map existing = mergedByKey[key]
+                    if (!existing || scorePromptCatalogResult(queryText, row) > scorePromptCatalogResult(queryText, existing)) {
+                        mergedByKey[key] = row
+                    }
+                }
+                List<Map> promptList = mergedByKey.values().toList().sort { Map a, Map b ->
+                    Integer.valueOf(scorePromptCatalogResult(queryText, b)) <=> Integer.valueOf(scorePromptCatalogResult(queryText, a))
+                }.take(limit)
+                return wrapToolResult(svcRes, [promptList: promptList, promptCount: promptList.size(), source: 'opensearch'])
+            }
+
+            ec.message.clearAll()
+            List<Map> prompts = runtimeMatches.sort { Map a, Map b ->
+                Integer.valueOf(scorePromptCatalogResult(queryText, b)) <=> Integer.valueOf(scorePromptCatalogResult(queryText, a))
+            }.take(limit)
+            return wrapToolResult([:], [promptList: prompts, promptCount: prompts.size(), source: 'runtime'])
+        }
+
+        if (name == 'moqui_refresh_prompt_catalog') {
+            Map refreshResult = ec.service.sync().name('org.moqui.mcp.McpServices.refresh#PromptCatalog').parameters(args).call()
+            return wrapToolResult(refreshResult, refreshResult.result ?: refreshResult)
+        }
+
         if (name == 'moqui_list_prompts') {
-            String queryText = (args.queryText as String)?.toLowerCase()
+            String queryText = args.queryText as String
             String source = ((args.source as String) ?: 'any').toLowerCase()
             int limit = args.limit instanceof Number ? Math.max(((Number) args.limit).intValue(), 1) : 50
 
@@ -272,6 +370,8 @@ class McpClient {
             if (queryText) {
                 prompts = prompts.findAll { Map prompt ->
                     matchesPromptQuery(prompt, queryText)
+                }.sort { Map a, Map b ->
+                    Integer.valueOf(scorePromptCatalogResult(queryText, b)) <=> Integer.valueOf(scorePromptCatalogResult(queryText, a))
                 }
             }
             prompts = prompts.take(limit)
@@ -497,18 +597,34 @@ class McpClient {
         Map argument = params.argument instanceof Map ? (Map) params.argument : [:]
         String argName = argument.name as String
         String argValue = (argument.value as String) ?: ''
+        Map completionContext = normalizeCompletionContext(params.context instanceof Map ? (Map) params.context : [:])
         if (!argName) throw new IllegalArgumentException('completion argument.name is required')
 
         if (ref.type == 'ref/resource') {
-            return resourceProvider.complete((String) ref.uri, argName, argValue, params.context instanceof Map ? (Map) params.context : [:])
+            return resourceProvider.complete((String) ref.uri, argName, argValue, completionContext)
         }
         if (ref.type == 'ref/prompt') {
-            return promptProvider.complete(ref, argName, argValue, params.context instanceof Map ? (Map) params.context : [:])
+            return promptProvider.complete(ref, argName, argValue, completionContext)
         }
 
         return [
                     completion: [values: [], total: 0, hasMore: false]
         ]
+    }
+
+    protected static Map normalizeCompletionContext(Map rawContext) {
+        if (!rawContext) return [:]
+        Map normalized = [:]
+        rawContext.each { Object k, Object v ->
+            if (k == 'arguments' && v instanceof Map) return
+            if (v != null) normalized[k.toString()] = v
+        }
+        if (rawContext.arguments instanceof Map) {
+            ((Map) rawContext.arguments).each { Object k, Object v ->
+                if (v != null) normalized[k.toString()] = v
+            }
+        }
+        return normalized
     }
 
     protected Map wrapToolResult(Map serviceResult, Object payload) {
@@ -551,5 +667,147 @@ class McpClient {
                 .replaceAll(/[^A-Za-z0-9]+/, ' ')
                 .trim()
                 .toLowerCase()
+    }
+
+    protected static String buildPromptCatalogQuery(String queryText, Map args = [:]) {
+        String escaped = escapeQueryString(queryText)
+        List<String> tokens = normalizePromptSearchText(queryText).tokenize(' ').findAll { it }
+        List<String> textClauses = []
+        if (escaped) textClauses.add("\"${escaped}\"")
+        if (tokens) {
+            textClauses.add(tokens.join(' AND '))
+            textClauses.add(tokens.collect { "${escapeQueryString(it)}*" }.join(' AND '))
+        }
+        String textQuery = textClauses.unique().findAll { it }.join(' OR ')
+        if (!textQuery) textQuery = escaped
+        List<String> filters = []
+        if (args.area) filters.add("area:\"${escapeQueryString(args.area as String)}\"")
+        if (args.actionKind) filters.add("actionKind:\"${escapeQueryString(args.actionKind as String)}\"")
+        if (args.runtimeExecutable != null) filters.add("runtimeExecutable:${Boolean.valueOf(args.runtimeExecutable as String)}")
+        String query = textQuery
+        if (filters) query = "(${query}) AND " + filters.join(' AND ')
+        return query
+    }
+
+    protected static String escapeQueryString(String value) {
+        if (!value) return ''
+        return value
+                .replace('\\', '\\\\')
+                .replace('"', '\\"')
+                .replace(':', '\\:')
+                .replace('(', '\\(')
+                .replace(')', '\\)')
+    }
+
+    protected static String resolveRuntimePromptName(Map doc, List<Map> runtimePrompts) {
+        if (!doc || !runtimePrompts) return null
+        String sourceScreenPath = doc.sourceScreenPath as String
+        String screenFile = sourceScreenPath ? sourceScreenPath.tokenize('/')?.last() : null
+        String transitionToken = ((doc.documentId ?: doc._id ?: '') as String).tokenize('/')?.last()
+        if (!screenFile || !transitionToken) return null
+        String lowerTransition = transitionToken.toLowerCase()
+        Map exact = runtimePrompts.find { Map prompt ->
+            String promptName = prompt.name as String
+            promptName?.contains(screenFile) && promptName.toLowerCase().endsWith(".${lowerTransition}")
+        }
+        if (exact) return exact.name as String
+        Map partial = runtimePrompts.find { Map prompt ->
+            String promptName = prompt.name as String
+            promptName?.contains(screenFile) && promptName.toLowerCase().contains(lowerTransition)
+        }
+        return partial?.name as String
+    }
+
+    protected static int scorePromptCatalogResult(String queryText, Map row) {
+        if (!row) return 0
+        String normalizedQuery = normalizePromptSearchText(queryText)
+        List<String> queryTokens = normalizedQuery.tokenize(' ').findAll { it }
+        List<String> queryChunks = splitPromptSearchChunks(queryText)
+        String canonical = normalizePromptSearchText(row.canonicalPrompt as String)
+        String description = normalizePromptSearchText(row.description as String)
+        String title = normalizePromptSearchText(row.title as String)
+        String area = normalizePromptSearchText(row.area as String)
+        String subArea = normalizePromptSearchText(row.subArea as String)
+        String name = normalizePromptSearchText(row.name as String)
+        String sourceScreenPath = normalizePromptSearchText(row.sourceScreenPath as String)
+        String preferredService = normalizePromptSearchText(row.preferredService as String)
+        String actionKind = normalizePromptSearchText(row.actionKind as String)
+        String source = normalizePromptSearchText(row.source as String)
+
+        int score = 0
+        if (canonical == normalizedQuery) score += 200
+        if (canonical.contains(normalizedQuery)) score += 120
+        if (description.contains(normalizedQuery)) score += 60
+        if (title == normalizedQuery) score += 180
+        if (title.contains(normalizedQuery)) score += 100
+        if (Boolean.TRUE == row.runtimeExecutable) score += 25
+        if (preferredService) score += 10
+        if (!preferredService) score -= 20
+        if (name.contains(normalizedQuery)) score += 80
+        if (sourceScreenPath.contains(normalizedQuery)) score += 40
+        if (source == 'runtime') score += 20
+
+        queryChunks.each { String chunk ->
+            if (!chunk) return
+            if (canonical.contains(chunk)) score += 70
+            if (title.contains(chunk)) score += 90
+            if (name.contains(chunk)) score += 55
+            if (description.contains(chunk)) score += 25
+        }
+
+        queryTokens.each { String token ->
+            if (canonical.tokenize(' ').contains(token)) score += 30
+            if (description.tokenize(' ').contains(token)) score += 10
+            if (title.tokenize(' ').contains(token)) score += 25
+            if (area.tokenize(' ').contains(token)) score += 8
+            if (subArea.tokenize(' ').contains(token)) score += 8
+            if (name.tokenize(' ').contains(token)) score += 20
+            if (sourceScreenPath.tokenize(' ').contains(token)) score += 15
+            if (preferredService.tokenize(' ').contains(token)) score += 6
+        }
+
+        if (queryTokens.contains('create') && (row.actionKind as String) == 'create') score += 25
+        if (queryTokens.contains('update') && (row.actionKind as String) == 'update') score += 25
+        if (queryTokens.contains('delete') && (row.actionKind as String) == 'delete') score += 25
+        if (queryTokens.contains('move') && canonical.contains('move')) score += 20
+        if ((queryTokens.any { it in ['create', 'update', 'delete', 'move'] }) && actionKind in ['navigate', 'list']) score -= 80
+        if (queryTokens.contains('sales') && name.contains('sales')) score += 70
+        if (queryTokens.contains('sales') && title.contains('sales')) score += 90
+        if (queryTokens.contains('purchase') && name.contains('purchase')) score += 70
+        if (queryTokens.contains('purchase') && title.contains('purchase')) score += 90
+        if (normalizedQuery.contains('create sales order') && name.contains('create sales order')) score += 160
+        if (normalizedQuery.contains('create sales order') && title.contains('create sales order')) score += 180
+        if (normalizedQuery.contains('move asset') && preferredService.contains('move asset')) score += 160
+        if (queryTokens.contains('asset') && preferredService.contains('asset')) score += 45
+        if (queryTokens.contains('order') && preferredService.contains('order')) score += 35
+        if (queryTokens.contains('product') && preferredService.contains('product')) score += 35
+        return score
+    }
+
+    protected static List<String> splitPromptSearchChunks(String queryText) {
+        if (!queryText) return []
+        return queryText
+                .trim()
+                .split(/\s+/)
+                .collect { String chunk -> normalizePromptSearchText(chunk) }
+                .findAll { String chunk -> chunk }
+    }
+
+    protected static Map makeRuntimePromptSearchRow(Map prompt) {
+        String promptName = prompt.name as String
+        String title = prompt.title as String
+        String description = prompt.description as String
+        String promptSource = promptName?.startsWith('moqui.screen.') ? 'screen' : 'wiki'
+        return [
+                name            : promptName,
+                title           : title,
+                description     : description,
+                canonicalPrompt : title ?: promptName,
+                source          : 'runtime',
+                promptSource    : promptSource,
+                runtimeExecutable: Boolean.TRUE,
+                argumentNames   : prompt.arguments instanceof Collection ? ((Collection<Map>) prompt.arguments).collect { Map arg -> arg?.name }.findAll { it } : [],
+                actionKind      : normalizePromptSearchText(title).contains('create') ? 'create' : null
+        ]
     }
 }

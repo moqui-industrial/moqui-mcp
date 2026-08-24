@@ -491,16 +491,26 @@ class MoquiResourceProvider {
                         value      : value,
                         label      : label,
                         description: transitionName,
-                        metadata   : [transition: transitionName]
+                        metadata   : [transition: transitionName],
+                        searchText : buildDynamicLookupSearchText(rowMap, value, label, transitionName)
                 ]
             } else {
                 String text = row?.toString()
-                [value: text, label: text, description: transitionName, metadata: [transition: transitionName]]
+                [
+                        value      : text,
+                        label      : text,
+                        description: transitionName,
+                        metadata   : [transition: transitionName],
+                        searchText : text
+                ]
             }
         }.findAll { Map candidate ->
             if (!candidate.value) return false
             if (!q) return true
-            return [candidate.value, candidate.label, candidate.description].find { it?.toString()?.toLowerCase()?.contains(q) }
+            return [candidate.value, candidate.label, candidate.description, candidate.searchText]
+                    .find { it?.toString()?.toLowerCase()?.contains(q) }
+        }.collect { Map candidate ->
+            candidate.findAll { it.key != 'searchText' }
         }.unique { it.value }.take(limit)
     }
 
@@ -515,10 +525,24 @@ class MoquiResourceProvider {
 
     protected static String extractDynamicLookupLabel(Map rowMap, String labelField, String defaultValue) {
         if (labelField && rowMap[labelField] != null) return rowMap[labelField].toString()
-        for (String fallbackField in ['label', 'text', 'name', 'description', 'partyName']) {
+        for (String fallbackField in ['label', 'text', 'name', 'description', 'partyName', 'facilityName', 'storeName',
+                                      'organizationName', 'productName', 'assetName', 'statusDesc']) {
             if (rowMap[fallbackField] != null) return rowMap[fallbackField].toString()
         }
         return defaultValue
+    }
+
+    protected static String buildDynamicLookupSearchText(Map rowMap, String value, String label, String transitionName) {
+        List<String> pieces = [value, label, transitionName]
+        rowMap?.values()?.each { Object raw ->
+            if (raw == null) return
+            if (raw instanceof Map || raw instanceof Collection) {
+                pieces.add(raw.toString())
+            } else {
+                pieces.add(raw.toString())
+            }
+        }
+        return pieces.findAll { it }.join(' | ')
     }
 
     protected String renderLookupLabel(Map entityValue, Map lookup) {

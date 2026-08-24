@@ -46,11 +46,17 @@ class PromptLookupResolver {
                 case 'glAccount':
                     values = queryColumnValues('mantle.ledger.account.GlAccount', 'accountCode', valuePrefix, 20, null)
                     break
+                case 'asset':
+                    values = queryAssetValues(valuePrefix, 20)
+                    break
                 case 'product':
                     values = queryProductValues(valuePrefix, 20)
                     break
+                case 'productStore':
+                    values = queryProductStoreValues(valuePrefix, 20)
+                    break
                 case 'facility':
-                    values = queryColumnValues('mantle.facility.Facility', 'facilityName', valuePrefix, 20, null)
+                    values = queryFacilityValues(valuePrefix, 20)
                     break
                 case 'facilityLocation':
                     Map<String, Object> extraConditions = [:]
@@ -92,8 +98,12 @@ class PromptLookupResolver {
                 return resolveEnumeration(trimmed)
             case 'glAccount':
                 return resolveGlAccount(trimmed)
+            case 'asset':
+                return resolveAsset(trimmed)
             case 'product':
                 return resolveProduct(trimmed)
+            case 'productStore':
+                return resolveProductStore(trimmed)
             case 'facility':
                 return resolveFacility(trimmed)
             case 'facilityLocation':
@@ -155,9 +165,12 @@ class PromptLookupResolver {
         if (arg == 'statusId' || arg.endsWith('StatusId')) return 'status'
         if (arg == 'enumId' || arg.endsWith('EnumId') || arg.endsWith('TypeEnumId')) return 'enum'
         if (arg == 'glAccountId') return 'glAccount'
+        if (arg == 'assetId') return 'asset'
         if (arg == 'productId') return 'product'
+        if (arg == 'productStoreId') return 'productStore'
         if (arg == 'facilityId') return 'facility'
-        if (arg == 'locationSeqId') return 'facilityLocation'
+        if (arg == 'locationSeqId' || arg.endsWith('LocationSeqId')) return 'facilityLocation'
+        if (arg == 'scanLocation') return 'facilityLocation'
         if (arg == 'timePeriodId') return 'timePeriod'
         if (arg == 'partyId' || arg.endsWith('PartyId') || arg == 'assignToPartyId') return 'party'
         return 'literal'
@@ -171,11 +184,14 @@ class PromptLookupResolver {
     }
 
     protected Map resolveEnumeration(String rawValue, String enumTypeId = null) {
+        String normalized = rawValue
+        def matcher = (rawValue =~ /\[([A-Za-z0-9_:-]+)\]\s*$/)
+        if (matcher.find()) normalized = matcher.group(1)
         return resolveByUniqueMatch('moqui.basic.Enumeration', 'enumId', [
                 [field: 'enumId', operator: 'equals'],
                 [field: 'enumCode', operator: 'equalsIgnoreCase'],
                 [field: 'description', operator: 'equalsIgnoreCase']
-        ], rawValue, enumTypeId ? [enumTypeId: enumTypeId] : null)
+        ], normalized, enumTypeId ? [enumTypeId: enumTypeId] : null)
     }
 
     protected Map resolveGlAccount(String rawValue) {
@@ -187,11 +203,26 @@ class PromptLookupResolver {
         ], rawValue)
     }
 
+    protected Map resolveAsset(String rawValue) {
+        return resolveByUniqueMatch('mantle.product.asset.Asset', 'assetId', [
+                [field: 'assetId', operator: 'equals'],
+                [field: 'serialNumber', operator: 'equalsIgnoreCase'],
+                [field: 'assetName', operator: 'equalsIgnoreCase']
+        ], rawValue)
+    }
+
     protected Map resolveProduct(String rawValue) {
         return resolveByUniqueMatch('mantle.product.Product', 'productId', [
                 [field: 'productId', operator: 'equals'],
                 [field: 'pseudoId', operator: 'equalsIgnoreCase'],
                 [field: 'productName', operator: 'equalsIgnoreCase']
+        ], rawValue)
+    }
+
+    protected Map resolveProductStore(String rawValue) {
+        return resolveByUniqueMatch('mantle.product.store.ProductStore', 'productStoreId', [
+                [field: 'productStoreId', operator: 'equals'],
+                [field: 'storeName', operator: 'equalsIgnoreCase']
         ], rawValue)
     }
 
@@ -266,6 +297,7 @@ class PromptLookupResolver {
         String keyField = lookupMeta.keyField as String
         if (!entityName || !keyField || !ec.entity.isEntityDefined(entityName)) return [value: rawValue, matched: false]
 
+        String normalized = normalizeLookupCandidate(rawValue)
         Map<String, Object> baseConditions = [:]
         ((Collection) lookupMeta.conditions ?: []).each { Map cond ->
             if (!cond?.fieldName) return
@@ -275,15 +307,15 @@ class PromptLookupResolver {
         List<Map> rows = []
         def idFind = ec.entity.find(entityName)
         baseConditions.each { String k, Object v -> idFind.condition(k, v) }
-        idFind.condition(keyField, rawValue)
+        idFind.condition(keyField, normalized)
         rows.addAll(idFind.list() as List<Map>)
 
-        if (!rows && (lookupMeta.textTemplate?.toString()?.toLowerCase()?.contains('partyname'))) {
+        if (!rows && shouldUsePartyNameLookup(lookupMeta, entityName)) {
             def nameFind = ec.entity.find(entityName)
             baseConditions.each { String k, Object v -> nameFind.condition(k, v) }
             nameFind.list().each { Map ev ->
                 String partyName = renderPartyName(ev)
-                if (partyName && partyName.equalsIgnoreCase(rawValue)) rows.add(ev)
+                if (partyName && partyName.equalsIgnoreCase(normalized)) rows.add(ev)
             }
         }
 
@@ -294,7 +326,7 @@ class PromptLookupResolver {
                 baseConditions.each { String k, Object v -> textFind.condition(k, v) }
                 textFind.list().each { Map ev ->
                     List<String> probeValues = templateFields.collect { String fieldName -> ev[fieldName]?.toString() }.findAll { it }
-                    if (probeValues.any { it.equalsIgnoreCase(rawValue) }) rows.add(ev)
+                    if (probeValues.any { it.equalsIgnoreCase(normalized) }) rows.add(ev)
                 }
             }
         }
@@ -343,7 +375,9 @@ class PromptLookupResolver {
                 prefix,
                 argContext ?: [:],
                 20
-        ).collect { Map candidate -> candidate.value as String }.findAll { it }
+        ).collectMany { Map candidate ->
+            [candidate.value as String, candidate.label as String].findAll { it }
+        }.findAll { it }
     }
 
     protected Map resolveByUniqueMatch(String entityName, String idField, List<Map> probes, String rawValue, Map<String, Object> fixedConditions = null) {
@@ -383,15 +417,17 @@ class PromptLookupResolver {
         if (enumTypeId) find.condition('enumTypeId', enumTypeId)
         List<Map> rows = find.list().take(250) as List<Map>
         String q = prefix?.toLowerCase() ?: ''
-        return rows.findAll { Map ev ->
+        List<String> values = rows.findAll { Map ev ->
             if (!q) return true
             [ev.enumId, ev.enumCode, ev.description].find { it?.toString()?.toLowerCase()?.contains(q) }
-        }.collect { Map ev ->
-            ev.enumId as String
+        }.collectMany { Map ev ->
+            List<String> options = []
+            if (ev.enumId) options.add(ev.enumId as String)
+            if (ev.description) options.add(ev.description as String)
+            if (ev.description && ev.enumId) options.add("${ev.description} [${ev.enumId}]".toString())
+            return options
         }.findAll { it }
-                .unique()
-                .sort()
-                .take(limit)
+        return values.unique().sort().take(limit)
     }
 
     protected List<String> queryStatusValues(String prefix, int limit, String statusTypeId) {
@@ -415,6 +451,8 @@ class PromptLookupResolver {
         String entityName = lookupMeta.entityName as String
         if (!entityName || !ec.entity.isEntityDefined(entityName)) return []
         String keyField = lookupMeta.keyField as String
+        boolean usePartyName = shouldUsePartyNameLookup(lookupMeta, entityName)
+        List<String> templateFields = extractTemplateFields(lookupMeta.textTemplate as String)
         Map<String, Object> baseConditions = [:]
         ((Collection) lookupMeta.conditions ?: []).each { Map cond ->
             if (!cond?.fieldName) return
@@ -423,20 +461,61 @@ class PromptLookupResolver {
         List<Map> rows = ec.entity.find(entityName).list().take(250) as List<Map>
         rows = rows.findAll { Map ev -> baseConditions.every { String k, Object v -> ev[k]?.toString() == v?.toString() } }
         String q = prefix?.toLowerCase() ?: ''
-        return rows.findAll { Map ev ->
+        List<String> values = rows.findAll { Map ev ->
             if (!q) return true
             List<String> probeValues = []
-            if (keyField && ev[keyField] != null) probeValues.add(ev[keyField].toString())
-            String partyName = renderPartyName(ev)
-            if (partyName) probeValues.add(partyName)
-            probeValues.addAll(extractTemplateFields(lookupMeta.textTemplate as String).collect { String fieldName -> ev[fieldName]?.toString() }.findAll { it })
+            String keyValue = safeFieldString(ev, keyField)
+            if (keyValue) probeValues.add(keyValue)
+            if (usePartyName) {
+                String partyName = renderPartyName(ev)
+                if (partyName) probeValues.add(partyName)
+            }
+            probeValues.addAll(templateFields.collect { String fieldName -> safeFieldString(ev, fieldName) }.findAll { it })
             probeValues.find { it?.toLowerCase()?.contains(q) }
-        }.collect { Map ev ->
-            keyField && ev[keyField] != null ? ev[keyField].toString() : null
+        }.collectMany { Map ev ->
+            List<String> options = []
+            String keyValue = safeFieldString(ev, keyField)
+            if (keyValue) options.add(keyValue)
+            String labelValue = null
+            if (usePartyName) {
+                labelValue = renderPartyName(ev)
+                if (labelValue) options.add(labelValue)
+            }
+            List<String> templateValues = templateFields.collect { String fieldName -> safeFieldString(ev, fieldName) }.findAll { it }
+            options.addAll(templateValues)
+            if (!labelValue && templateValues) labelValue = templateValues.join(' ').trim()
+            if (keyValue && labelValue) {
+                boolean labelAlreadyContainsKey = labelValue.equalsIgnoreCase(keyValue) ||
+                        labelValue.toLowerCase().contains("[${keyValue.toLowerCase()}]".toString()) ||
+                        labelValue.toLowerCase().startsWith("${keyValue.toLowerCase()}:".toString()) ||
+                        labelValue.toLowerCase().startsWith("${keyValue.toLowerCase()} ".toString())
+                if (!labelAlreadyContainsKey) {
+                    options.add("${keyValue}: ${labelValue}".toString())
+                    options.add("${labelValue} [${keyValue}]".toString())
+                }
+            }
+            return options
         }.findAll { it }
-                .unique()
-                .sort()
-                .take(limit)
+        return values.unique().sort().take(limit)
+    }
+
+    protected static String normalizeLookupCandidate(String rawValue) {
+        if (!rawValue) return rawValue
+        String normalized = rawValue.trim()
+        def bracketMatcher = (normalized =~ /\[([A-Za-z0-9_:-]+)\]\s*$/)
+        if (bracketMatcher.find()) return bracketMatcher.group(1)
+        int colonIdx = normalized.indexOf(':')
+        if (colonIdx > 0) {
+            String beforeColon = normalized.substring(0, colonIdx).trim()
+            if (beforeColon ==~ /[A-Za-z0-9_:-]+/) return beforeColon
+        }
+        return normalized
+    }
+
+    protected static boolean shouldUsePartyNameLookup(Map lookupMeta, String entityName) {
+        String template = lookupMeta?.textTemplate as String
+        if (template?.toLowerCase()?.contains('partyname')) return true
+        return entityName?.startsWith('mantle.party.')
     }
 
     protected static List<String> extractTemplateFields(String template) {
@@ -453,12 +532,22 @@ class PromptLookupResolver {
     }
 
     protected static String renderPartyName(Map ev) {
-        String organizationName = ev['organizationName'] as String
+        String organizationName = safeFieldString(ev, 'organizationName')
         if (organizationName) return organizationName
-        String firstName = ev['firstName'] as String
-        String lastName = ev['lastName'] as String
+        String firstName = safeFieldString(ev, 'firstName')
+        String lastName = safeFieldString(ev, 'lastName')
         if (firstName || lastName) return [firstName, lastName].findAll { it }.join(' ')
         return null
+    }
+
+    protected static String safeFieldString(Map ev, String fieldName) {
+        if (!ev || !fieldName) return null
+        try {
+            Object value = ev[fieldName]
+            return value != null ? value.toString() : null
+        } catch (Throwable ignored) {
+            return null
+        }
     }
 
     protected List<String> queryColumnValues(String entityName, String fieldName, String prefix, int limit, Map<String, Object> conditions) {
@@ -477,6 +566,36 @@ class PromptLookupResolver {
         List<Map> rows = ec.entity.find('mantle.product.Product').list().take(250) as List<Map>
         return rows.collectMany { Map ev ->
             [ev.productId as String, ev.productName as String, ev.pseudoId as String].findAll { it }
+        }.findAll { it.toLowerCase().startsWith(prefix.toLowerCase()) }
+                .unique()
+                .sort()
+                .take(limit)
+    }
+
+    protected List<String> queryAssetValues(String prefix, int limit) {
+        List<Map> rows = ec.entity.find('mantle.product.asset.Asset').list().take(250) as List<Map>
+        return rows.collectMany { Map ev ->
+            [ev.assetId as String, ev.serialNumber as String, ev.assetName as String].findAll { it }
+        }.findAll { it.toLowerCase().startsWith(prefix.toLowerCase()) }
+                .unique()
+                .sort()
+                .take(limit)
+    }
+
+    protected List<String> queryProductStoreValues(String prefix, int limit) {
+        List<Map> rows = ec.entity.find('mantle.product.store.ProductStore').list().take(250) as List<Map>
+        return rows.collectMany { Map ev ->
+            [ev.productStoreId as String, ev.storeName as String].findAll { it }
+        }.findAll { it.toLowerCase().startsWith(prefix.toLowerCase()) }
+                .unique()
+                .sort()
+                .take(limit)
+    }
+
+    protected List<String> queryFacilityValues(String prefix, int limit) {
+        List<Map> rows = ec.entity.find('mantle.facility.Facility').list().take(250) as List<Map>
+        return rows.collectMany { Map ev ->
+            [ev.facilityId as String, ev.facilityName as String].findAll { it }
         }.findAll { it.toLowerCase().startsWith(prefix.toLowerCase()) }
                 .unique()
                 .sort()
