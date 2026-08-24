@@ -75,6 +75,7 @@ class ScreenPromptProvider {
         if (missingArguments || unresolvedLookupArguments) {
             Map elicitationSpec = buildElicitationRequest(descriptor, resolvedArguments, missingArguments, unresolvedLookupArguments)
             return [
+                    resultType  : 'input_required',
                     requestState : PromptSupport.encodeRequestState([promptName: name, arguments: resolvedArguments]),
                     inputRequests: [
                             'screen-input': [
@@ -122,6 +123,10 @@ ${descriptor.serviceName ? "Bound service: ${descriptor.serviceName}" : ""}
 Resolved arguments: ${resolvedArguments}
 Resolved lookups: ${resolutionMeta}
 
+Instruction: treat this prompt contract as an internal ERP execution plan for the LLM. Do not paraphrase or reinterpret lookup-backed values.
+Instruction: every lookup-backed argument must resolve to a valid ERP identifier or an accepted lookup label returned by completion/complete or lookup:// resources.
+Instruction: if a lookup value is unresolved, ambiguous, or still business-prose, stop before submit and ask for a shorter exact lookup term. Do not invent codes, identifiers, or enum values.
+
 ${lookupText}
 ${submitText}
 ${bindingText}
@@ -134,6 +139,7 @@ ${bindingText}
         promptMessages.addAll(buildLookupResourceMessages(lookupBindings))
 
         return [
+                resultType : 'complete',
                 description: descriptor.description,
                 messages   : promptMessages,
                 _meta      : [
@@ -350,9 +356,9 @@ ${bindingText}
 
     protected static String buildLookupInstructionText(List<Map> lookupBindings) {
         if (!lookupBindings) {
-            return 'Lookup guidance: if a field value is uncertain, resolve it before submit using completion/complete or the bound lookup:// resource. If the user already provides a valid code or identifier, pass it through unchanged.'
+            return 'Lookup guidance: if a field value is uncertain, resolve it before submit using completion/complete or the bound lookup:// resource. If the user already provides a valid ERP code or identifier, pass it through unchanged. Otherwise stop and ask for a simpler exact lookup term.'
         }
-        List<String> lines = ['Lookup guidance: before submit, resolve lookup-backed fields using completion/complete or the bound lookup:// resource. If the user already provides a valid code or identifier accepted by the lookup source, reuse it directly without another lookup.']
+        List<String> lines = ['Lookup guidance: before submit, resolve lookup-backed fields using completion/complete or the bound lookup:// resource. If the user already provides a valid code or identifier accepted by the lookup source, reuse it directly without another lookup. Never guess ERP values from free prose.']
         lookupBindings.each { Map binding ->
             StringBuilder line = new StringBuilder()
             line.append("- ").append(binding.argumentName)

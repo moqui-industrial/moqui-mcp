@@ -115,6 +115,9 @@ class PromptCatalogIndexer {
             domainObject = inferDomainObjectFromWiki(promptName)
         }
 
+        String catalogName = buildCatalogName(promptSource, promptTitle, actionKind, domainObject, sourceScreenPath)
+        String catalogDescription = buildCatalogDescription(promptSource, catalogName, promptDescription, actionKind, domainObject, sourceScreenPath, boundServices, lookupBindings)
+
         relatedEntities.addAll(lookupEntities)
         List<String> lookupArgumentNames = lookupBindings.collect { Map binding -> binding.argumentName as String }.findAll { it }
         promptVariants.addAll(buildPromptVariants(promptName, promptTitle, promptDescription, actionKind, domainObject))
@@ -122,6 +125,8 @@ class PromptCatalogIndexer {
         String promptUri = "prompt://${promptName}"
         String humanExplanation = buildHumanExplanation(prompt, promptSource, canonicalPrompt, lookupBindings, boundServices, sourceScreenPath)
         String body = buildPromptBody([
+                catalogName           : catalogName,
+                catalogDescription    : catalogDescription,
                 promptName            : promptName,
                 title                 : promptTitle,
                 description           : promptDescription,
@@ -145,6 +150,9 @@ class PromptCatalogIndexer {
         return [
                 doc_id              : promptName,
                 documentId          : promptName,
+                catalogName         : catalogName,
+                catalogDescription  : catalogDescription,
+                mcpPromptName       : promptName,
                 promptName          : promptName,
                 title               : promptTitle,
                 description         : promptDescription,
@@ -191,6 +199,9 @@ class PromptCatalogIndexer {
                         properties: [
                                 doc_id               : [type: 'keyword'],
                                 documentId           : [type: 'keyword'],
+                                catalogName          : [type: 'text'],
+                                catalogDescription   : [type: 'text'],
+                                mcpPromptName        : [type: 'keyword'],
                                 promptName           : [type: 'keyword'],
                                 title                : [type: 'text'],
                                 description          : [type: 'text'],
@@ -295,21 +306,52 @@ class PromptCatalogIndexer {
         return bits.join(' ').trim()
     }
 
+    protected static String buildCatalogName(String promptSource, String promptTitle, String actionKind, String domainObject, String sourceScreenPath) {
+        if (promptSource == 'screen') {
+            String verb = actionKind ? actionKind.capitalize() : 'Use'
+            String noun = formatBusinessTerm(domainObject ?: inferObjectFromScreenPath(sourceScreenPath) ?: promptTitle)
+            if (noun) return "${verb} ${noun}".trim()
+        }
+        return formatBusinessTerm(promptTitle)
+    }
+
+    protected static String buildCatalogDescription(String promptSource, String catalogName, String promptDescription, String actionKind,
+                                                    String domainObject, String sourceScreenPath, List<String> boundServices, List<Map> lookupBindings) {
+        List<String> bits = []
+        String noun = formatBusinessTerm(domainObject ?: inferObjectFromScreenPath(sourceScreenPath))
+        if (promptSource == 'screen') {
+            bits.add(catalogName ?: 'Screen interaction')
+            if (noun) bits.add("for ${noun.toLowerCase()}")
+            bits.add('in the ERP user workflow.')
+            if (lookupBindings) bits.add('Requires resolving ERP lookup values before submit.')
+            if (boundServices) bits.add("Submits through ${boundServices[0]}.")
+        } else if (promptDescription) {
+            bits.add(promptDescription)
+        } else {
+            bits.add(catalogName ?: 'Moqui prompt')
+        }
+        return bits.join(' ').replaceAll(/\s+/, ' ').trim()
+    }
+
     protected static String buildPromptBody(Map info) {
         return """\
 ---
-name: ${info.promptName}
-title: ${info.title}
-description: ${info.description ?: info.humanExplanation}
+name: ${info.catalogName}
+description: ${info.catalogDescription}
 source: ${info.source}
 actionKind: ${info.actionKind}
 domainObject: ${info.domainObject}
 promptUri: ${info.promptUri}
+mcpPromptName: ${info.promptName}
 ---
-Prompt catalog entry for ${info.promptName}.
+Prompt catalog entry for ${info.catalogName}.
+
+This OpenSearch document is the discovery layer for the prompt and is intentionally analogous to the frontmatter of a SKILL.md file.
+The MCP prompt referenced by mcpPromptName is the technical execution contract for the LLM, analogous to the procedural body of a skill.
 
 Canonical prompt: ${info.canonicalPrompt}
 Human explanation: ${info.humanExplanation}
+Internal MCP prompt name: ${info.promptName}
 Source screen: ${info.sourceScreenPath ?: 'n/a'}
 Transition: ${info.transitionName ?: 'n/a'}
 Execution mode: ${info.executionMode ?: 'n/a'}
@@ -323,6 +365,21 @@ ${(info.lookupUriTemplates ?: []).collect { "- ${it}" }.join('\n')}
 Use prompts/get or moqui_get_prompt_contract with promptName=${info.promptName}.
 When submit is confirmed, execute the bound Moqui tool described by the prompt contract.
 """.stripIndent().trim()
+    }
+
+    protected static String inferObjectFromScreenPath(String screenLocation) {
+        List<String> tokens = tokenizePath(screenLocation)
+        return tokens ? tokens[-1] : null
+    }
+
+    protected static String formatBusinessTerm(String raw) {
+        if (!raw) return raw
+        return raw
+                .replace('.xml', '')
+                .replaceAll(/([a-z0-9])([A-Z])/, '$1 $2')
+                .replaceAll(/[._]+/, ' ')
+                .replaceAll(/\s+/, ' ')
+                .trim()
     }
 
     protected static List<String> tokenizePath(String screenLocation) {

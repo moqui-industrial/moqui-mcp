@@ -9,6 +9,11 @@ This component is intentionally narrow and reusable:
 - `prompts` are either stored in Moqui Wiki pages or derived at runtime from Moqui screens/transitions
 - `notifications` are bridged from Moqui `NotificationMessage`
 
+The prompt layer is intentionally split in two:
+
+- the internal MCP prompt is technical and optimized for the LLM
+- the OpenSearch prompt-catalog document is semantic and optimized for discovery
+
 ## Scope
 
 `moqui-mcp` is the MCP-facing protocol layer. It should stay small.
@@ -252,6 +257,78 @@ For screen-derived prompts:
 
 This keeps `moqui-mcp` stateless while still supporting multi-round prompt completion.
 
+### Prompt discovery versus prompt execution
+
+This component deliberately separates:
+
+- `prompt discovery`
+- `prompt execution`
+
+The internal MCP prompt is not intended to be friendly free-form prose for the end user.
+It is intended to be a precise execution contract for the LLM.
+
+That means:
+
+- lookup-backed values should resolve to real ERP identifiers, codes, enum ids, or accepted lookup labels
+- vague business prose such as `the internal retail organization` should fail
+- if a lookup cannot be resolved exactly enough, the LLM should stop before submit and ask for a simpler lookup term
+
+This is intentional for ERP safety and repeatability.
+
+### Prompt catalog documents in OpenSearch
+
+To make prompts discoverable in business language, `moqui-mcp` also materializes a semantic catalog in OpenSearch.
+
+Each prompt catalog document contains:
+
+- a business-oriented `name`
+- a business-oriented `description`
+- the internal MCP prompt name in metadata (`mcpPromptName`)
+- the technical prompt link (`promptUri`)
+
+This means the user-facing search surface and the execution surface are different by design:
+
+- OpenSearch catalog document: business discovery surface
+- MCP prompt contract: technical execution surface
+
+### Comparison with `SKILL.md`
+
+The prompt catalog is intentionally modeled to be analogous to the `SKILL.md` pattern used by agent skills.
+
+Conceptually:
+
+- the OpenSearch prompt-catalog document plays the role of `SKILL.md` frontmatter
+- the internal MCP prompt contract plays the role of the technical body of `SKILL.md`
+
+In other words:
+
+- `catalogName` / `catalogDescription` correspond to the semantic activation metadata
+- `mcpPromptName` points to the executable technical artifact
+- `prompts/get` returns the detailed interaction contract that the LLM must follow
+
+This mirrors the same activation problem solved by agent skills:
+
+- a semantic description is needed to find the right artifact
+- a technical body is needed to execute it correctly
+
+### Why this separation matters
+
+If the internal MCP prompt were also the business-facing discovery text, it would become ambiguous and weaker for execution.
+
+If the OpenSearch catalog document were also the execution contract, it would become too informal and too unsafe for ERP operations.
+
+The current design keeps both concerns separate:
+
+- business-language retrieval happens in OpenSearch
+- precise execution happens through MCP prompt contracts plus tools/resources/completion
+
+This is especially important for:
+
+- enum resolution
+- party/store/facility lookup
+- screen-derived submit contracts
+- deterministic user-driven ERP workflows
+
 ### Example screen-derived round trip
 
 1. Call `prompts/get` for a screen-derived prompt name.
@@ -366,5 +443,14 @@ Use other components for higher-level behavior:
 - `moqui-harness` for planning, orchestration, validation, and business execution policy
 - `moqui-math` for mathematical or categorical models
 - search/DataDocument definitions in Mantle or other components for rich OpenSearch lookup
+
+For user-driven ERP workflows:
+
+- discover the prompt through `moqui_search_prompt_catalog`
+- obtain the internal execution contract through `prompts/get` or `moqui_get_prompt_contract`
+- resolve lookup-backed values through `completion/complete` or `lookup://` resources
+- submit through the bound MCP tool
+
+This makes MCP prompts the conversational counterpart of Moqui screens, while keeping the execution semantics strict and machine-safe.
 
 See [docs/HarnessBoundary.md](docs/HarnessBoundary.md) for the explicit architectural split between `moqui-mcp` and `moqui-harness`.

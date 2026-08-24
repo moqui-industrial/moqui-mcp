@@ -8,6 +8,10 @@ import org.moqui.impl.service.ServiceFacadeImpl
 import org.moqui.impl.util.RestSchemaUtil
 
 class McpClient {
+    protected static final Set<String> PROMPT_SEARCH_STOPWORDS = [
+            'a', 'an', 'the', 'of', 'for', 'to', 'from', 'in', 'on', 'with', 'by', 'and'
+    ] as Set
+
     protected final ExecutionContext ec
     static final String PROTOCOL_VERSION = '2026-07-28'
     static final long CACHE_TTL_MS = 300000L
@@ -306,9 +310,13 @@ class McpClient {
                     String runtimePromptName = resolveRuntimePromptName(doc, runtimePrompts)
                     [
                             documentId       : doc._id ?: doc.documentId ?: doc.id,
-                            name             : doc.promptName ?: doc.name ?: runtimePromptName,
+                            catalogName      : doc.catalogName,
+                            catalogDescription: doc.catalogDescription,
+                            name             : doc.catalogName ?: doc.title ?: doc.promptName ?: doc.name ?: runtimePromptName,
+                            promptName       : doc.mcpPromptName ?: doc.promptName ?: runtimePromptName,
                             canonicalPrompt  : doc.canonicalPrompt,
-                            description      : doc.humanExplanation ?: doc.description,
+                            description      : doc.catalogDescription ?: doc.humanExplanation ?: doc.description,
+                            title            : doc.catalogName ?: doc.title ?: runtimePromptName,
                             area             : doc.area,
                             subArea          : doc.subArea,
                             actionKind       : doc.actionKind,
@@ -321,15 +329,7 @@ class McpClient {
                             source           : 'opensearch'
                     ]
                 }
-                Map<String, Map> mergedByKey = [:]
-                (openSearchRows + runtimeMatches).each { Map row ->
-                    String key = (row.name ?: row.documentId ?: row.canonicalPrompt ?: UUID.randomUUID().toString()) as String
-                    Map existing = mergedByKey[key]
-                    if (!existing || scorePromptCatalogResult(queryText, row) > scorePromptCatalogResult(queryText, existing)) {
-                        mergedByKey[key] = row
-                    }
-                }
-                List<Map> promptList = mergedByKey.values().toList().sort { Map a, Map b ->
+                List<Map> promptList = openSearchRows.sort { Map a, Map b ->
                     Integer.valueOf(scorePromptCatalogResult(queryText, b)) <=> Integer.valueOf(scorePromptCatalogResult(queryText, a))
                 }.take(limit)
                 return wrapToolResult(svcRes, [promptList: promptList, promptCount: promptList.size(), source: 'opensearch'])
@@ -646,8 +646,8 @@ class McpClient {
 
     protected static boolean matchesPromptQuery(Map prompt, String queryText) {
         if (!queryText) return true
-        String normalizedQuery = normalizePromptSearchText(queryText)
-        List<String> queryTokens = normalizedQuery.tokenize(' ').findAll { it }
+        List<String> queryTokens = normalizePromptSearchTokens(queryText)
+        String normalizedQuery = queryTokens.join(' ')
         List argNames = prompt.arguments instanceof Collection ? ((Collection) prompt.arguments).collect { Map arg -> arg?.name } : []
         String haystack = normalizePromptSearchText([
                 prompt.name,
@@ -669,14 +669,40 @@ class McpClient {
                 .toLowerCase()
     }
 
+    protected static List<String> normalizePromptSearchTokens(String text) {
+        return normalizePromptSearchText(text)
+                .tokenize(' ')
+                .findAll { String token -> token && !PROMPT_SEARCH_STOPWORDS.contains(token) }
+    }
+
     protected static String buildPromptCatalogQuery(String queryText, Map args = [:]) {
-        String escaped = escapeQueryString(queryText)
-        List<String> tokens = normalizePromptSearchText(queryText).tokenize(' ').findAll { it }
+        List<String> tokens = normalizePromptSearchTokens(queryText)
+        String normalizedQuery = tokens.join(' ')
+        String escaped = escapeQueryString(normalizedQuery)
         List<String> textClauses = []
-        if (escaped) textClauses.add("\"${escaped}\"")
+        if (escaped) {
+            textClauses.add("catalogName:\"${escaped}\"")
+            textClauses.add("canonicalPrompt:\"${escaped}\"")
+            textClauses.add("catalogDescription:\"${escaped}\"")
+            textClauses.add("humanExplanation:\"${escaped}\"")
+            textClauses.add("title:\"${escaped}\"")
+            textClauses.add("embeddingText:\"${escaped}\"")
+        }
         if (tokens) {
-            textClauses.add(tokens.join(' AND '))
-            textClauses.add(tokens.collect { "${escapeQueryString(it)}*" }.join(' AND '))
+            String andTokens = tokens.join(' AND ')
+            String andPrefixes = tokens.collect { "${escapeQueryString(it)}*" }.join(' AND ')
+            textClauses.add("catalogName:(${andTokens})")
+            textClauses.add("canonicalPrompt:(${andTokens})")
+            textClauses.add("catalogDescription:(${andTokens})")
+            textClauses.add("humanExplanation:(${andTokens})")
+            textClauses.add("title:(${andTokens})")
+            textClauses.add("embeddingText:(${andTokens})")
+            textClauses.add("catalogName:(${andPrefixes})")
+            textClauses.add("canonicalPrompt:(${andPrefixes})")
+            textClauses.add("catalogDescription:(${andPrefixes})")
+            textClauses.add("humanExplanation:(${andPrefixes})")
+            textClauses.add("title:(${andPrefixes})")
+            textClauses.add("embeddingText:(${andPrefixes})")
         }
         String textQuery = textClauses.unique().findAll { it }.join(' OR ')
         if (!textQuery) textQuery = escaped
@@ -720,9 +746,11 @@ class McpClient {
 
     protected static int scorePromptCatalogResult(String queryText, Map row) {
         if (!row) return 0
-        String normalizedQuery = normalizePromptSearchText(queryText)
-        List<String> queryTokens = normalizedQuery.tokenize(' ').findAll { it }
+        List<String> queryTokens = normalizePromptSearchTokens(queryText)
+        String normalizedQuery = queryTokens.join(' ')
         List<String> queryChunks = splitPromptSearchChunks(queryText)
+        String catalogName = normalizePromptSearchText(row.catalogName as String)
+        String catalogDescription = normalizePromptSearchText(row.catalogDescription as String)
         String canonical = normalizePromptSearchText(row.canonicalPrompt as String)
         String description = normalizePromptSearchText(row.description as String)
         String title = normalizePromptSearchText(row.title as String)
@@ -735,6 +763,9 @@ class McpClient {
         String source = normalizePromptSearchText(row.source as String)
 
         int score = 0
+        if (catalogName == normalizedQuery) score += 260
+        if (catalogName.contains(normalizedQuery)) score += 160
+        if (catalogDescription.contains(normalizedQuery)) score += 90
         if (canonical == normalizedQuery) score += 200
         if (canonical.contains(normalizedQuery)) score += 120
         if (description.contains(normalizedQuery)) score += 60
@@ -745,10 +776,13 @@ class McpClient {
         if (!preferredService) score -= 20
         if (name.contains(normalizedQuery)) score += 80
         if (sourceScreenPath.contains(normalizedQuery)) score += 40
-        if (source == 'runtime') score += 20
+        if (source == 'opensearch') score += 60
+        if (source == 'runtime') score += 5
 
         queryChunks.each { String chunk ->
             if (!chunk) return
+            if (catalogName.contains(chunk)) score += 95
+            if (catalogDescription.contains(chunk)) score += 35
             if (canonical.contains(chunk)) score += 70
             if (title.contains(chunk)) score += 90
             if (name.contains(chunk)) score += 55
@@ -756,6 +790,8 @@ class McpClient {
         }
 
         queryTokens.each { String token ->
+            if (catalogName.tokenize(' ').contains(token)) score += 38
+            if (catalogDescription.tokenize(' ').contains(token)) score += 14
             if (canonical.tokenize(' ').contains(token)) score += 30
             if (description.tokenize(' ').contains(token)) score += 10
             if (title.tokenize(' ').contains(token)) score += 25
@@ -786,11 +822,7 @@ class McpClient {
 
     protected static List<String> splitPromptSearchChunks(String queryText) {
         if (!queryText) return []
-        return queryText
-                .trim()
-                .split(/\s+/)
-                .collect { String chunk -> normalizePromptSearchText(chunk) }
-                .findAll { String chunk -> chunk }
+        return normalizePromptSearchTokens(queryText)
     }
 
     protected static Map makeRuntimePromptSearchRow(Map prompt) {
@@ -800,6 +832,7 @@ class McpClient {
         String promptSource = promptName?.startsWith('moqui.screen.') ? 'screen' : 'wiki'
         return [
                 name            : promptName,
+                promptName      : promptName,
                 title           : title,
                 description     : description,
                 canonicalPrompt : title ?: promptName,
