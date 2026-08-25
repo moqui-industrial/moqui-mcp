@@ -6,11 +6,13 @@ class ScreenPromptProvider {
     protected final ExecutionContext ec
     protected final ScreenInteractionCompiler compiler
     protected final PromptLookupResolver lookupResolver
+    protected final PromptSecurityHelper securityHelper
 
     ScreenPromptProvider(ExecutionContext ec) {
         this.ec = ec
         this.compiler = new ScreenInteractionCompiler(ec)
         this.lookupResolver = new PromptLookupResolver(ec)
+        this.securityHelper = new PromptSecurityHelper(ec)
     }
 
     boolean hasPrompt(String name) {
@@ -237,7 +239,9 @@ ${bindingText}
     }
 
     protected List<Map> compilePromptList() {
-        return compiler.compileServiceBoundPrompts()
+        return compiler.compileServiceBoundPrompts().findAll { Map descriptor ->
+            securityHelper.isPromptVisible(descriptor)
+        }
     }
 
     protected Map<String, Map> getPromptDescriptorMap() {

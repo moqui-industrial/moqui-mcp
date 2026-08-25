@@ -589,8 +589,10 @@ class MoquiResourceProvider {
     }
 
     protected Map<String, Map> buildPromptDescriptorMap() {
+        PromptSecurityHelper securityHelper = new PromptSecurityHelper(ec)
         Map<String, Map> promptMap = [:]
         compiler.compileServiceBoundPrompts().each { Map descriptor ->
+            if (!securityHelper.isPromptVisible(descriptor)) return
             promptMap[descriptor.name as String] = descriptor
         }
         return promptMap

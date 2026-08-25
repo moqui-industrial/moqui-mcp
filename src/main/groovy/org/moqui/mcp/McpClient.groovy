@@ -18,12 +18,14 @@ class McpClient {
 
     protected final MoquiResourceProvider resourceProvider
     protected final CompositePromptProvider promptProvider
+    protected final PromptSecurityHelper promptSecurityHelper
     protected final String clientProfile
 
     McpClient(ExecutionContext ec, Map options = [:]) {
         this.ec = ec
         this.resourceProvider = new MoquiResourceProvider(ec)
         this.promptProvider = new CompositePromptProvider(ec)
+        this.promptSecurityHelper = new PromptSecurityHelper(ec)
         this.clientProfile = (options?.clientProfile as String) ?: 'default'
     }
 
@@ -328,6 +330,9 @@ class McpClient {
                             score            : doc._score,
                             source           : 'opensearch'
                     ]
+                }.findAll { Map row ->
+                    String promptName = row.promptName as String
+                    runtimePrompts.any { Map prompt -> (prompt.name as String) == promptName }
                 }
                 List<Map> promptList = openSearchRows.sort { Map a, Map b ->
                     Integer.valueOf(scorePromptCatalogResult(queryText, b)) <=> Integer.valueOf(scorePromptCatalogResult(queryText, a))
@@ -481,6 +486,7 @@ class McpClient {
             if (seenNames.add(sd.serviceName)) serviceTools.add(makeServiceToolDescriptor(sd))
         }
         new ScreenInteractionCompiler(ec).compileServiceBoundPrompts().each { Map descriptor ->
+            if (!promptSecurityHelper.isPromptVisible(descriptor)) return
             String serviceName = descriptor.serviceName as String
             if (!serviceName || !seenNames.add(serviceName)) return
             ServiceDefinition sd = ec.serviceFacade.getServiceDefinition(serviceName)
