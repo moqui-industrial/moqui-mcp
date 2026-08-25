@@ -73,6 +73,8 @@ This is intentionally manual and curated. A wiki-backed MCP prompt is:
 
 The prompt text is for the LLM. The business-facing discovery language can be curated directly in the wiki page title and content.
 
+If the `MCP_PROMPTS` wiki space contains no pages, `prompts/list` will correctly return an empty list.
+
 ## Security
 
 `moqui-mcp` relies on standard Moqui artifact-aware security.
@@ -130,3 +132,9 @@ An MCP Inspector client config is provided in:
 The shell helper is:
 
 - `tools/inspector/run-inspector-local.sh`
+
+## Historical Context
+
+The architectural rationale for the current minimal design is documented in:
+
+- `docs/ArchitecturalEvolution.md`

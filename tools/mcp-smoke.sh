@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_URL="${MCP_BASE_URL:-http://localhost:8080/mcp}"
+BASE_URL="${MCP_BASE_URL:-http://localhost:8081/mcp}"
 PROTO_VERSION="${MCP_PROTOCOL_VERSION:-2026-07-28}"
 ENTITY_URI="${MCP_TEST_ENTITY_URI:-entity://mantle.party.Person}"
+PROMPT_NAME="${MCP_TEST_PROMPT_NAME:-}"
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -75,16 +76,36 @@ curl_json "tools/list" \
 assert_contains "${TMP_DIR}/tools.json" '"moqui_search_data_documents"'
 assert_contains "${TMP_DIR}/tools.json" '"moqui_call_service"'
 
-echo "3. resources/read"
+echo "3. resources/list"
+curl_json "resources/list" \
+  '{"jsonrpc":"2.0","id":3,"method":"resources/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' \
+  > "${TMP_DIR}/resources.json"
+assert_contains "${TMP_DIR}/resources.json" '"resources"'
+
+echo "4. resources/read"
 curl_json "resources/read" \
-  "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"resources/read\",\"params\":{\"uri\":\"${ENTITY_URI}\",\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}" \
+  "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"resources/read\",\"params\":{\"uri\":\"${ENTITY_URI}\",\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}" \
   -H "Mcp-Name: ${ENTITY_URI}" \
   > "${TMP_DIR}/resource.json"
 assert_resource_entity_name "${TMP_DIR}/resource.json" "${ENTITY_URI#entity://}"
 
-echo "4. negative mismatch"
+echo "5. prompts/list"
+curl_json "prompts/list" \
+  '{"jsonrpc":"2.0","id":5,"method":"prompts/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' \
+  > "${TMP_DIR}/prompts.json"
+assert_contains "${TMP_DIR}/prompts.json" '"prompts"'
+
+if [[ -n "${PROMPT_NAME}" ]]; then
+  echo "6. prompts/get (${PROMPT_NAME})"
+  curl_json "prompts/get" \
+    "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"prompts/get\",\"params\":{\"name\":\"${PROMPT_NAME}\",\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}" \
+    > "${TMP_DIR}/prompt.json"
+  assert_contains "${TMP_DIR}/prompt.json" "\"name\":\"${PROMPT_NAME}\""
+fi
+
+echo "7. negative mismatch"
 curl_json "tools/list" \
-  '{"jsonrpc":"2.0","id":4,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' \
+  '{"jsonrpc":"2.0","id":7,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' \
   > "${TMP_DIR}/mismatch.json"
 assert_contains "${TMP_DIR}/mismatch.json" '"code":-32020'
 
