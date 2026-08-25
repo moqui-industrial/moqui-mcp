@@ -7,8 +7,7 @@ class CompositePromptProvider {
 
     CompositePromptProvider(ExecutionContext ec) {
         promptProviders = [
-                new WikiPromptProvider(ec),
-                new ScreenPromptProvider(ec)
+                new WikiPromptProvider(ec)
         ]
     }
 

@@ -19,21 +19,4 @@ along with this software (see the LICENSE.md file). If not, see
             restrictView="N"
             restrictUpdate="Y"
             allowAnyHtml="N"/>
-
-    <moqui.entity.document.DataDocument
-            dataDocumentId="McpPromptCatalogDocument"
-            documentName="MCP Prompt Catalog Document"
-            documentTitle="${canonicalPrompt}"
-            indexName="moqui_agent_prompts_v1"
-            manualDataServiceName="org.moqui.mcp.McpServices.add#PromptCatalogManualDocumentData"
-            manualMappingServiceName="org.moqui.mcp.McpServices.transform#PromptCatalogDocumentMapping"/>
-
-    <moqui.entity.feed.DataFeed
-            dataFeedId="McpPromptCatalogFeed"
-            dataFeedTypeEnumId="DTFDTP_MAN_PULL"
-            indexOnStartEmpty="Y"
-            feedName="MCP Prompt Catalog Feed"
-            feedReceiveServiceName="org.moqui.search.SearchServices.index#DataDocuments"/>
-
-    <moqui.entity.feed.DataFeedDocument dataFeedId="McpPromptCatalogFeed" dataDocumentId="McpPromptCatalogDocument"/>
 </entity-facade-xml>

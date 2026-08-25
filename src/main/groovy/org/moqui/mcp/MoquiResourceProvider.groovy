@@ -6,11 +6,9 @@ import org.moqui.impl.context.ArtifactExecutionFacadeImpl
 
 class MoquiResourceProvider {
     protected final ExecutionContext ec
-    protected final ScreenInteractionCompiler compiler
 
     MoquiResourceProvider(ExecutionContext ec) {
         this.ec = ec
-        this.compiler = new ScreenInteractionCompiler(ec)
     }
 
     Map listResources(Map params) {
@@ -21,7 +19,7 @@ class MoquiResourceProvider {
             resources.add([
                     uri        : "moqui://entity-def/${entityName}",
                     name       : entityName,
-                    description: "Moqui entity definition for ${entityName}",
+                    description: "Moqui entity or view-entity definition for ${entityName}",
                     mimeType   : 'application/json'
             ])
         }
@@ -52,7 +50,7 @@ class MoquiResourceProvider {
                 [
                         name       : 'moqui-entity-definition',
                         title      : 'Moqui Entity Definition',
-                        description: 'Read Moqui entity definition metadata by full entity name.',
+                        description: 'Read Moqui entity or view-entity definition metadata by full entity name.',
                         uriTemplate: 'moqui://entity-def/{entityName}',
                         mimeType   : 'application/json'
                 ],
@@ -69,16 +67,8 @@ class MoquiResourceProvider {
                         description: 'Read DataDocument definition metadata by dataDocumentId.',
                         uriTemplate: 'moqui://data-document/{dataDocumentId}',
                         mimeType   : 'application/json'
-                ],
-                [
-                        name       : 'moqui-screen-lookup',
-                        title      : 'Moqui Screen Lookup',
-                        description: 'Read a prompt-bound lookup resource derived from a Moqui screen field.',
-                        uriTemplate: 'lookup://screen/{promptName}/{argumentName}?q={query}',
-                        mimeType   : 'application/json'
                 ]
         ]
-        templates.addAll(buildLookupResourceTemplates())
         Map page = McpPaginationSupport.paginate(templates, params, 'resourceTemplates')
         Map result = [
                 resultType       : 'complete',
@@ -112,10 +102,6 @@ class MoquiResourceProvider {
             return readDataDocument(uri, dataDocumentId)
         }
 
-        if (uri.startsWith('lookup://screen/')) {
-            return readLookupResource(uri)
-        }
-
         if (uri.startsWith('entity://')) {
             return readEntityDefinition(uri, uri.substring('entity://'.length()))
         }
@@ -139,41 +125,6 @@ class MoquiResourceProvider {
         }
 
         throw new IllegalArgumentException("Unsupported resource URI: ${uri}")
-    }
-
-    Map complete(String refUri, String argumentName, String argumentValue, Map context) {
-        String valuePrefix = argumentValue ?: ''
-        List<String> values = []
-
-        if (refUri == 'moqui://entity-def/{entityName}' || refUri == 'moqui://entity/{entityName}/{primaryKeyToken}') {
-            if (argumentName == 'entityName') {
-                values = ((Collection<String>) ec.entity.getAllEntityNames()).toList().findAll { it.startsWith(valuePrefix) }.sort().take(100)
-            }
-        }
-
-        if (refUri == 'moqui://data-document/{dataDocumentId}' && argumentName == 'dataDocumentId') {
-            values = ec.entity.find('moqui.entity.document.DataDocument').useCache(true).list()
-                    .collect { it.dataDocumentId as String }
-                    .findAll { it.startsWith(valuePrefix) }
-                    .sort()
-                    .take(100)
-        }
-
-        if (refUri?.startsWith('lookup://screen/')) {
-            Map lookupTemplate = parseLookupUri(refUri)
-            if (argumentName == 'query' || argumentName == 'q') {
-                values = queryLookupValues(lookupTemplate.promptName as String, lookupTemplate.argumentName as String,
-                        [q: valuePrefix]).collect { it.value as String }.take(100)
-            }
-        }
-
-        return [
-                completion: [
-                        values : values,
-                        total  : values.size(),
-                        hasMore: false
-                ]
-        ]
     }
 
     protected Map readEntityDefinition(String uri, String entityName) {
@@ -268,290 +219,18 @@ class MoquiResourceProvider {
                                      text    : new JsonBuilder([
                                              dataDocument: dd,
                                              summary     : [
-                                                     dataDocumentId     : dd?.dataDocumentId,
-                                                     documentName       : dd?.documentName,
-                                                     documentTitle      : dd?.documentTitle,
-                                                     indexName          : dd?.indexName,
-                                                     primaryEntityName  : dd?.primaryEntityName,
-                                                     manualDataService  : dd?.manualDataServiceName,
+                                                     dataDocumentId      : dd?.dataDocumentId,
+                                                     documentName        : dd?.documentName,
+                                                     documentTitle       : dd?.documentTitle,
+                                                     indexName           : dd?.indexName,
+                                                     primaryEntityName   : dd?.primaryEntityName,
+                                                     manualDataService   : dd?.manualDataServiceName,
                                                      manualMappingService: dd?.manualMappingServiceName
                                              ],
                                              fieldList   : fields
                                      ]).toString()
                              ]]
         ]
-    }
-
-    protected List<Map> buildLookupResourceTemplates() {
-        List<Map> templates = []
-        buildPromptDescriptorMap().each { String promptName, Map descriptor ->
-            (descriptor.arguments ?: []).each { Map arg ->
-                Map lookup = arg.lookup instanceof Map ? (Map) arg.lookup : null
-                if (!lookup) return
-                List<String> queryParts = ['q={query}']
-                if (lookup.dependsOn instanceof Collection) {
-                    ((Collection<String>) lookup.dependsOn).findAll { it }.each { String dep ->
-                        queryParts.add("${dep}={${dep}}")
-                    }
-                }
-                String uriTemplate = "lookup://screen/${promptName}/${arg.name}"
-                if (queryParts) uriTemplate += '?' + queryParts.join('&')
-                templates.add([
-                        name       : "lookup.${promptName}.${arg.name}",
-                        title      : "${descriptor.title}.${arg.title ?: arg.name}",
-                        description: "Lookup resource for ${descriptor.title} field ${arg.name}",
-                        uriTemplate: uriTemplate,
-                        mimeType   : 'application/json',
-                        annotations: [
-                                lookupKind : lookup.lookupKind,
-                                entityName : lookup.entityName,
-                                enumTypeId : lookup.enumTypeId,
-                                statusTypeId: lookup.statusTypeId
-                        ].findAll { it.value != null }
-                ])
-            }
-        }
-        return templates.sort { a, b -> (a.uriTemplate ?: '') <=> (b.uriTemplate ?: '') }
-    }
-
-    protected Map readLookupResource(String uri) {
-        Map parsed = parseLookupUri(uri)
-        String promptName = parsed.promptName as String
-        String argumentName = parsed.argumentName as String
-        Map descriptor = buildPromptDescriptorMap()[promptName]
-        if (!descriptor) throw new IllegalArgumentException("Unknown lookup prompt ${promptName}")
-        Map argument = (descriptor.arguments ?: []).find { Map arg -> arg.name == argumentName } as Map
-        if (!argument?.lookup) throw new IllegalArgumentException("Prompt ${promptName} does not expose lookup field ${argumentName}")
-
-        List<Map> values = queryLookupValues(promptName, argumentName, parsed.queryParams as Map<String, String>)
-        Map payload = [
-                promptName  : promptName,
-                argumentName: argumentName,
-                title       : argument.title ?: argument.name,
-                lookup      : argument.lookup,
-                query       : parsed.queryParams?.q,
-                values      : values
-        ]
-
-        return [
-                ttlMs     : McpClient.CACHE_TTL_MS,
-                cacheScope: 'private',
-                contents  : [[
-                                     uri     : uri,
-                                     mimeType: 'application/json',
-                                     text    : new JsonBuilder(payload).toString()
-                             ]]
-        ]
-    }
-
-    protected List<Map> queryLookupValues(String promptName, String argumentName, Map<String, String> queryParams) {
-        Map descriptor = buildPromptDescriptorMap()[promptName]
-        if (!descriptor) return []
-        Map argument = (descriptor.arguments ?: []).find { Map arg -> arg.name == argumentName } as Map
-        Map lookup = argument?.lookup instanceof Map ? (Map) argument.lookup : null
-        if (!lookup) return []
-        String query = queryParams?.q ?: ''
-
-        switch (lookup.lookupKind) {
-            case 'enum':
-            case 'enum-parent':
-            case 'enum-group':
-                return queryEnumerationLookup(query, lookup.enumTypeId as String, 50)
-            case 'status':
-                return queryStatusLookup(query, lookup.statusTypeId as String, 50)
-            case 'dynamic-options':
-                return queryDynamicOptionsLookup(descriptor, argument, lookup, query, queryParams, 50)
-            case 'entity-options':
-                return queryEntityOptionsLookup(lookup, query, queryParams, 50)
-            default:
-                return []
-        }
-    }
-
-    protected List<Map> queryEnumerationLookup(String query, String enumTypeId, int limit) {
-        if (!ec.entity.isEntityDefined('moqui.basic.Enumeration')) return []
-        def find = ec.entity.find('moqui.basic.Enumeration')
-        if (enumTypeId) find.condition('enumTypeId', enumTypeId)
-        List<Map> rows = find.list().take(250) as List<Map>
-        String q = query?.toLowerCase()
-        return rows.findAll { Map ev ->
-            !q || [ev.enumId, ev.enumCode, ev.description].find { it?.toString()?.toLowerCase()?.contains(q) }
-        }.collect { Map ev ->
-            [
-                    value      : ev.enumId as String,
-                    label      : ev.description ?: ev.enumCode ?: ev.enumId,
-                    description: ev.enumCode ?: ev.description,
-                    metadata   : [
-                            enumCode  : ev.enumCode,
-                            enumTypeId: ev.enumTypeId
-                    ].findAll { it.value != null }
-            ]
-        }.unique { it.value }.take(limit)
-    }
-
-    protected List<Map> queryStatusLookup(String query, String statusTypeId, int limit) {
-        if (!ec.entity.isEntityDefined('moqui.basic.StatusItem')) return []
-        def find = ec.entity.find('moqui.basic.StatusItem')
-        if (statusTypeId) find.condition('statusTypeId', statusTypeId)
-        List<Map> rows = find.list().take(250) as List<Map>
-        String q = query?.toLowerCase()
-        return rows.findAll { Map ev ->
-            !q || [ev.statusId, ev.description].find { it?.toString()?.toLowerCase()?.contains(q) }
-        }.collect { Map ev ->
-            [
-                    value      : ev.statusId as String,
-                    label      : ev.description ?: ev.statusId,
-                    description: ev.statusId,
-                    metadata   : [statusTypeId: ev.statusTypeId].findAll { it.value != null }
-            ]
-        }.unique { it.value }.take(limit)
-    }
-
-    protected List<Map> queryEntityOptionsLookup(Map lookup, String query, Map<String, String> queryParams, int limit) {
-        String entityName = lookup.entityName as String
-        String keyField = lookup.keyField as String
-        if (!entityName || !keyField || !ec.entity.isEntityDefined(entityName)) return []
-
-        def find = ec.entity.find(entityName)
-        ((Collection<Map>) lookup.conditions ?: []).each { Map cond ->
-            String fieldName = cond.fieldName as String
-            if (!fieldName) return
-            if (cond.value != null && cond.value != '') {
-                find.condition(fieldName, cond.value)
-            } else if (cond.from != null && cond.from != '') {
-                String fromField = cond.from as String
-                if (queryParams[fromField]) find.condition(fieldName, queryParams[fromField])
-            }
-        }
-        if (lookup.dependsOn instanceof Collection) {
-            ((Collection<String>) lookup.dependsOn).findAll { it }.each { String dep ->
-                if (queryParams[dep]) find.condition(dep, queryParams[dep])
-            }
-        }
-
-        List<Map> rows = find.list().take(250) as List<Map>
-        String q = query?.toLowerCase()
-        return rows.findAll { Map ev ->
-            if (!q) return true
-            List<String> probeValues = [ev[keyField]?.toString(), renderLookupLabel(ev, lookup)]
-            probeValues.find { it?.toLowerCase()?.contains(q) }
-        }.collect { Map ev ->
-            [
-                    value      : ev[keyField] as String,
-                    label      : renderLookupLabel(ev, lookup),
-                    description: entityName,
-                    metadata   : [entityName: entityName, keyField: keyField]
-            ]
-        }.findAll { it.value }.unique { it.value }.take(limit)
-    }
-
-    protected List<Map> queryDynamicOptionsLookup(Map descriptor, Map argument, Map lookup, String query, Map<String, String> queryParams, int limit) {
-        String transitionName = lookup.transition as String
-        if (!descriptor?.screenLocation || !transitionName) return []
-
-        Map<String, Object> parameters = [:]
-        Map staticParameterMap = lookup.parameterMap instanceof Map ? (Map) lookup.parameterMap : [:]
-        staticParameterMap.each { k, v -> parameters[k as String] = v }
-        if (query != null) parameters.term = query
-
-        if (lookup.dependsOn instanceof Collection) {
-            ((Collection<String>) lookup.dependsOn).findAll { it }.each { String dep ->
-                if (queryParams.containsKey(dep)) parameters[dep] = queryParams[dep]
-            }
-        }
-
-        Map result = new ScreenTransitionExecutor(ec).execute(
-                descriptor.screenLocation as String,
-                transitionName,
-                [
-                        rootScreenLocation: descriptor.rootScreenLocation,
-                        relativeScreenPath: descriptor.relativeScreenPath,
-                        transitionMethod  : descriptor.transitionMethod
-                ] + parameters
-        )
-        Object jsonObject = result.jsonObject
-        Collection optionRows
-        if (jsonObject instanceof Map && ((Map) jsonObject).options instanceof Collection) {
-            optionRows = (Collection) ((Map) jsonObject).options
-        } else if (jsonObject instanceof Collection) {
-            optionRows = (Collection) jsonObject
-        } else {
-            optionRows = []
-        }
-
-        String valueField = lookup.valueField as String
-        String labelField = lookup.labelField as String
-        String q = query?.toLowerCase()
-        return optionRows.collect { Object row ->
-            if (row instanceof Map) {
-                Map rowMap = (Map) row
-                String value = extractDynamicLookupValue(rowMap, valueField)
-                String label = extractDynamicLookupLabel(rowMap, labelField, value)
-                [
-                        value      : value,
-                        label      : label,
-                        description: transitionName,
-                        metadata   : [transition: transitionName],
-                        searchText : buildDynamicLookupSearchText(rowMap, value, label, transitionName)
-                ]
-            } else {
-                String text = row?.toString()
-                [
-                        value      : text,
-                        label      : text,
-                        description: transitionName,
-                        metadata   : [transition: transitionName],
-                        searchText : text
-                ]
-            }
-        }.findAll { Map candidate ->
-            if (!candidate.value) return false
-            if (!q) return true
-            return [candidate.value, candidate.label, candidate.description, candidate.searchText]
-                    .find { it?.toString()?.toLowerCase()?.contains(q) }
-        }.collect { Map candidate ->
-            candidate.findAll { it.key != 'searchText' }
-        }.unique { it.value }.take(limit)
-    }
-
-    protected static String extractDynamicLookupValue(Map rowMap, String valueField) {
-        if (valueField && rowMap[valueField] != null) return rowMap[valueField].toString()
-        for (String fallbackField in ['value', 'key', 'id', 'enumId', 'statusId']) {
-            if (rowMap[fallbackField] != null) return rowMap[fallbackField].toString()
-        }
-        if (rowMap.size() == 1) return rowMap.values().first()?.toString()
-        return null
-    }
-
-    protected static String extractDynamicLookupLabel(Map rowMap, String labelField, String defaultValue) {
-        if (labelField && rowMap[labelField] != null) return rowMap[labelField].toString()
-        for (String fallbackField in ['label', 'text', 'name', 'description', 'partyName', 'facilityName', 'storeName',
-                                      'organizationName', 'productName', 'assetName', 'statusDesc']) {
-            if (rowMap[fallbackField] != null) return rowMap[fallbackField].toString()
-        }
-        return defaultValue
-    }
-
-    protected static String buildDynamicLookupSearchText(Map rowMap, String value, String label, String transitionName) {
-        List<String> pieces = [value, label, transitionName]
-        rowMap?.values()?.each { Object raw ->
-            if (raw == null) return
-            if (raw instanceof Map || raw instanceof Collection) {
-                pieces.add(raw.toString())
-            } else {
-                pieces.add(raw.toString())
-            }
-        }
-        return pieces.findAll { it }.join(' | ')
-    }
-
-    protected String renderLookupLabel(Map entityValue, Map lookup) {
-        String textTemplate = lookup.textTemplate as String
-        if (!textTemplate) return entityValue[lookup.keyField as String] as String
-        if (textTemplate.toLowerCase().contains('partyname')) return renderPartyName(entityValue)
-        return textTemplate.replaceAll(/\$\{([^}]+)\}/) { Object[] groups ->
-            entityValue[groups[1] as String]?.toString() ?: ''
-        }.trim()
     }
 
     protected boolean isEntityVisible(String entityName) {
@@ -576,48 +255,6 @@ class MoquiResourceProvider {
             }
         }
         return true
-    }
-
-    protected static String renderPartyName(Map entityValue) {
-        List<String> parts = []
-        if (entityValue['firstName']) parts.add(entityValue['firstName'] as String)
-        if (entityValue['middleName']) parts.add(entityValue['middleName'] as String)
-        if (entityValue['lastName']) parts.add(entityValue['lastName'] as String)
-        if (!parts && entityValue['organizationName']) parts.add(entityValue['organizationName'] as String)
-        if (!parts && entityValue['partyName']) parts.add(entityValue['partyName'] as String)
-        return parts.join(' ').trim()
-    }
-
-    protected Map<String, Map> buildPromptDescriptorMap() {
-        PromptSecurityHelper securityHelper = new PromptSecurityHelper(ec)
-        Map<String, Map> promptMap = [:]
-        compiler.compileServiceBoundPrompts().each { Map descriptor ->
-            if (!securityHelper.isPromptVisible(descriptor)) return
-            promptMap[descriptor.name as String] = descriptor
-        }
-        return promptMap
-    }
-
-    protected static Map parseLookupUri(String uri) {
-        String withoutScheme = uri.substring('lookup://screen/'.length())
-        List<String> mainParts = withoutScheme.split('\\?', 2) as List<String>
-        List<String> pathParts = mainParts[0].split('/') as List<String>
-        if (pathParts.size() < 2) throw new IllegalArgumentException("Invalid lookup URI ${uri}")
-        Map<String, String> queryParams = [:]
-        if (mainParts.size() > 1 && mainParts[1]) {
-            mainParts[1].split('&').each { String pair ->
-                if (!pair) return
-                List<String> kv = pair.split('=', 2) as List<String>
-                String key = java.net.URLDecoder.decode(kv[0], 'UTF-8')
-                String value = kv.size() > 1 ? java.net.URLDecoder.decode(kv[1], 'UTF-8') : ''
-                queryParams[key] = value
-            }
-        }
-        return [
-                promptName  : java.net.URLDecoder.decode(pathParts[0], 'UTF-8'),
-                argumentName: java.net.URLDecoder.decode(pathParts[1], 'UTF-8'),
-                queryParams : queryParams
-        ]
     }
 
     protected static Map<String, String> decodePrimaryKeyToken(String pkToken, List<String> pkFieldNames) {

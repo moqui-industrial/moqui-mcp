@@ -19,7 +19,7 @@ class McpServlet extends HttpServlet {
 
     static final String PROTOCOL_VERSION = '2026-07-28'
     static final Set<String> SUPPORTED_PROTOCOL_VERSIONS = ['2026-07-28', '2025-11-25'] as Set
-    static final Map SERVER_INFO = [name: 'moqui-mcp', version: '3.1.0']
+    static final Map SERVER_INFO = [name: 'moqui-mcp', version: '4.0.0']
 
     private final JsonSlurper jsonSlurper = new JsonSlurper()
 

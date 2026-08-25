@@ -1,475 +1,132 @@
 # moqui-mcp
 
-Minimal MCP protocol component for Moqui aligned to MCP `2026-07-28`.
+Minimal MCP protocol component for Moqui, aligned to MCP `2026-07-28`.
 
-This component is intentionally narrow and reusable:
+This component is intentionally narrow:
 
-- `tools` expose selected Moqui service operations, lookup helpers, and the Moqui service catalog itself
-- `resources` expose Moqui entities, deterministic entity records, and DataDocument definitions
-- `prompts` are either stored in Moqui Wiki pages or derived at runtime from Moqui screens/transitions
-- `notifications` are bridged from Moqui `NotificationMessage`
+- `tools` expose Moqui services
+- `resources` expose Moqui entities, view-entities, records, and DataDocument definitions
+- `prompts` come only from Moqui `WikiPage` content in the `MCP_PROMPTS` wiki space
+- `notifications` are bridged through standard Moqui `NotificationMessage`
 
-The prompt layer is intentionally split in two:
-
-- the internal MCP prompt is technical and optimized for the LLM
-- the OpenSearch prompt-catalog document is semantic and optimized for discovery
+This component does **not** try to convert rich ERP screens into conversational workflows.
+Complex UI work remains in Moqui screens. `moqui-mcp` only publishes a minimal, standards-aligned MCP surface.
 
 ## Scope
 
-`moqui-mcp` is the MCP-facing protocol layer. It should stay small.
+`moqui-mcp` should stay small and stable.
 
 It should not contain:
 
-- agent planning engines
-- algebraic metamodel logic
-- skill orchestration logic
-- morphism composition
-- workflow state or replanning
-- legacy screen-first agent runtime logic
+- screen-derived prompt generation
+- lookup transitions exposed as MCP resources
+- OpenSearch prompt catalogs
+- skill orchestration
+- workflow planning
+- algebraic models or morphism composition
 
-Those responsibilities belong in other components such as `moqui-harness` and `moqui-math`.
+Those responsibilities belong elsewhere, such as `moqui-harness`, `moqui-math`, or curated offline skill repositories.
 
-## Internal Structure
+## MCP Mapping
 
-- `src/main/groovy/org/moqui/mcp/McpClient.groovy` contains MCP protocol dispatch and Moqui integration logic.
-- `src/main/groovy/org/moqui/mcp/MoquiResourceProvider.groovy` owns resources and resource templates.
-- `src/main/groovy/org/moqui/mcp/CompositePromptProvider.groovy` merges wiki-backed and screen-derived prompts.
-- `src/main/groovy/org/moqui/mcp/ScreenInteractionCompiler.groovy` compiles runtime `ScreenDefinition` data into prompt descriptors.
-- `service/org/moqui/mcp/McpServices.xml` is a thin service facade over `McpClient`.
-- `src/main/groovy/org/moqui/mcp/McpServlet.groovy` exposes the MCP Streamable HTTP endpoint on `/mcp`.
-- `MoquiConf.xml` wires the `/mcp/*` filter and servlet in standard Moqui webapp configuration.
+### Tools
 
-## MCP Mapping In Moqui
+Tools map to Moqui services.
 
-This component maps MCP primitives to standard Moqui concepts as follows:
+The server exposes:
 
-- `tools` -> Moqui services and explicit lookup helpers
-- `resources` -> entity schema resources, entity record resources, and DataDocument definition resources
-- `prompts` -> wiki-backed prompt templates plus screen-derived interaction contracts
-- `notifications` -> Moqui notification bridge
+- built-in helper tools
+- concrete Moqui services discovered from the service facade, when `allow-remote="true"` and authorized for the current user
 
-The component does not embed planning, workflow composition, or business reasoning.
-It only exposes a standards-aligned MCP surface over Moqui-native capabilities.
-
-## Current Entry Points
-
-The generic JSON-RPC entry service is still available:
-
-- `org.moqui.mcp.McpServices.mcp#Handle`
-
-The MCP transport endpoint is available at:
-
-- `/mcp`
-
-Current status:
-
-- the logical MCP catalog is implemented in code and exposed through Moqui services
-- the component compiles and loads in Moqui
-- `/mcp` responds over MCP Streamable HTTP with a single `POST` endpoint
-- every request is stateless and must include `_meta.io.modelcontextprotocol/protocolVersion` and `_meta.io.modelcontextprotocol/clientCapabilities`
-- the servlet sits behind the standard Moqui auth filter and expects normal Moqui authentication from remote clients
-- trusted internal callers may optionally configure `-Dmoqui.mcp.serviceAccountUserId=<userId>` as an explicit fallback
-- SSE and advanced notification streaming are not implemented
-
-It dispatches these MCP methods:
-
-- `server/discover`
-- `tools/list`
-- `tools/call`
-- `resources/list`
-- `resources/templates/list`
-- `resources/read`
-- `resources/subscribe`
-- `resources/unsubscribe`
-- `prompts/list`
-- `prompts/get`
-- `completion/complete`
-
-## Tool Model
-
-The protocol layer always exposes these built-in tools:
+Built-in helper tools:
 
 - `moqui_search_data_documents`
 - `moqui_get_service_metadata`
 - `moqui_call_service`
-- `moqui_execute_screen_transition`
 - `moqui_make_notification`
 
-In addition, `tools/list` exposes the discovered Moqui services themselves as first-class MCP tools.
-Each service tool uses the full Moqui service name, for example:
+### Resources
 
-- `mantle.GeneralServices.lookup#ById`
-- `mantle.GeneralServices.search#MantleFiltered`
-- `mantle.order.OrderServices.place#Order`
+Resources map to Moqui data and metadata.
 
-The input schema for each service tool is derived from the authoritative Moqui `ServiceDefinition`.
-
-### `moqui_search_data_documents`
-
-This tool is the standard lookup entry point for business data.
-It delegates to Moqui search services over OpenSearch-backed DataDocuments and is intended for:
-
-- party and organization lookup
-- product lookup
-- facility and location lookup
-- document-oriented search across denormalized business data
-- future harness-side identifier resolution before mutating service calls
-
-The intent is that agents resolve business identifiers first through document search, and only then call mutating services with explicit parameters.
-
-### `moqui_get_service_metadata`
-
-This tool returns the authoritative Moqui service contract for a full service name.
-
-It includes:
-
-- service identity and path
-- authenticate / allow-remote flags
-- generated input JSON Schema
-- generated output JSON Schema
-- base description when present in the service definition
-
-### `moqui_call_service`
-
-This tool invokes an existing Moqui service by full service name with an explicit parameter map.
-It is intentionally low-level and does not invent workflows.
-
-Typical uses:
-
-- call a known business service after required identifiers have been resolved
-- execute deterministic service operations from an external MCP client
-- bridge a harness or another planner to Moqui-native service execution
-
-### `moqui_make_notification`
-
-This tool creates a standard Moqui `NotificationMessage`.
-It is the current notification bridge exposed through MCP.
-
-### Service tools as first-class MCP tools
-
-The server exposes real Moqui services directly in `tools/list`, not only the generic `moqui_call_service` wrapper.
-
-Use cases:
-
-- generic MCP clients can discover callable business operations directly
-- hosts can inspect the per-service JSON Schema and render input forms
-- prompts and harness code can bind directly to concrete Moqui services
-
-The low-level wrapper `moqui_call_service` remains useful for internal bindings and dynamic execution, but external clients should prefer the concrete service tool when possible.
-
-There is no dynamic tool-provider loading in this component.
-If a future integration needs more MCP tools, they should be added explicitly in `McpClient` and documented here.
-
-## Resource Model
-
-The component exposes canonical resource templates and resource reads.
-
-### Resource templates
-
-Current URI templates:
+Canonical resource templates:
 
 - `moqui://entity-def/{entityName}`
 - `moqui://entity/{entityName}/{primaryKeyToken}`
 - `moqui://data-document/{dataDocumentId}`
 
-### Entity schema resources
+These cover:
 
-URI format:
+- entity and view-entity definitions
+- deterministic entity record reads by primary key
+- DataDocument definition metadata
 
-- `moqui://entity-def/<full.entity.name>`
+### Prompts
 
-These resources return structural metadata about an entity, including:
+Prompts come only from `WikiPage` rows in the `MCP_PROMPTS` wiki space.
 
-- field names
-- field types
-- primary-key flags
-- not-null flags
-- encryption flags
-- relationship summaries
+This is intentionally manual and curated. A wiki-backed MCP prompt is:
 
-These are schema resources, not record resources.
+- discoverable with `prompts/list`
+- retrievable with `prompts/get`
+- parameterized through simple `${argName}` substitutions
 
-### Entity record resources
+The prompt text is for the LLM. The business-facing discovery language can be curated directly in the wiki page title and content.
 
-URI format:
+## Security
 
-- `moqui://entity/<full.entity.name>/<primaryKeyToken>`
+`moqui-mcp` relies on standard Moqui artifact-aware security.
 
-These resources return an actual entity record selected by a complete primary key token.
-The component does not treat arbitrary query conditions as canonical record resources.
+- service tools are visible only if the current user is allowed to view or invoke the corresponding Moqui service
+- entity and DataDocument resources are visible only if the current user is allowed to view the underlying artifact
 
-### DataDocument resources
+There is no separate MCP-specific authorization model in this component.
 
-URI format:
+## Transport
 
-- `moqui://data-document/<dataDocumentId>`
+The MCP Streamable HTTP endpoint is:
 
-These resources return DataDocument definition metadata, including:
+- `/mcp`
 
-- document identity
-- index name
-- primary entity
-- field list
-- manual data service
-- manual mapping service
+The generic Moqui service facade entrypoint remains:
 
-This is especially useful for clients that need to understand which denormalized search documents exist in OpenSearch and how they are shaped.
+- `org.moqui.mcp.McpServices.mcp#Handle`
 
-## Prompt Model
+## Runtime Notes
 
-Prompts come from two sources.
+- requests are stateless
+- remote callers should use normal Moqui authentication
+- trusted local callers may optionally use the local service-account fallback configured through JVM properties
 
-### Wiki-backed prompts
+## Internal Structure
 
-Prompts can be read from wiki pages in wiki space:
+- `src/main/groovy/org/moqui/mcp/McpServlet.groovy`
+  HTTP MCP servlet
+- `src/main/groovy/org/moqui/mcp/McpClient.groovy`
+  MCP dispatch and Moqui integration
+- `src/main/groovy/org/moqui/mcp/MoquiResourceProvider.groovy`
+  resource and resource-template publishing
+- `src/main/groovy/org/moqui/mcp/WikiPromptProvider.groovy`
+  wiki-backed prompt provider
+- `service/org/moqui/mcp/McpServices.xml`
+  thin Moqui service wrappers over `McpClient`
 
-- `MCP_PROMPTS`
+## Design Decision
 
-This keeps prompt content in standard Moqui-managed data instead of filesystem-only prompt files.
+This component no longer treats Moqui screens as MCP prompts.
 
-### Screen-derived prompts
+Reason:
 
-The component also derives prompts at runtime from Moqui screen transitions when the transition is safely reducible to a single bound service call.
+- simple conversational prompts work well for small, atomic ERP interactions
+- rich screens such as order, invoice, shipment, and payment workspaces are operational consoles, not prompts
+- those screens should remain graphical UI, or be documented separately as curated agent skills outside this minimal MCP protocol component
 
-Current rules:
+## Inspector
 
-- only service-bound transitions are exposed as automatic prompts
-- automatic/internal transitions such as `actions`, `formSelectColumns`, `formSaveFind`, and `screenDoc` are excluded
-- each derived prompt carries:
-  - originating `screenLocation`
-  - `transitionName`
-  - bound `serviceName`
-  - argument list derived from the target service contract plus explicit transition/path parameters
+An MCP Inspector client config is provided in:
 
-Current boundary:
+- `docs/mcp-inspector.client.json`
 
-- transitions with custom XML Actions or multi-step logic are not yet exposed as executable MCP prompts
-- those interactions remain future work and may eventually bind to a dedicated `moqui_execute_screen_transition` tool
+The shell helper is:
 
-### Prompt arguments and elicitation
-
-For screen-derived prompts:
-
-- `prompts/get` evaluates provided arguments
-- if required arguments are missing, the server returns `resultType: input_required`
-- the response includes a simple `elicitation/create` form schema and an opaque `requestState`
-- the client may retry `prompts/get` with `inputResponses` and `requestState`
-
-This keeps `moqui-mcp` stateless while still supporting multi-round prompt completion.
-
-### Prompt discovery versus prompt execution
-
-This component deliberately separates:
-
-- `prompt discovery`
-- `prompt execution`
-
-The internal MCP prompt is not intended to be friendly free-form prose for the end user.
-It is intended to be a precise execution contract for the LLM.
-
-That means:
-
-- lookup-backed values should resolve to real ERP identifiers, codes, enum ids, or accepted lookup labels
-- vague business prose such as `the internal retail organization` should fail
-- if a lookup cannot be resolved exactly enough, the LLM should stop before submit and ask for a simpler lookup term
-
-This is intentional for ERP safety and repeatability.
-
-### Prompt catalog documents in OpenSearch
-
-To make prompts discoverable in business language, `moqui-mcp` also materializes a semantic catalog in OpenSearch.
-
-Each prompt catalog document contains:
-
-- a business-oriented `name`
-- a business-oriented `description`
-- the internal MCP prompt name in metadata (`mcpPromptName`)
-- the technical prompt link (`promptUri`)
-
-This means the user-facing search surface and the execution surface are different by design:
-
-- OpenSearch catalog document: business discovery surface
-- MCP prompt contract: technical execution surface
-
-### Comparison with `SKILL.md`
-
-The prompt catalog is intentionally modeled to be analogous to the `SKILL.md` pattern used by agent skills.
-
-Conceptually:
-
-- the OpenSearch prompt-catalog document plays the role of `SKILL.md` frontmatter
-- the internal MCP prompt contract plays the role of the technical body of `SKILL.md`
-
-In other words:
-
-- `catalogName` / `catalogDescription` correspond to the semantic activation metadata
-- `mcpPromptName` points to the executable technical artifact
-- `prompts/get` returns the detailed interaction contract that the LLM must follow
-
-This mirrors the same activation problem solved by agent skills:
-
-- a semantic description is needed to find the right artifact
-- a technical body is needed to execute it correctly
-
-### Why this separation matters
-
-If the internal MCP prompt were also the business-facing discovery text, it would become ambiguous and weaker for execution.
-
-If the OpenSearch catalog document were also the execution contract, it would become too informal and too unsafe for ERP operations.
-
-The current design keeps both concerns separate:
-
-- business-language retrieval happens in OpenSearch
-- precise execution happens through MCP prompt contracts plus tools/resources/completion
-
-This is especially important for:
-
-- enum resolution
-- party/store/facility lookup
-- screen-derived submit contracts
-- deterministic user-driven ERP workflows
-
-### Example screen-derived round trip
-
-1. Call `prompts/get` for a screen-derived prompt name.
-2. Read `_meta.org.moqui/promptBinding`.
-3. Execute the referenced tool with the resolved parameters.
-
-Example binding payload:
-
-```json
-{
-  "toolName": "moqui_execute_screen_transition",
-  "screenLocation": "component://SimpleScreens/screen/SimpleScreens/Facility/EditFacility.xml",
-  "transitionName": "getFacilityList",
-  "parameters": {
-    "facilityName": "Retail"
-  }
-}
-```
-
-Then call `tools/call` with:
-
-```json
-{
-  "name": "moqui_execute_screen_transition",
-  "arguments": {
-    "screenLocation": "component://SimpleScreens/screen/SimpleScreens/Facility/EditFacility.xml",
-    "transitionName": "getFacilityList",
-    "parameters": {
-      "facilityName": "Retail"
-    }
-  }
-}
-```
-
-## Notification Model
-
-The runtime notification source is the Moqui standard `NotificationMessage` mechanism.
-Today the component provides the notification creation tool and resource subscription registration, but not a full streaming notification transport.
-
-## Supported MCP 2026-07-28 Behavior
-
-- `server/discover` is the entry point instead of `initialize`
-- `notifications/initialized` is not used
-- `ping` is not implemented because it is no longer part of the current spec
-- `Mcp-Session-Id` is not used because the protocol is stateless
-- `MCP-Protocol-Version` must match the body metadata protocol version
-- `Mcp-Method` is optional for JSON-RPC `POST` requests and, when present, must match the JSON-RPC method
-- `Mcp-Name` is optional for JSON-RPC `POST` requests and, when present, must match the selected tool name, prompt name, or resource URI
-- `tools/list`, `resources/list`, `resources/templates/list`, and `prompts/list` support `cursor` and `pageSize`
-- `resources/subscribe` and `resources/unsubscribe` register resource interest for the authenticated principal, but do not yet emit server-pushed `notifications/resources/updated` events
-
-## Authentication
-
-This endpoint uses standard Moqui web authentication.
-
-Recommended client options:
-
-- HTTP Basic Auth
-- `api_key` header with a valid Moqui login key
-- `login_key` header with a valid Moqui login key
-
-The component no longer assumes the demo `john.doe/moqui` account.
-For local development that account may still exist, but it is not part of the component contract.
-
-## Inspector and Client Notes
-
-- After changing the tool catalog, reconnect the MCP client so it refreshes `tools/list`.
-- If a client sends header `Mcp-Name`, it must equal the selected tool name, prompt name, or resource URI.
-- If a client sends header `Mcp-Method`, it must equal the JSON-RPC method in the request body.
-
-For browser-based or cross-origin clients, the servlet explicitly allows these headers:
-
-- `Authorization`
-- `api_key`
-- `login_key`
-- `MCP-Protocol-Version`
-- `Mcp-Method`
-- `Mcp-Name`
-
-See [docs/MCPInspector.md](docs/MCPInspector.md) for Inspector setup and [tools/mcp-smoke.sh](tools/mcp-smoke.sh) for a repeatable smoke test.
-
-## Current Conformance Boundaries
-
-The component is aligned to the current MCP transport and request/response shape, but it remains intentionally minimal.
-
-Implemented:
-
-- stateless Streamable HTTP transport
-- `server/discover`
-- tool, resource, resource-template, prompt, and completion catalog methods
-- strict header and protocol-version validation
-- Moqui-authenticated execution
-- wiki-backed prompts
-- screen-derived prompts for direct service-bound transitions
-- deterministic primary-key-based entity record resources
-
-Not implemented:
-
-- subscriptions
-- list-changed notifications
-- streaming notification delivery
-- generic execution of complex screen transitions with custom XML Actions
-- harness-side planning or workflow execution
-- dynamic registration of arbitrary external tool providers
-
-## Recommended Usage
-
-Use `moqui-mcp` as the MCP protocol adapter for Moqui.
-
-Use other components for higher-level behavior:
-
-- `moqui-harness` for planning, orchestration, validation, and business execution policy
-- `moqui-math` for mathematical or categorical models
-- search/DataDocument definitions in Mantle or other components for rich OpenSearch lookup
-
-For user-driven ERP workflows:
-
-- discover the prompt through `moqui_search_prompt_catalog`
-- obtain the internal execution contract through `prompts/get` or `moqui_get_prompt_contract`
-- resolve lookup-backed values through `completion/complete` or `lookup://` resources
-- submit through the bound MCP tool
-
-This makes MCP prompts the conversational counterpart of Moqui screens, while keeping the execution semantics strict and machine-safe.
-
-The intended client flow is explicit and two-layered:
-
-1. the user speaks in business language and asks the client to find the right interaction;
-2. the client uses `moqui_search_prompt_catalog` against the OpenSearch prompt catalog;
-3. the user chooses a discovered prompt by business-facing name/description;
-4. the client calls `prompts/get` for the internal Moqui MCP prompt name;
-5. the returned prompt is treated as a technical execution contract for the LLM, not as user-facing prose.
-
-In other words:
-
-- the OpenSearch catalog document plays the role of `SKILL.md` frontmatter for human discovery;
-- the actual MCP prompt contract plays the role of the technical body that the LLM follows exactly.
-
-Screen-derived prompt generation is moving toward a render-based extraction model:
-
-- a Moqui screen is treated as a container of one or more interaction units;
-- in practice, prompts are derived from `form + transition` combinations, not from whole screens as single prompts;
-- this allows one screen such as `FindProduct.xml` to yield multiple MCP prompts like create, list, filter, or lookup-oriented interactions while preserving one shared screen context.
-
-See [docs/HarnessBoundary.md](docs/HarnessBoundary.md) for the explicit architectural split between `moqui-mcp` and `moqui-harness`.
+- `tools/inspector/run-inspector-local.sh`
