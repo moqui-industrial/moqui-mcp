@@ -9,9 +9,11 @@ import org.moqui.util.MNode
 
 class ScreenInteractionCompiler {
     protected final ExecutionContext ec
+    protected final ScreenPromptRenderSupport renderSupport
 
     ScreenInteractionCompiler(ExecutionContext ec) {
         this.ec = ec
+        this.renderSupport = new ScreenPromptRenderSupport(ec)
     }
 
     List<Map> compileServiceBoundPrompts() {
@@ -23,17 +25,9 @@ class ScreenInteractionCompiler {
             sfi.getScreenInfoList(rootLocation, 99).each { info ->
                 ScreenDefinition sd = info.sd as ScreenDefinition
                 if (sd == null) return
-                sd.getAllTransitions().each { ScreenDefinition.TransitionItem ti ->
-                    List<Map> formContexts = collectFormContexts(sd, ti)
-                    if (formContexts.size() > 1) {
-                        formContexts.each { Map formContext ->
-                            Map descriptor = buildPromptDescriptor(info, sd, ti, rootLocation, formContext)
-                            if (descriptor != null && seenNames.add(descriptor.name as String)) promptList.add(descriptor)
-                        }
-                    } else {
-                        Map descriptor = buildPromptDescriptor(info, sd, ti, rootLocation, formContexts ? formContexts[0] : null)
-                        if (descriptor != null && seenNames.add(descriptor.name as String)) promptList.add(descriptor)
-                    }
+                collectFormContexts(sd).each { Map formContext ->
+                    Map descriptor = buildPromptDescriptor(info, sd, rootLocation, formContext)
+                    if (descriptor != null && seenNames.add(descriptor.name as String)) promptList.add(descriptor)
                 }
             }
         }
@@ -41,22 +35,14 @@ class ScreenInteractionCompiler {
         return promptList.sort { a, b -> (a.name ?: '') <=> (b.name ?: '') }
     }
 
-    protected Map buildPromptDescriptor(Object info, ScreenDefinition sd, ScreenDefinition.TransitionItem ti, String rootLocation) {
-        if (sd == null || ti == null) return null
-        if (!ti.hasActionsOrSingleService()) return null
-        if (ti.name in ['actions', 'formSelectColumns', 'formSaveFind', 'screenDoc']) return null
+    protected Map buildPromptDescriptor(Object info, ScreenDefinition sd, String rootLocation, Map formContext) {
+        if (sd == null || formContext == null) return null
 
-        List<Map> formContexts = collectFormContexts(sd, ti)
-        if (formContexts.size() > 1) {
-            return null
-        }
-        Map formContext = formContexts ? formContexts[0] : null
-        return buildPromptDescriptor(info, sd, ti, rootLocation, formContext)
-    }
-
-    protected Map buildPromptDescriptor(Object info, ScreenDefinition sd, ScreenDefinition.TransitionItem ti, String rootLocation, Map formContext) {
-        if (sd == null || ti == null) return null
-        if (!ti.hasActionsOrSingleService()) return null
+        String transitionName = formContext.transitionName as String
+        String transitionMethod = formContext.transitionMethod as String ?: 'any'
+        ScreenDefinition.TransitionItem ti = transitionName ? sd.getTransitionItem(transitionName, transitionMethod) : null
+        if (transitionName && ti == null) ti = sd.getTransitionItem(transitionName, 'any')
+        if (ti == null || !ti.hasActionsOrSingleService()) return null
         if (ti.name in ['actions', 'formSelectColumns', 'formSaveFind', 'screenDoc']) return null
 
         ServiceDefinition serviceDefinition = ti.singleServiceName ? ec.serviceFacade.getServiceDefinition(ti.singleServiceName) : null
@@ -90,15 +76,15 @@ class ScreenInteractionCompiler {
                     name       : pathParameterName,
                     title      : pathParameterName,
                     description: "Path parameter ${pathParameterName}",
-                required   : true
+                    required   : true
             ])
         }
 
         augmentArgumentsFromForms(sd, ti, arguments, formContext)
 
-        String promptName = buildPromptName(sd, ti, formContext)
-        String title = buildPromptTitle(sd, ti, formContext)
-        String description = buildPromptDescription(sd, ti, serviceDefinition, formContext)
+        String promptName = buildPromptName(sd, formContext, ti)
+        String title = buildPromptTitle(sd, formContext, ti)
+        String description = buildPromptDescription(sd, formContext, ti, serviceDefinition)
         return [
                 name              : promptName,
                 title             : title,
@@ -111,7 +97,10 @@ class ScreenInteractionCompiler {
                 transitionName    : ti.name,
                 transitionMethod  : ti.method,
                 serviceName       : ti.singleServiceName,
-                formName          : formContext?.formName,
+                formName          : formContext.formName,
+                formType          : formContext.formType,
+                interactionKind   : formContext.interactionKind,
+                screenInteraction : formContext.screenInteraction == true,
                 executionMode     : ti.singleServiceName ? 'service' : 'transition',
                 readOnly          : ti.readOnly
         ]
@@ -131,46 +120,111 @@ class ScreenInteractionCompiler {
         return pathSegments
     }
 
-    protected static String buildPromptName(ScreenDefinition sd, ScreenDefinition.TransitionItem ti, Map formContext = null) {
+    protected static String buildPromptName(ScreenDefinition sd, Map formContext, ScreenDefinition.TransitionItem ti) {
         String sanitizedLocation = (sd.location ?: 'screen')
                 .replace('component://', '')
                 .replaceAll(/[^A-Za-z0-9]+/, '.')
                 .replaceAll(/\.+/, '.')
                 .replaceAll(/^\.|\.$/, '')
-        String tail = (formContext?.formName ? "${formContext.formName}.${ti.name}" : ti.name)
-        if (ti.method && ti.method != 'any') tail = "${tail}.${ti.method}"
+        String tail = formContext.formName ?: ti.name
+        if (ti?.name && ti.name != formContext.formName) tail = "${tail}.${ti.name}"
+        if (ti?.method && ti.method != 'any') tail = "${tail}.${ti.method}"
         tail = tail.replaceAll(/[^A-Za-z0-9]+/, '.').replaceAll(/\.+/, '.').replaceAll(/^\.|\.$/, '')
         return "moqui.screen.${sanitizedLocation}.${tail}"
     }
 
-    protected static String buildPromptTitle(ScreenDefinition sd, ScreenDefinition.TransitionItem ti, Map formContext = null) {
-        return formContext?.formName ? "${sd.screenName}.${formContext.formName}.${ti.name}" : "${sd.screenName}.${ti.name}"
+    protected static String buildPromptTitle(ScreenDefinition sd, Map formContext, ScreenDefinition.TransitionItem ti) {
+        String prefix = formContext.interactionKind ? "${formContext.interactionKind} " : ''
+        String suffix = ti?.name && ti.name != formContext.formName ? ".${ti.name}" : ''
+        return "${prefix}${sd.screenName}.${formContext.formName}${suffix}".trim()
     }
 
-    protected static String buildPromptDescription(ScreenDefinition sd, ScreenDefinition.TransitionItem ti, ServiceDefinition serviceDefinition, Map formContext = null) {
+    protected static String buildPromptDescription(ScreenDefinition sd, Map formContext, ScreenDefinition.TransitionItem ti, ServiceDefinition serviceDefinition) {
         StringBuilder sb = new StringBuilder()
-        sb.append("Screen-derived prompt for transition ").append(ti.name)
-        if (formContext?.formName) sb.append(" from form ").append(formContext.formName)
-        sb.append(" on screen ").append(sd.location).append(".")
+        sb.append('Screen-derived interaction contract for ')
+                .append(formContext.formType ?: 'form')
+                .append(' ')
+                .append(formContext.formName)
+                .append(' on screen ')
+                .append(sd.location)
+                .append('.')
+        if (formContext.interactionKind) sb.append(' Interaction kind ').append(formContext.interactionKind).append('.')
+        sb.append(' Submit transition ').append(ti.name).append('.')
         if (serviceDefinition != null) {
-            sb.append(" Executes service ").append(serviceDefinition.serviceName).append(".")
+            sb.append(' Executes service ').append(serviceDefinition.serviceName).append('.')
         } else {
-            sb.append(" Executes the native Moqui transition logic for this screen.")
+            sb.append(' Executes the native Moqui transition logic for this screen.').append(' ')
         }
-        if (ti.readOnly) sb.append(" This interaction is read-only.")
-        return sb.toString()
+        if (ti.readOnly) sb.append(' This interaction is read-only.')
+        return sb.toString().trim()
     }
 
-    protected List<Map> collectFormContexts(ScreenDefinition sd, ScreenDefinition.TransitionItem ti) {
+    protected List<Map> collectFormContexts(ScreenDefinition sd) {
+        List<Map> renderedContexts = collectRenderedFormContexts(sd)
+        if (renderedContexts) return renderedContexts
+
         MNode screenNode = MNode.parse(ec.resourceFacade.getLocationReference(sd.location))
         if (screenNode == null) return []
         List<Map> contexts = []
         Collection<MNode> formNodes = screenNode.depthFirst({ MNode it -> it.name == 'form-single' || it.name == 'form-list' })
         for (MNode formNode in formNodes) {
-            if (formNode.attribute('transition') != ti.name) continue
-            contexts.add([formName: formNode.attribute('name') ?: ti.name, formNode: formNode])
+            String transitionName = formNode.attribute('transition')
+            if (!transitionName) continue
+            contexts.add([
+                    formName         : formNode.attribute('name') ?: transitionName,
+                    formNode         : formNode,
+                    formType         : formNode.name,
+                    transitionName   : transitionName,
+                    transitionMethod : formNode.attribute('transition-method') ?: 'any',
+                    interactionKind  : inferInteractionKind(formNode.name, transitionName),
+                    screenInteraction: false
+            ])
         }
         return contexts
+    }
+
+    protected List<Map> collectRenderedFormContexts(ScreenDefinition sd) {
+        List<Map> interactions = renderSupport.extractInteractions(sd.location)
+        if (!interactions) return []
+        return interactions.collect { Map interaction ->
+            String formName = interaction.formName as String
+            MNode formNode = findFormNode(sd.location, formName)
+            if (formNode == null) return null
+            String transitionName = interaction.transitionName as String ?: formNode.attribute('transition')
+            if (!transitionName) return null
+            [
+                    formName         : formName,
+                    formNode         : formNode,
+                    formType         : interaction.formType ?: formNode.name,
+                    transitionName   : transitionName,
+                    transitionMethod : formNode.attribute('transition-method') ?: 'any',
+                    interactionKind  : interaction.interactionKind ?: inferInteractionKind(interaction.formType as String, transitionName),
+                    screenInteraction: true,
+                    renderedFields   : interaction.fields
+            ]
+        }.findAll { Map ctx -> ctx != null }
+    }
+
+    protected static String inferInteractionKind(String formType, String transitionName) {
+        String normalized = (transitionName ?: '').toLowerCase()
+        if ('form-list' == formType) {
+            if (normalized.startsWith('get') || normalized.contains('list') || normalized.contains('find')) return 'query'
+            return 'browse'
+        }
+        if (normalized.startsWith('create')) return 'create'
+        if (normalized.startsWith('update') || normalized.startsWith('edit')) return 'update'
+        if (normalized.startsWith('delete') || normalized.startsWith('remove')) return 'delete'
+        if (normalized.startsWith('get') || normalized.contains('list') || normalized.contains('find')) return 'query'
+        return 'action'
+    }
+
+    protected MNode findFormNode(String screenLocation, String formName) {
+        if (!screenLocation || !formName) return null
+        MNode screenNode = MNode.parse(ec.resourceFacade.getLocationReference(screenLocation))
+        if (screenNode == null) return null
+        return screenNode.depthFirst({ MNode it ->
+            (it.name == 'form-single' || it.name == 'form-list') && it.attribute('name') == formName
+        })?.find()
     }
 
     protected void augmentArgumentsFromForms(ScreenDefinition sd, ScreenDefinition.TransitionItem ti, List<Map> arguments, Map formContext = null) {
@@ -182,7 +236,8 @@ class ScreenInteractionCompiler {
         Collection<MNode> formNodes = formContext?.formNode ? [formContext.formNode as MNode] :
                 screenNode.depthFirst({ MNode it -> it.name == 'form-single' || it.name == 'form-list' })
         for (MNode formNode in formNodes) {
-            if (formNode.attribute('transition') != ti.name) continue
+            if (formContext?.formName && formNode.attribute('name') != formContext.formName) continue
+            if (ti != null && formNode.attribute('transition') != ti.name) continue
             for (MNode fieldNode in formNode.children('field')) {
                 String fieldName = fieldNode.attribute('name')
                 if (!fieldName || fieldName == 'submitButton') continue
@@ -228,18 +283,18 @@ class ScreenInteractionCompiler {
 
         MNode defaultField = fieldNode.first('default-field')
         String tooltip = defaultField?.attribute('tooltip')
-        if (tooltip) sb.append(". ").append(tooltip)
+        if (tooltip) sb.append('. ').append(tooltip)
 
         Map lookup = extractLookupHint(fieldNode)
-        if (lookup?.transition) sb.append(". Uses lookup transition ").append(lookup.transition)
-        if (lookup?.lookupKind) sb.append(". Lookup kind ").append(lookup.lookupKind)
-        if (lookup?.entityName) sb.append(". Lookup entity ").append(lookup.entityName)
-        if (lookup?.enumTypeId) sb.append(". Enum type ").append(lookup.enumTypeId)
-        if (lookup?.statusTypeId) sb.append(". Status type ").append(lookup.statusTypeId)
-        if (lookup?.dependsOn) sb.append(". Depends on ").append(((Collection) lookup.dependsOn).join(', '))
+        if (lookup?.transition) sb.append('. Uses lookup transition ').append(lookup.transition)
+        if (lookup?.lookupKind) sb.append('. Lookup kind ').append(lookup.lookupKind)
+        if (lookup?.entityName) sb.append('. Lookup entity ').append(lookup.entityName)
+        if (lookup?.enumTypeId) sb.append('. Enum type ').append(lookup.enumTypeId)
+        if (lookup?.statusTypeId) sb.append('. Status type ').append(lookup.statusTypeId)
+        if (lookup?.dependsOn) sb.append('. Depends on ').append(((Collection) lookup.dependsOn).join(', '))
 
         String defaultValue = extractDefaultValue(fieldNode)
-        if (defaultValue != null && defaultValue != '') sb.append(". Default ").append(defaultValue)
+        if (defaultValue != null && defaultValue != '') sb.append('. Default ').append(defaultValue)
         return sb.toString()
     }
 
@@ -306,9 +361,9 @@ class ScreenInteractionCompiler {
         if (entityOptions != null) {
             MNode entityFind = entityOptions.first('entity-find')
             Map lookup = [
-                    lookupKind: 'entity-options',
-                    entityName: entityFind?.attribute('entity-name'),
-                    keyField  : extractEntityOptionsKeyField(entityOptions.attribute('key')),
+                    lookupKind  : 'entity-options',
+                    entityName  : entityFind?.attribute('entity-name'),
+                    keyField    : extractEntityOptionsKeyField(entityOptions.attribute('key')),
                     textTemplate: entityOptions.attribute('text')
             ]
             List<Map> conditions = []

@@ -453,4 +453,23 @@ For user-driven ERP workflows:
 
 This makes MCP prompts the conversational counterpart of Moqui screens, while keeping the execution semantics strict and machine-safe.
 
+The intended client flow is explicit and two-layered:
+
+1. the user speaks in business language and asks the client to find the right interaction;
+2. the client uses `moqui_search_prompt_catalog` against the OpenSearch prompt catalog;
+3. the user chooses a discovered prompt by business-facing name/description;
+4. the client calls `prompts/get` for the internal Moqui MCP prompt name;
+5. the returned prompt is treated as a technical execution contract for the LLM, not as user-facing prose.
+
+In other words:
+
+- the OpenSearch catalog document plays the role of `SKILL.md` frontmatter for human discovery;
+- the actual MCP prompt contract plays the role of the technical body that the LLM follows exactly.
+
+Screen-derived prompt generation is moving toward a render-based extraction model:
+
+- a Moqui screen is treated as a container of one or more interaction units;
+- in practice, prompts are derived from `form + transition` combinations, not from whole screens as single prompts;
+- this allows one screen such as `FindProduct.xml` to yield multiple MCP prompts like create, list, filter, or lookup-oriented interactions while preserving one shared screen context.
+
 See [docs/HarnessBoundary.md](docs/HarnessBoundary.md) for the explicit architectural split between `moqui-mcp` and `moqui-harness`.
