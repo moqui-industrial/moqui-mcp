@@ -170,6 +170,7 @@ class McpClient {
                                         area             : [type: 'string', description: 'Optional functional area filter'],
                                         actionKind       : [type: 'string', description: 'Optional action kind filter'],
                                         runtimeExecutable: [type: 'boolean', description: 'Filter prompts that are executable at runtime'],
+                                        executableOnly   : [type: 'boolean', description: 'When true, return only business prompts that are directly executable and bound to a submit service. Defaults to true.'],
                                         limit            : [type: 'integer', description: 'Maximum number of prompt descriptors to return']
                                 ],
                                 required  : ['queryText'],
@@ -291,59 +292,61 @@ class McpClient {
             String queryText = (args.queryText as String)?.trim()
             if (!queryText) throw new IllegalArgumentException('queryText is required')
             int limit = args.limit instanceof Number ? Math.max(((Number) args.limit).intValue(), 1) : 20
-            int fetchSize = Math.max(limit * 10, 50)
+            int fetchSize = Math.max(limit * 25, 300)
+            boolean executableOnly = args.executableOnly == null ? true : Boolean.parseBoolean(args.executableOnly as String)
             Map promptResult = promptProvider.listPrompts([pageSize: 10000])
             List<Map> runtimePrompts = promptResult.prompts instanceof Collection ? (Collection<Map>) promptResult.prompts : []
             List<Map> runtimeMatches = runtimePrompts.findAll { Map prompt ->
                 matchesPromptQuery(prompt, queryText)
             }.collect { Map prompt ->
                 makeRuntimePromptSearchRow(prompt)
+            }.findAll { Map row ->
+                !executableOnly || isExecutableBusinessPrompt(row)
             }
 
-            Map svcArgs = [
+            Map exactSvcRes = ec.service.sync().name('org.moqui.search.SearchServices.search#DataDocuments').parameters([
                     indexName  : 'moqui_agent_prompts_v1',
-                    queryString: buildPromptCatalogQuery(queryText, args),
+                    queryString: buildExactPromptCatalogQuery(queryText, args + [executableOnly: executableOnly]),
+                    pageIndex  : 0,
+                    pageSize   : Math.max(limit * 2, 10)
+            ]).call()
+            List<Map> exactRows = []
+            if (!ec.message.hasError() && exactSvcRes.documentList instanceof Collection) {
+                exactRows = ((Collection<Map>) exactSvcRes.documentList).collect { Map doc ->
+                    Map row = mapPromptCatalogDoc(doc)
+                    if (executableOnly && !isExecutableBusinessPrompt(row)) return null
+                    return row
+                }.findAll { it != null }
+            }
+            ec.message.clearAll()
+
+            Map broadSvcRes = ec.service.sync().name('org.moqui.search.SearchServices.search#DataDocuments').parameters([
+                    indexName  : 'moqui_agent_prompts_v1',
+                    queryString: buildPromptCatalogQuery(queryText, args + [executableOnly: executableOnly]),
                     pageIndex  : 0,
                     pageSize   : fetchSize
-            ]
-            Map svcRes = ec.service.sync().name('org.moqui.search.SearchServices.search#DataDocuments').parameters(svcArgs).call()
-            if (!ec.message.hasError() && svcRes.documentList instanceof Collection && !((Collection) svcRes.documentList).isEmpty()) {
-                List<Map> openSearchRows = ((Collection<Map>) svcRes.documentList).collect { Map doc ->
-                    String runtimePromptName = resolveRuntimePromptName(doc, runtimePrompts)
-                    [
-                            documentId       : doc._id ?: doc.documentId ?: doc.id,
-                            catalogName      : doc.catalogName,
-                            catalogDescription: doc.catalogDescription,
-                            name             : doc.catalogName ?: doc.title ?: doc.promptName ?: doc.name ?: runtimePromptName,
-                            promptName       : doc.mcpPromptName ?: doc.promptName ?: runtimePromptName,
-                            canonicalPrompt  : doc.canonicalPrompt,
-                            description      : doc.catalogDescription ?: doc.humanExplanation ?: doc.description,
-                            title            : doc.catalogName ?: doc.title ?: runtimePromptName,
-                            area             : doc.area,
-                            subArea          : doc.subArea,
-                            actionKind       : doc.actionKind,
-                            runtimeExecutable: doc.runtimeExecutable,
-                            preferredService : doc.preferredService,
-                            sourceScreenPath : doc.sourceScreenPath,
-                            transitionNames  : doc.transitionNames ?: [],
-                            promptVariants   : doc.promptVariants ?: [],
-                            score            : doc._score,
-                            source           : 'opensearch'
-                    ]
-                }.findAll { Map row ->
-                    String promptName = row.promptName as String
-                    runtimePrompts.any { Map prompt -> (prompt.name as String) == promptName }
-                }
-                List<Map> promptList = openSearchRows.sort { Map a, Map b ->
-                    Integer.valueOf(scorePromptCatalogResult(queryText, b)) <=> Integer.valueOf(scorePromptCatalogResult(queryText, a))
-                }.take(limit)
-                return wrapToolResult(svcRes, [promptList: promptList, promptCount: promptList.size(), source: 'opensearch'])
+            ]).call()
+            if (!ec.message.hasError() && broadSvcRes.documentList instanceof Collection && !((Collection) broadSvcRes.documentList).isEmpty()) {
+                List<Map> openSearchRows = mapPromptCatalogRows((Collection<Map>) broadSvcRes.documentList, runtimePrompts, executableOnly)
+                List<Map> exactPromptList = exactRows
+                        .unique { Map row -> row.promptName ?: row.documentId ?: row.name }
+                Set<String> exactPromptNames = exactPromptList.collect { Map row -> row.promptName ?: row.documentId ?: row.name }
+                        .findAll { it } as Set<String>
+                List<Map> broadPromptList = openSearchRows
+                        .findAll { Map row -> !exactPromptNames.contains(row.promptName ?: row.documentId ?: row.name) }
+                        .unique { Map row -> row.promptName ?: row.documentId ?: row.name }
+                        .sort { Map a, Map b ->
+                            Integer.valueOf(scorePromptCatalogResult(queryText, b)) <=> Integer.valueOf(scorePromptCatalogResult(queryText, a))
+                        }
+                List<Map> promptList = (exactPromptList + broadPromptList).take(limit)
+                return wrapToolResult(broadSvcRes, [promptList: promptList, promptCount: promptList.size(), source: 'opensearch'])
             }
 
             ec.message.clearAll()
             List<Map> prompts = runtimeMatches.sort { Map a, Map b ->
                 Integer.valueOf(scorePromptCatalogResult(queryText, b)) <=> Integer.valueOf(scorePromptCatalogResult(queryText, a))
-            }.take(limit)
+            }
+            prompts = prioritizeExactCatalogName(queryText, prompts).take(limit)
             return wrapToolResult([:], [promptList: prompts, promptCount: prompts.size(), source: 'runtime'])
         }
 
@@ -716,9 +719,46 @@ class McpClient {
         if (args.area) filters.add("area:\"${escapeQueryString(args.area as String)}\"")
         if (args.actionKind) filters.add("actionKind:\"${escapeQueryString(args.actionKind as String)}\"")
         if (args.runtimeExecutable != null) filters.add("runtimeExecutable:${Boolean.valueOf(args.runtimeExecutable as String)}")
+        if (args.executableOnly == null || Boolean.parseBoolean(args.executableOnly as String)) {
+            filters.add("runtimeExecutable:true")
+            filters.add("_exists_:preferredService")
+        }
         String query = textQuery
         if (filters) query = "(${query}) AND " + filters.join(' AND ')
         return query
+    }
+
+    protected static String buildExactPromptCatalogQuery(String queryText, Map args = [:]) {
+        List<String> tokens = normalizePromptSearchTokens(queryText)
+        String normalizedQuery = tokens.join(' ')
+        String escaped = escapeQueryString(normalizedQuery)
+        List<String> filters = ["catalogNameExact:\"${escaped}\""]
+        if (args.area) filters.add("area:\"${escapeQueryString(args.area as String)}\"")
+        if (args.actionKind) filters.add("actionKind:\"${escapeQueryString(args.actionKind as String)}\"")
+        if (args.runtimeExecutable != null) filters.add("runtimeExecutable:${Boolean.valueOf(args.runtimeExecutable as String)}")
+        if (args.executableOnly == null || Boolean.parseBoolean(args.executableOnly as String)) {
+            filters.add("runtimeExecutable:true")
+            filters.add("_exists_:preferredService")
+        }
+        return filters.join(' AND ')
+    }
+
+    protected static boolean isExecutableBusinessPrompt(Map row) {
+        if (!row) return false
+        if (row.runtimeExecutable != null && row.runtimeExecutable != Boolean.TRUE) return false
+        String source = (row.source as String)?.trim()
+        String preferredService = (row.preferredService as String)?.trim()
+        String actionKind = normalizePromptSearchText(row.actionKind as String)
+        String promptName = normalizePromptSearchText(row.promptName as String)
+        String name = normalizePromptSearchText(row.name as String)
+        String title = normalizePromptSearchText(row.title as String)
+        String canonical = normalizePromptSearchText(row.canonicalPrompt as String)
+        List<String> helperSignals = ['get ', 'list ', 'lookup ', 'search ', 'find ', 'select ']
+        if (!preferredService && source != 'runtime') return false
+        boolean looksLikeHelper = helperSignals.any { promptName.contains(".${it.trim()}") } ||
+                helperSignals.any { name.startsWith(it) || title.startsWith(it) || canonical.startsWith(it) }
+        if (looksLikeHelper && !(actionKind in ['create', 'update', 'delete', 'move', 'submit', 'apply', 'complete'])) return false
+        return true
     }
 
     protected static String escapeQueryString(String value) {
@@ -730,6 +770,42 @@ class McpClient {
                 .replace('(', '\\(')
                 .replace(')', '\\)')
     }
+
+    protected static List<Map> mapPromptCatalogRows(Collection<Map> docs, List<Map> runtimePrompts, boolean executableOnly) {
+        return docs.collect { Map doc ->
+            Map row = mapPromptCatalogDoc(doc, runtimePrompts)
+            row
+        }.findAll { Map row ->
+            String promptName = row.promptName as String
+            runtimePrompts.any { Map prompt -> (prompt.name as String) == promptName } &&
+                    (!executableOnly || isExecutableBusinessPrompt(row))
+        }
+    }
+
+    protected static Map mapPromptCatalogDoc(Map doc, List<Map> runtimePrompts = null) {
+        String runtimePromptName = runtimePrompts ? resolveRuntimePromptName(doc, runtimePrompts) : null
+        return [
+                documentId       : doc._id ?: doc.documentId ?: doc.id,
+                catalogName      : doc.catalogName,
+                catalogDescription: doc.catalogDescription,
+                name             : doc.catalogName ?: doc.title ?: doc.promptName ?: doc.name ?: runtimePromptName,
+                promptName       : doc.mcpPromptName ?: doc.promptName ?: runtimePromptName,
+                canonicalPrompt  : doc.canonicalPrompt,
+                description      : doc.catalogDescription ?: doc.humanExplanation ?: doc.description,
+                title            : doc.catalogName ?: doc.title ?: runtimePromptName,
+                area             : doc.area,
+                subArea          : doc.subArea,
+                actionKind       : doc.actionKind,
+                runtimeExecutable: doc.runtimeExecutable,
+                preferredService : doc.preferredService,
+                sourceScreenPath : doc.sourceScreenPath,
+                transitionNames  : doc.transitionNames ?: [],
+                promptVariants   : doc.promptVariants ?: [],
+                score            : doc._score,
+                source           : 'opensearch'
+        ]
+    }
+
 
     protected static String resolveRuntimePromptName(Map doc, List<Map> runtimePrompts) {
         if (!doc || !runtimePrompts) return null
@@ -769,17 +845,18 @@ class McpClient {
         String source = normalizePromptSearchText(row.source as String)
 
         int score = 0
-        if (catalogName == normalizedQuery) score += 260
+        if (catalogName == normalizedQuery) score += 2500
+        if (catalogName == normalizedQuery && actionKind == 'create') score += 1000
         if (catalogName.contains(normalizedQuery)) score += 160
         if (catalogDescription.contains(normalizedQuery)) score += 90
-        if (canonical == normalizedQuery) score += 200
+        if (canonical == normalizedQuery) score += 1500
         if (canonical.contains(normalizedQuery)) score += 120
         if (description.contains(normalizedQuery)) score += 60
         if (title == normalizedQuery) score += 180
         if (title.contains(normalizedQuery)) score += 100
         if (Boolean.TRUE == row.runtimeExecutable) score += 25
         if (preferredService) score += 10
-        if (!preferredService) score -= 20
+        if (!preferredService) score -= 120
         if (name.contains(normalizedQuery)) score += 80
         if (sourceScreenPath.contains(normalizedQuery)) score += 40
         if (source == 'opensearch') score += 60
@@ -813,6 +890,8 @@ class McpClient {
         if (queryTokens.contains('delete') && (row.actionKind as String) == 'delete') score += 25
         if (queryTokens.contains('move') && canonical.contains('move')) score += 20
         if ((queryTokens.any { it in ['create', 'update', 'delete', 'move'] }) && actionKind in ['navigate', 'list']) score -= 80
+        if ((queryTokens.any { it in ['create', 'update', 'delete', 'move'] }) &&
+                (name.contains('get ') || title.contains('get ') || name.contains(' list') || title.contains(' list'))) score -= 120
         if (queryTokens.contains('sales') && name.contains('sales')) score += 70
         if (queryTokens.contains('sales') && title.contains('sales')) score += 90
         if (queryTokens.contains('purchase') && name.contains('purchase')) score += 70
@@ -823,12 +902,34 @@ class McpClient {
         if (queryTokens.contains('asset') && preferredService.contains('asset')) score += 45
         if (queryTokens.contains('order') && preferredService.contains('order')) score += 35
         if (queryTokens.contains('product') && preferredService.contains('product')) score += 35
+
+        List<String> catalogTokens = catalogName ? catalogName.tokenize(' ') : []
+        if (queryTokens && catalogTokens) {
+            List<String> extraCatalogTokens = catalogTokens.findAll { !(it in queryTokens) }
+            score -= extraCatalogTokens.size() * 35
+            if (!queryTokens.contains('edit') && extraCatalogTokens.contains('edit')) score -= 120
+        }
+
         return score
     }
 
     protected static List<String> splitPromptSearchChunks(String queryText) {
         if (!queryText) return []
         return normalizePromptSearchTokens(queryText)
+    }
+
+    protected static List<Map> prioritizeExactCatalogName(String queryText, List<Map> rows) {
+        if (!rows) return rows ?: []
+        String normalizedQuery = normalizePromptSearchTokens(queryText).join(' ')
+        if (!normalizedQuery) return rows
+        List<Map> exact = []
+        List<Map> rest = []
+        rows.each { Map row ->
+            String catalogName = normalizePromptSearchText(row.catalogName as String)
+            if (catalogName == normalizedQuery) exact.add(row)
+            else rest.add(row)
+        }
+        return exact + rest
     }
 
     protected static Map makeRuntimePromptSearchRow(Map prompt) {

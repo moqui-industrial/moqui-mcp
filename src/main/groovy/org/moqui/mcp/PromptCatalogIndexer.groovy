@@ -151,10 +151,12 @@ class PromptCatalogIndexer {
                 doc_id              : promptName,
                 documentId          : promptName,
                 catalogName         : catalogName,
+                catalogNameExact    : McpClient.normalizePromptSearchText(catalogName),
                 catalogDescription  : catalogDescription,
                 mcpPromptName       : promptName,
                 promptName          : promptName,
                 title               : promptTitle,
+                titleExact          : McpClient.normalizePromptSearchText(promptTitle),
                 description         : promptDescription,
                 canonicalPrompt     : canonicalPrompt,
                 promptVariants      : promptVariants.unique(),
@@ -203,10 +205,12 @@ class PromptCatalogIndexer {
                                 doc_id               : [type: 'keyword'],
                                 documentId           : [type: 'keyword'],
                                 catalogName          : [type: 'text'],
+                                catalogNameExact     : [type: 'keyword', normalizer: 'lowercase_keyword'],
                                 catalogDescription   : [type: 'text'],
                                 mcpPromptName        : [type: 'keyword'],
                                 promptName           : [type: 'keyword'],
                                 title                : [type: 'text'],
+                                titleExact           : [type: 'keyword', normalizer: 'lowercase_keyword'],
                                 description          : [type: 'text'],
                                 canonicalPrompt      : [type: 'text'],
                                 promptVariants       : [type: 'text'],
@@ -316,7 +320,12 @@ class PromptCatalogIndexer {
         if (promptSource == 'screen') {
             String verb = actionKind ? actionKind.capitalize() : 'Use'
             String noun = formatBusinessTerm(domainObject ?: inferObjectFromScreenPath(sourceScreenPath) ?: promptTitle)
-            if (noun) return "${verb} ${noun}".trim()
+            if (noun) {
+                String lowerVerb = verb.toLowerCase()
+                String lowerNoun = noun.toLowerCase()
+                if (lowerNoun == lowerVerb || lowerNoun.startsWith(lowerVerb + ' ')) return noun.trim()
+                return "${verb} ${noun}".trim()
+            }
         }
         return formatBusinessTerm(promptTitle)
     }
