@@ -22,11 +22,13 @@ class WikiPromptProvider {
                 .condition('wikiSpaceId', 'MCP_PROMPTS')
                 .orderBy('pagePath')
                 .list()
+                .findAll { wp -> (((wp.pagePath ?: '') as String).length() > 0) }
                 .collect { wp ->
+                    String promptName = (wp.pagePath ?: '') as String
                     [
-                            name       : wp.pagePath,
-                            title      : wp.pageName ?: wp.pagePath,
-                            description: wp.pageName ?: wp.pagePath,
+                            name       : promptName,
+                            title      : promptName,
+                            description: promptName,
                             arguments  : []
                     ]
                 }

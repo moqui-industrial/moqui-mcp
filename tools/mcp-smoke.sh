@@ -62,6 +62,28 @@ if doc.get('entityName') != sys.argv[2]:
 PY
 }
 
+assert_prompt_complete() {
+  local file="$1"
+  local expected_desc="$2"
+  python3 - "$file" "$expected_desc" <<'PY'
+import json, sys
+payload = json.load(open(sys.argv[1], 'r', encoding='utf-8'))
+result = payload.get('result', {})
+if result.get('resultType') != 'complete':
+    raise SystemExit(f"Unexpected resultType: {result.get('resultType')!r}")
+if result.get('description') != sys.argv[2]:
+    raise SystemExit(f"Unexpected description: {result.get('description')!r}")
+messages = result.get('messages') or []
+if not messages:
+    raise SystemExit('Missing messages array')
+content = messages[0].get('content') or {}
+if content.get('type') != 'text':
+    raise SystemExit(f"Unexpected content.type: {content.get('type')!r}")
+if not content.get('text'):
+    raise SystemExit('Missing prompt text')
+PY
+}
+
 echo "1. server/discover"
 curl_json "server/discover" \
   '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' \
@@ -100,7 +122,7 @@ if [[ -n "${PROMPT_NAME}" ]]; then
   curl_json "prompts/get" \
     "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"prompts/get\",\"params\":{\"name\":\"${PROMPT_NAME}\",\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}" \
     > "${TMP_DIR}/prompt.json"
-  assert_contains "${TMP_DIR}/prompt.json" "\"name\":\"${PROMPT_NAME}\""
+  assert_prompt_complete "${TMP_DIR}/prompt.json" "${PROMPT_NAME}"
 fi
 
 echo "7. negative mismatch"

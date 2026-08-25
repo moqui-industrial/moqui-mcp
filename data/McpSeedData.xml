@@ -19,4 +19,74 @@ along with this software (see the LICENSE.md file). If not, see
             restrictView="N"
             restrictUpdate="Y"
             allowAnyHtml="N"/>
+    <moqui.resource.wiki.WikiPage wikiPageId="MCP_PROMPTS_ROOT" wikiSpaceId="MCP_PROMPTS"
+            pagePath="" createdByUserId="" publishedVersionName="01"/>
+    <moqui.resource.wiki.WikiPageHistory wikiPageId="MCP_PROMPTS_ROOT" historySeqId="01"
+            userId="" changeDateTime="1787616000000"/>
+    <moqui.resource.DbResource resourceId="mcp_prompts_root" parentResourceId="WIKI_SPACE_ROOT"
+            filename="mcp-prompts.md" isFile="Y"/>
+    <moqui.resource.DbResourceFile resourceId="mcp_prompts_root" mimeType="text/plain"
+            versionName="01" rootVersionName="01"
+            fileData="# MCP Prompts&#10;&#10;Curated MCP prompts for Moqui clients.">
+        <histories versionName="01" versionDate="1787616000000" isDiff="N"/>
+    </moqui.resource.DbResourceFile>
+    <moqui.resource.DbResource resourceId="mcp_prompts_dir" parentResourceId="WIKI_SPACE_ROOT"
+            filename="mcp-prompts" isFile="N"/>
+
+    <moqui.resource.DbResource resourceId="mcp_prompt_create_product" parentResourceId="mcp_prompts_dir"
+            filename="create-product.md" isFile="Y"/>
+    <moqui.resource.DbResourceFile resourceId="mcp_prompt_create_product" mimeType="text/plain"
+            versionName="01" rootVersionName="01"><fileData><![CDATA[
+Use `moqui_call_service` to create a new product in Moqui.
+
+Required inputs:
+- `productName`: human-readable product name
+- `productTypeEnumId`: exact Moqui product type enum id such as `PtAsset`, `PtFinishedGood`, `PtService`
+
+Optional inputs:
+- `ownerPartyId`: internal organization that owns the product
+- `productId`: explicit product pseudo-id if the business process requires it
+- `internalName`
+- `description`
+
+Rules:
+- If the user does not provide an exact enum id, first call `moqui_search_data_documents` or `moqui_get_service_metadata` and resolve the exact code before submit.
+- If the user does not provide an exact `ownerPartyId`, resolve it before submit.
+- Do not invent enum ids, party ids, or product ids.
+- When the required values are exact, call `moqui_call_service` with `serviceName=create#mantle.product.Product`.
+]]></fileData><histories versionName="01" versionDate="1787616000000" isDiff="N"/></moqui.resource.DbResourceFile>
+    <moqui.resource.wiki.WikiPage wikiPageId="MCP_PROMPT_CREATE_PRODUCT" wikiSpaceId="MCP_PROMPTS"
+            pagePath="create-product" createdByUserId="" publishedVersionName="01"/>
+    <moqui.resource.wiki.WikiPageHistory wikiPageId="MCP_PROMPT_CREATE_PRODUCT" historySeqId="01"
+            userId="" changeDateTime="1787616000000"/>
+
+    <moqui.resource.DbResource resourceId="mcp_prompt_create_sales_order" parentResourceId="mcp_prompts_dir"
+            filename="create-sales-order.md" isFile="Y"/>
+    <moqui.resource.DbResourceFile resourceId="mcp_prompt_create_sales_order" mimeType="text/plain"
+            versionName="01" rootVersionName="01"><fileData><![CDATA[
+Use `moqui_call_service` to create a new sales order in Moqui.
+
+Required inputs:
+- exact customer party identifier
+- exact product or item identifiers
+- quantities
+
+Optional inputs depend on the business case:
+- `productStoreId`
+- `facilityId`
+- shipping method
+- requested delivery date
+- order priority
+
+Rules:
+- Resolve customer, store, facility, and product identifiers before submit.
+- Never invent Moqui ids.
+- Use `moqui_search_data_documents` to discover candidate business objects when the user provides only business wording.
+- Use `moqui_get_service_metadata` if you need the exact in-parameters of the bound order creation service before calling it.
+- Only call the final service when all required identifiers are exact and unambiguous.
+]]></fileData><histories versionName="01" versionDate="1787616000000" isDiff="N"/></moqui.resource.DbResourceFile>
+    <moqui.resource.wiki.WikiPage wikiPageId="MCP_PROMPT_CREATE_SALES_ORDER" wikiSpaceId="MCP_PROMPTS"
+            pagePath="create-sales-order" createdByUserId="" publishedVersionName="01"/>
+    <moqui.resource.wiki.WikiPageHistory wikiPageId="MCP_PROMPT_CREATE_SALES_ORDER" historySeqId="01"
+            userId="" changeDateTime="1787616000000"/>
 </entity-facade-xml>
