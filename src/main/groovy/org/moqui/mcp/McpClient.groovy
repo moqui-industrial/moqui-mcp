@@ -182,6 +182,7 @@ class McpClient {
             if (!serviceName) throw new IllegalArgumentException('serviceName is required')
             ServiceDefinition sd = ec.serviceFacade.getServiceDefinition(serviceName)
             if (sd == null) throw new IllegalArgumentException("Unknown service ${serviceName}")
+            assertServiceCallable(sd)
             Map payload = [
                     serviceName : sd.serviceName,
                     verb        : sd.verb,
@@ -201,12 +202,16 @@ class McpClient {
             String serviceName = args.serviceName as String
             Map serviceParameters = (args.parameters instanceof Map) ? (Map) args.parameters : [:]
             if (!serviceName) throw new IllegalArgumentException('serviceName is required')
+            ServiceDefinition sd = ec.serviceFacade.getServiceDefinition(serviceName)
+            if (sd == null) throw new IllegalArgumentException("Unknown service ${serviceName}")
+            assertServiceCallable(sd)
             Map svcRes = ec.service.sync().name(serviceName).parameters(serviceParameters).call()
             return wrapToolResult(svcRes, svcRes)
         }
 
         ServiceDefinition serviceDefinition = ec.serviceFacade.getServiceDefinition(name)
         if (serviceDefinition != null) {
+            assertServiceCallable(serviceDefinition)
             Map svcRes = ec.service.sync().name(name).parameters(args).call()
             return wrapToolResult(svcRes, svcRes)
         }
@@ -282,6 +287,16 @@ class McpClient {
             return ArtifactExecutionFacadeImpl.isPermitted("AT_SERVICE:AUTHZA_VIEW:${serviceName}", ec)
         } catch (Throwable ignored) {
             return false
+        }
+    }
+
+    protected void assertServiceCallable(ServiceDefinition sd) {
+        if (sd == null) throw new IllegalArgumentException('Service definition is required')
+        if (!sd.allowRemote) {
+            throw new IllegalArgumentException("Service ${sd.serviceName} is not available for remote invocation")
+        }
+        if (!isServiceVisible(sd.serviceName)) {
+            throw new IllegalArgumentException("Service ${sd.serviceName} is not visible for the current user")
         }
     }
 

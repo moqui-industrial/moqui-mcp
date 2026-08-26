@@ -111,17 +111,7 @@ class MoquiResourceProvider {
         }
 
         if (uri.startsWith('record://')) {
-            String withoutScheme = uri.substring('record://'.length())
-            List<String> parts = withoutScheme.split('\\?', 2) as List<String>
-            String entityName = parts[0]
-            Map<String, Object> conditions = [:]
-            if (parts.size() > 1 && parts[1]) {
-                parts[1].split('&').each { String pair ->
-                    List<String> kv = pair.split('=', 2) as List<String>
-                    conditions[kv[0]] = kv.size() > 1 ? java.net.URLDecoder.decode(kv[1], 'UTF-8') : ''
-                }
-            }
-            return readLegacyRecord(uri, entityName, conditions)
+            throw new IllegalArgumentException("Legacy record:// URIs are no longer supported. Use moqui://entity/{entityName}/{primaryKeyToken}.")
         }
 
         throw new IllegalArgumentException("Unsupported resource URI: ${uri}")
@@ -175,22 +165,6 @@ class MoquiResourceProvider {
         Map<String, String> pkMap = decodePrimaryKeyToken(pkToken, pkFieldNames)
         def find = ec.entity.find(entityName)
         pkMap.each { String fieldName, String value -> find.condition(fieldName, value) }
-        def record = find.one()
-        if (!record) throw new IllegalArgumentException("Record resource not found for ${uri}")
-        return [
-                ttlMs     : McpClient.CACHE_TTL_MS,
-                cacheScope: 'private',
-                contents  : [[
-                                     uri     : uri,
-                                     mimeType: 'application/json',
-                                     text    : new JsonBuilder(record ?: [:]).toString()
-                             ]]
-        ]
-    }
-
-    protected Map readLegacyRecord(String uri, String entityName, Map<String, Object> conditions) {
-        def find = ec.entity.find(entityName)
-        conditions.each { String key, Object value -> find.condition(key, value) }
         def record = find.one()
         if (!record) throw new IllegalArgumentException("Record resource not found for ${uri}")
         return [
