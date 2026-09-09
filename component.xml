@@ -14,8 +14,4 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <component xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
           xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/moqui-conf-3.xsd"
-          name="moqui-mcp" version="4.0.0">
-
-    <service-factory load-path="service/"/>
-    <entity-factory load-path="entity/" load-data="data/McpSeedData.xml"/>
-</component>
+          name="moqui-mcp" version="4.0.0"/>
