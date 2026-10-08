@@ -1,0 +1,17 @@
+{
+  "protocolVersion": "2026-07-28",
+  "repository": "https://github.com/modelcontextprotocol/modelcontextprotocol",
+  "tag": "2026-07-28",
+  "commit": "5f5440bb26a62e2cf3440b92da5a667efa03b267",
+  "schemaPath": "schema/2026-07-28/schema.json",
+  "schemaUrl": "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/2026-07-28/schema/2026-07-28/schema.json",
+  "sha256": "ef70b61f99b6d2e5e3b46863822eab08dff6a45bedc7a08914e0e5b133f40203",
+  "validator": "com.networknt:json-schema-validator:2.0.4",
+  "qualifiedBaselines": {
+    "framework": "6b197443",
+    "runtime": "cffc985dc782045d1b6376fe2ce5eebec7cf775e",
+    "mantleUdm": "73482e52e0605afa85cdf2ab7eddb4c964f7df19",
+    "mantleUsl": "3fa07c672809910b1fe59caa050e5e4a8c20ea63",
+    "openSearch": "3.4.0"
+  }
+}

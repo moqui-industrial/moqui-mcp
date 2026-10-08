@@ -5,13 +5,12 @@
       "url": "http://localhost:8081/mcp",
       "headers": {
         "Accept": "application/json, text/event-stream",
-        "Authorization": "Basic am9obi5kb2U6bW9xdWk=",
         "MCP-Protocol-Version": "2026-07-28"
       },
       "connectionTimeout": 30000,
       "requestTimeout": 60000,
       "paginatedLists": true,
-      "autoRefreshOnListChanged": true
+      "autoRefreshOnListChanged": false
     }
   }
 }

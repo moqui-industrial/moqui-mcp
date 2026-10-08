@@ -3,109 +3,17 @@
 <moqui-conf xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/moqui-conf-3.xsd">
 
-    <default-property name="librechat_host" value="127.0.0.1"/>
-    <default-property name="librechat_port" value="3081"/>
-    <default-property name="librechat_auto_email" value="moqui.agent@local.test"/>
-    <default-property name="librechat_auto_password" value="moqui-mcp-dev-2026"/>
-
     <webapp-list>
         <webapp name="webroot">
             <filter name="McpAuthFilter" class="org.moqui.impl.webapp.MoquiAuthFilter" async-supported="true">
                 <url-pattern>/mcp</url-pattern>
                 <url-pattern>/mcp/*</url-pattern>
             </filter>
-            <filter name="LibreChatAuthFilter" class="org.moqui.impl.webapp.MoquiAuthFilter" async-supported="true">
-                <init-param name="permission" value="LibreChatRemote"/>
-                <url-pattern>/librechat/*</url-pattern>
-                <url-pattern>/assets/*</url-pattern>
-                <url-pattern>/images/*</url-pattern>
-                <url-pattern>/api/*</url-pattern>
-                <url-pattern>/auth/*</url-pattern>
-                <url-pattern>/oauth/*</url-pattern>
-                <url-pattern>/c/*</url-pattern>
-                <url-pattern>/sw.js</url-pattern>
-                <url-pattern>/manifest.webmanifest</url-pattern>
-                <url-pattern>/registerSW.js</url-pattern>
-            </filter>
             <servlet name="McpServlet" class="org.moqui.mcp.McpServlet" load-on-startup="5" async-supported="true">
                 <url-pattern>/mcp</url-pattern>
                 <url-pattern>/mcp/*</url-pattern>
             </servlet>
-            <servlet name="LibreChatProxy" class="org.eclipse.jetty.ee11.proxy.ProxyServlet$Transparent" load-on-startup="6" async-supported="true">
-                <init-param name="proxyTo" value="http://${librechat_host}:${librechat_port}"/>
-                <init-param name="prefix" value="/librechat"/>
-                <url-pattern>/librechat/*</url-pattern>
-            </servlet>
-            <servlet name="LibreChatAssetsProxy" class="org.eclipse.jetty.ee11.proxy.ProxyServlet$Transparent" load-on-startup="6" async-supported="true">
-                <init-param name="proxyTo" value="http://${librechat_host}:${librechat_port}/assets"/>
-                <init-param name="prefix" value="/assets"/>
-                <url-pattern>/assets/*</url-pattern>
-            </servlet>
-            <servlet name="LibreChatImagesProxy" class="org.eclipse.jetty.ee11.proxy.ProxyServlet$Transparent" load-on-startup="6" async-supported="true">
-                <init-param name="proxyTo" value="http://${librechat_host}:${librechat_port}/images"/>
-                <init-param name="prefix" value="/images"/>
-                <url-pattern>/images/*</url-pattern>
-            </servlet>
-            <servlet name="LibreChatApiProxy" class="org.eclipse.jetty.ee11.proxy.ProxyServlet$Transparent" load-on-startup="6" async-supported="true">
-                <init-param name="proxyTo" value="http://${librechat_host}:${librechat_port}/api"/>
-                <init-param name="prefix" value="/api"/>
-                <url-pattern>/api/*</url-pattern>
-            </servlet>
-            <servlet name="LibreChatAuthProxy" class="org.eclipse.jetty.ee11.proxy.ProxyServlet$Transparent" load-on-startup="6" async-supported="true">
-                <init-param name="proxyTo" value="http://${librechat_host}:${librechat_port}/auth"/>
-                <init-param name="prefix" value="/auth"/>
-                <url-pattern>/auth/*</url-pattern>
-            </servlet>
-            <servlet name="LibreChatOauthProxy" class="org.eclipse.jetty.ee11.proxy.ProxyServlet$Transparent" load-on-startup="6" async-supported="true">
-                <init-param name="proxyTo" value="http://${librechat_host}:${librechat_port}/oauth"/>
-                <init-param name="prefix" value="/oauth"/>
-                <url-pattern>/oauth/*</url-pattern>
-            </servlet>
-            <servlet name="LibreChatConversationProxy" class="org.eclipse.jetty.ee11.proxy.ProxyServlet$Transparent" load-on-startup="6" async-supported="true">
-                <init-param name="proxyTo" value="http://${librechat_host}:${librechat_port}/c"/>
-                <init-param name="prefix" value="/c"/>
-                <url-pattern>/c/*</url-pattern>
-            </servlet>
-            <servlet name="LibreChatSwProxy" class="org.eclipse.jetty.ee11.proxy.ProxyServlet$Transparent" load-on-startup="6" async-supported="true">
-                <init-param name="proxyTo" value="http://${librechat_host}:${librechat_port}/sw.js"/>
-                <init-param name="prefix" value="/sw.js"/>
-                <url-pattern>/sw.js</url-pattern>
-            </servlet>
-            <servlet name="LibreChatManifestProxy" class="org.eclipse.jetty.ee11.proxy.ProxyServlet$Transparent" load-on-startup="6" async-supported="true">
-                <init-param name="proxyTo" value="http://${librechat_host}:${librechat_port}/manifest.webmanifest"/>
-                <init-param name="prefix" value="/manifest.webmanifest"/>
-                <url-pattern>/manifest.webmanifest</url-pattern>
-            </servlet>
-            <servlet name="LibreChatRegisterSwProxy" class="org.eclipse.jetty.ee11.proxy.ProxyServlet$Transparent" load-on-startup="6" async-supported="true">
-                <init-param name="proxyTo" value="http://${librechat_host}:${librechat_port}/registerSW.js"/>
-                <init-param name="prefix" value="/registerSW.js"/>
-                <url-pattern>/registerSW.js</url-pattern>
-            </servlet>
         </webapp>
     </webapp-list>
 
-    <screen-facade>
-        <screen location="component://webroot/screen/webroot/apps.xml">
-            <subscreens-item name="agent" menu-title="Agent Chat" menu-index="97"
-                    location="component://moqui-mcp/screen/agent.xml"/>
-        </screen>
-        <screen location="component://webroot/screen/webroot/vapps.xml">
-            <subscreens-item name="agent" menu-title="Agent Chat" menu-index="97"
-                    location="component://moqui-mcp/screen/agent.xml"/>
-        </screen>
-        <screen location="component://webroot/screen/webroot/qapps.xml">
-            <subscreens-item name="agent" menu-title="Agent Chat" menu-index="97"
-                    location="component://moqui-mcp/screen/agent.xml"/>
-        </screen>
-        <screen location="component://webroot/screen/webroot.xml">
-            <subscreens-item name="mcp" menu-include="false"
-                    location="component://moqui-mcp/screen/mcp.xml"/>
-            <subscreens-item name="message" menu-include="false"
-                    location="component://moqui-mcp/screen/mcp.xml"/>
-            <subscreens-item name="sse" menu-include="false"
-                    location="component://moqui-mcp/screen/mcp.xml"/>
-            <subscreens-item name="LibreChat" menu-title="LibreChat" menu-include="false"
-                    location="component://moqui-mcp/screen/agent/LibreChat.xml"/>
-        </screen>
-    </screen-facade>
 </moqui-conf>

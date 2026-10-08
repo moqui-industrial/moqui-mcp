@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
+# This software is in the public domain under CC0 1.0 Universal plus a
+# Grant of Patent License. See the LICENSE.md file for details.
+
 set -euo pipefail
 
 BASE_URL="${MCP_BASE_URL:-http://localhost:8081/mcp}"
 PROTO_VERSION="${MCP_PROTOCOL_VERSION:-2026-07-28}"
-ENTITY_URI="${MCP_TEST_ENTITY_URI:-entity://mantle.party.Person}"
+ENTITY_URI="${MCP_TEST_ENTITY_URI:-moqui://entity-def/moqui.basic.Enumeration}"
 PROMPT_NAME="${MCP_TEST_PROMPT_NAME:-}"
 
 TMP_DIR="$(mktemp -d)"
@@ -26,6 +29,7 @@ curl_json() {
   shift 2
   curl -sS "${auth_args[@]}" -X POST "${BASE_URL}" \
     -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
     -H "MCP-Protocol-Version: ${PROTO_VERSION}" \
     -H "Mcp-Method: ${method}" \
     "${extra_headers[@]}" \
@@ -109,7 +113,7 @@ curl_json "resources/read" \
   "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"resources/read\",\"params\":{\"uri\":\"${ENTITY_URI}\",\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}" \
   -H "Mcp-Name: ${ENTITY_URI}" \
   > "${TMP_DIR}/resource.json"
-assert_resource_entity_name "${TMP_DIR}/resource.json" "${ENTITY_URI#entity://}"
+assert_resource_entity_name "${TMP_DIR}/resource.json" "${ENTITY_URI#moqui://entity-def/}"
 
 echo "5. prompts/list"
 curl_json "prompts/list" \
@@ -121,6 +125,7 @@ if [[ -n "${PROMPT_NAME}" ]]; then
   echo "6. prompts/get (${PROMPT_NAME})"
   curl_json "prompts/get" \
     "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"prompts/get\",\"params\":{\"name\":\"${PROMPT_NAME}\",\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}" \
+    -H "Mcp-Name: ${PROMPT_NAME}" \
     > "${TMP_DIR}/prompt.json"
   assert_prompt_complete "${TMP_DIR}/prompt.json" "${PROMPT_NAME}"
 fi

@@ -1,6 +1,15 @@
 /*
  * This software is in the public domain under CC0 1.0 Universal plus a
  * Grant of Patent License.
+ *
+ * To the extent possible under law, the author(s) have dedicated all
+ * copyright and related and neighboring rights to this software to the
+ * public domain worldwide. This software is distributed without any
+ * warranty.
+ *
+ * You should have received a copy of the CC0 Public Domain Dedication
+ * along with this software (see the LICENSE.md file). If not, see
+ * <http://creativecommons.org/publicdomain/zero/1.0/>.
  */
 
 apply plugin: 'groovy'
@@ -9,6 +18,8 @@ def componentNode = parseComponent(project)
 version = componentNode.'@version'
 def jarBaseName = componentNode.'@name'
 def moquiDir = projectDir.parentFile.parentFile.parentFile
+def runtimeDir = projectDir.parentFile.parentFile
+def testRuntimeDir = project.hasProperty('mcpTestRuntime') ? file(project.property('mcpTestRuntime')) : runtimeDir
 def frameworkDir = file(moquiDir.absolutePath + '/framework')
 
 repositories {
@@ -23,14 +34,67 @@ dependencies {
     implementation project(':framework')
     runtimeOnly 'jakarta.servlet:jakarta.servlet-api:6.0.0'
     testImplementation project(':framework').configurations.testImplementation.allDependencies
+    testImplementation 'com.networknt:json-schema-validator:2.0.4'
+    testImplementation 'org.eclipse.jetty.ee11:jetty-ee11-servlet:12.1.12'
 }
 
-check.dependsOn.clear()
+def mcpSchemaUrl = 'https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/2026-07-28/schema/2026-07-28/schema.json'
+def mcpSchemaSha256 = 'ef70b61f99b6d2e5e3b46863822eab08dff6a45bedc7a08914e0e5b133f40203'
+def mcpSchemaFile = layout.buildDirectory.file('mcp-schema/2026-07-28-schema.json')
+def mcpSchemaCacheFile = new File(gradle.gradleUserHomeDir, "caches/moqui-mcp/${mcpSchemaSha256}.json")
+
+tasks.register('downloadMcpSchema') {
+    outputs.file(mcpSchemaFile)
+    doLast {
+        File outputFile = mcpSchemaFile.get().asFile
+        outputFile.parentFile.mkdirs()
+        byte[] schemaBytes
+        if (mcpSchemaCacheFile.exists()) {
+            schemaBytes = mcpSchemaCacheFile.bytes
+        } else {
+            schemaBytes = new URI(mcpSchemaUrl).toURL().bytes
+        }
+        String actualSha256 = java.security.MessageDigest.getInstance('SHA-256')
+                .digest(schemaBytes).encodeHex().toString()
+        if (actualSha256 != mcpSchemaSha256) {
+            throw new GradleException("Unexpected MCP schema SHA-256 ${actualSha256}; expected ${mcpSchemaSha256}")
+        }
+        if (!mcpSchemaCacheFile.exists()) {
+            mcpSchemaCacheFile.parentFile.mkdirs()
+            mcpSchemaCacheFile.bytes = schemaBytes
+        }
+        outputFile.bytes = schemaBytes
+    }
+}
 
 test {
+    dependsOn tasks.named('downloadMcpSchema')
     useJUnitPlatform()
+    systemProperty 'moqui.runtime', testRuntimeDir.absolutePath
+    systemProperty 'moqui.conf', new File(testRuntimeDir, 'conf/MoquiDevConf.xml').absolutePath
+    systemProperty 'moqui.init.static', 'true'
+    systemProperty 'moqui.mcp.schema.path', mcpSchemaFile.get().asFile.absolutePath
+    exclude '**/McpSearchBackendTests.class'
     testLogging { events "passed", "skipped", "failed" }
     testLogging.showStandardStreams = true
+}
+
+tasks.register('testMcpSearchBackend', Test) {
+    dependsOn tasks.named('testClasses')
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform()
+    filter { includeTestsMatching 'org.moqui.mcp.McpSearchBackendTests' }
+    systemProperty 'moqui.runtime', testRuntimeDir.absolutePath
+    systemProperty 'moqui.conf', new File(testRuntimeDir, 'conf/MoquiDevConf.xml').absolutePath
+    systemProperty 'moqui.init.static', 'true'
+    systemProperty 'moqui.mcp.search.url', project.findProperty('mcpSearchUrl') ?: ''
+    testLogging { events "passed", "skipped", "failed" }
+    testLogging.showStandardStreams = true
+}
+
+gradle.projectsEvaluated {
+    tasks.named('check').configure { dependsOn tasks.named('test') }
 }
 
 task cleanLib(type: Delete) { delete fileTree(dir: projectDir.absolutePath + '/lib', include: '*') }
