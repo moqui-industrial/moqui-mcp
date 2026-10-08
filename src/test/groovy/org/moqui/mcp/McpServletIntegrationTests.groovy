@@ -134,6 +134,68 @@ class McpServletIntegrationTests extends Specification {
         body.result.supportedVersions == ['2026-07-28']
     }
 
+    def 'LibreChat legacy profile translates initialize and accepts initialized notification'() {
+        given:
+        Map initialize = [
+                jsonrpc: '2.0', id: 42, method: 'initialize',
+                params : [protocolVersion: '2025-11-25', capabilities: [:], clientInfo: [name: 'LibreChat', version: '0.8.x']]
+        ]
+        Map initialized = [jsonrpc: '2.0', method: 'notifications/initialized', params: [:]]
+
+        when:
+        HttpResponse<String> initializeResponse = rawPost(JsonOutput.toJson(initialize), legacyLibreChatHeaders())
+        HttpResponse<String> notificationResponse = rawPost(JsonOutput.toJson(initialized), legacyLibreChatHeaders())
+        Map initializeBody = new JsonSlurper().parseText(initializeResponse.body()) as Map
+
+        then:
+        initializeResponse.statusCode() == 200
+        initializeBody.result.protocolVersion == '2025-11-25'
+        initializeBody.result.serverInfo.name == 'moqui-mcp'
+        notificationResponse.statusCode() == 202
+    }
+
+    def 'LibreChat profile accepts the headerless initialize sent by LibreChat 0.8.7'() {
+        given:
+        Map initialize = [
+                jsonrpc: '2.0', id: 44, method: 'initialize',
+                params : [protocolVersion: '2025-11-25', capabilities: [:], clientInfo: [name: 'LibreChat', version: '0.8.7']]
+        ]
+        Map<String, String> headers = legacyLibreChatHeaders()
+        headers.remove('MCP-Protocol-Version')
+
+        when:
+        HttpResponse<String> response = rawPost(JsonOutput.toJson(initialize), headers)
+        Map body = new JsonSlurper().parseText(response.body()) as Map
+
+        then:
+        response.statusCode() == 200
+        body.result.protocolVersion == '2025-11-25'
+    }
+
+    def 'LibreChat legacy profile accepts the post-initialize ping probe'() {
+        given:
+        Map ping = [jsonrpc: '2.0', id: 45, method: 'ping', params: [:]]
+
+        when:
+        HttpResponse<String> response = rawPost(JsonOutput.toJson(ping), legacyLibreChatHeaders())
+        Map body = new JsonSlurper().parseText(response.body()) as Map
+
+        then:
+        response.statusCode() == 200
+        body.id == 45
+        body.result._meta['io.modelcontextprotocol/serverInfo'].name == 'moqui-mcp'
+    }
+
+    def 'legacy protocol is rejected without the LibreChat compatibility profile'() {
+        given:
+        Map initialize = [jsonrpc: '2.0', id: 43, method: 'initialize', params: [:]]
+        Map<String, String> headers = legacyLibreChatHeaders()
+        headers.remove('X-Moqui-Mcp-Profile')
+
+        expect:
+        rawPost(JsonOutput.toJson(initialize), headers).statusCode() == 400
+    }
+
     def 'real HTTP boundary rejects malformed transport and envelope input'() {
         expect:
         rawPost('{', standardHeaders('server/discover')).statusCode() == 400
@@ -232,6 +294,15 @@ class McpServletIntegrationTests extends Specification {
                 'Accept'              : 'application/json, text/event-stream',
                 'MCP-Protocol-Version': '2026-07-28',
                 'Mcp-Method'          : method
+        ]
+    }
+
+    private static Map<String, String> legacyLibreChatHeaders() {
+        return [
+                'Content-Type'        : 'application/json',
+                'Accept'              : 'application/json, text/event-stream',
+                'MCP-Protocol-Version': '2025-11-25',
+                'X-Moqui-Mcp-Profile' : 'librechat'
         ]
     }
 

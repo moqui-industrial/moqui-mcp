@@ -32,6 +32,9 @@ class McpServlet extends HttpServlet {
 
     static final String PROTOCOL_VERSION = '2026-07-28'
     static final Set<String> SUPPORTED_PROTOCOL_VERSIONS = ['2026-07-28'] as Set
+    static final String LIBRECHAT_LEGACY_PROTOCOL_VERSION = '2025-11-25'
+    static final String LIBRECHAT_PROFILE_HEADER = 'X-Moqui-Mcp-Profile'
+    static final String LIBRECHAT_PROFILE = 'librechat'
     static final Map SERVER_INFO = [name: 'moqui-mcp', version: '4.0.0']
     static final int MAX_BODY_CHARS = 1024 * 1024
     static final String ALLOWED_ORIGINS_PROPERTY = 'moqui.mcp.allowedOrigins'
@@ -77,10 +80,11 @@ class McpServlet extends HttpServlet {
             Map rpcRequest = (Map) payload
             errorId = rpcRequest.id
             validateJsonRpcEnvelope(rpcRequest)
-            validateHttpHeaders(request, rpcRequest)
-            validateRequestMeta(rpcRequest)
+            boolean legacyLibreChat = isLegacyLibreChatRequest(request)
+            validateHttpHeaders(request, rpcRequest, legacyLibreChat)
+            validateRequestMeta(rpcRequest, legacyLibreChat)
 
-            Map rpcResponse = handleJsonRpcRequest(ec, rpcRequest, request)
+            Map rpcResponse = handleJsonRpcRequest(ec, rpcRequest, legacyLibreChat)
             if (rpcResponse != null) {
                 writeJson(response, rpcResponse)
             } else {
@@ -99,10 +103,12 @@ class McpServlet extends HttpServlet {
         }
     }
 
-    private Map handleJsonRpcRequest(ExecutionContextImpl ec, Map rpcRequest, HttpServletRequest request) {
+    private Map handleJsonRpcRequest(ExecutionContextImpl ec, Map rpcRequest, boolean legacyLibreChat) {
         String method = rpcRequest.method as String
         boolean hasId = rpcRequest.containsKey('id')
         Object id = rpcRequest.id
+        // LibreChat 0.8.x completes the 2025-11-25 handshake with this notification.
+        if (legacyLibreChat && method == 'notifications/initialized' && (!hasId || id == null)) return null
         if (!hasId || id == null) {
             throw new McpProtocolException(HttpServletResponse.SC_BAD_REQUEST, -32600, "Request id is required", null, null)
         }
@@ -112,13 +118,21 @@ class McpServlet extends HttpServlet {
         }
         Map params = rpcRequest.params instanceof Map ? (Map) rpcRequest.params : [:]
         Map result
-        try {
-            result = new McpClient(ec).handle(method, params)
-        } catch (IllegalArgumentException e) {
-            if ((e.message ?: '').startsWith('Unsupported MCP method:')) {
-                throw new McpProtocolException(HttpServletResponse.SC_NOT_FOUND, -32601, e.message, id, null)
+        if (legacyLibreChat && method == 'initialize') {
+            // Keep the old initialize result isolated from the native 2026 server/discover contract.
+            result = makeLibreChatInitializeResult()
+        } else if (legacyLibreChat && method == 'ping') {
+            // LibreChat probes legacy streamable HTTP servers after its initialize handshake.
+            result = [:]
+        } else {
+            try {
+                result = new McpClient(ec).handle(method, params)
+            } catch (IllegalArgumentException e) {
+                if ((e.message ?: '').startsWith('Unsupported MCP method:')) {
+                    throw new McpProtocolException(HttpServletResponse.SC_NOT_FOUND, -32601, e.message, id, null)
+                }
+                throw e
             }
-            throw e
         }
         Map resultMeta = (result._meta instanceof Map) ? new LinkedHashMap((Map) result._meta) : [:]
         resultMeta['io.modelcontextprotocol/serverInfo'] = SERVER_INFO
@@ -140,7 +154,9 @@ class McpServlet extends HttpServlet {
         }
     }
 
-    private void validateRequestMeta(Map rpcRequest) {
+    private void validateRequestMeta(Map rpcRequest, boolean legacyLibreChat) {
+        // The 2025-11-25 LibreChat client does not send the 2026 request metadata envelope.
+        if (legacyLibreChat) return
         Map params = rpcRequest.params instanceof Map ? (Map) rpcRequest.params : [:]
         Map meta = params._meta instanceof Map ? (Map) params._meta : null
         if (!meta) throw new McpProtocolException(HttpServletResponse.SC_BAD_REQUEST, -32602,
@@ -163,10 +179,17 @@ class McpServlet extends HttpServlet {
         }
     }
 
-    private void validateHttpHeaders(HttpServletRequest request, Map rpcRequest) {
+    private void validateHttpHeaders(HttpServletRequest request, Map rpcRequest, boolean legacyLibreChat) {
         Object id = rpcRequest.id
         String bodyMethod = rpcRequest.method as String
         String headerVersion = normalizeProtocolVersionValue(request.getHeader('MCP-Protocol-Version'))
+        if (legacyLibreChat) {
+            // LibreChat 0.8.7 omits this header during its legacy streamable HTTP handshake.
+            if (headerVersion && headerVersion != LIBRECHAT_LEGACY_PROTOCOL_VERSION) {
+                throw headerMismatch(id, "Legacy LibreChat requires MCP-Protocol-Version ${LIBRECHAT_LEGACY_PROTOCOL_VERSION}")
+            }
+            return
+        }
         if (!headerVersion) throw headerMismatch(id, "Missing required header MCP-Protocol-Version")
         if (!SUPPORTED_PROTOCOL_VERSIONS.contains(headerVersion)) {
             throw new McpProtocolException(
@@ -205,6 +228,26 @@ class McpServlet extends HttpServlet {
                 throw headerMismatch(id, "Header mismatch: Mcp-Name header value '${decodedHeaderName}' does not match body value '${expectedName}'")
             }
         }
+    }
+
+    private static boolean isLegacyLibreChatRequest(HttpServletRequest request) {
+        if (request.getHeader(LIBRECHAT_PROFILE_HEADER)?.trim() != LIBRECHAT_PROFILE) return false
+        String headerVersion = normalizeProtocolVersionValue(request.getHeader('MCP-Protocol-Version'))
+        if (!headerVersion || headerVersion == LIBRECHAT_LEGACY_PROTOCOL_VERSION) return true
+        return false
+    }
+
+    private static Map makeLibreChatInitializeResult() {
+        return [
+                protocolVersion: LIBRECHAT_LEGACY_PROTOCOL_VERSION,
+                capabilities   : [
+                        tools    : [listChanged: false],
+                        resources: [subscribe: false, listChanged: false],
+                        prompts  : [listChanged: false]
+                ],
+                serverInfo     : new LinkedHashMap(SERVER_INFO),
+                instructions   : 'Moqui MCP compatibility endpoint for LibreChat.'
+        ]
     }
 
     private static void validateContentHeaders(HttpServletRequest request) {
@@ -299,7 +342,7 @@ class McpServlet extends HttpServlet {
             response.setHeader('Access-Control-Allow-Origin', origin)
             response.addHeader('Vary', 'Origin')
             response.setHeader('Access-Control-Allow-Headers',
-                    'Content-Type, Authorization, api_key, login_key, MCP-Protocol-Version, Mcp-Method, Mcp-Name')
+                    'Content-Type, Authorization, api_key, login_key, MCP-Protocol-Version, Mcp-Method, Mcp-Name, X-Moqui-Mcp-Profile')
             response.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
         }
         if ("OPTIONS".equalsIgnoreCase(request.method)) {

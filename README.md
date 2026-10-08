@@ -1,6 +1,6 @@
 # moqui-mcp
 
-Minimal Model Context Protocol server for Moqui, targeting MCP `2026-07-28` only.
+Minimal Model Context Protocol server for Moqui, targeting MCP `2026-07-28` natively.
 
 The component maps Moqui artifacts to MCP without introducing a second application or authorization model:
 
@@ -137,6 +137,8 @@ org.moqui.mcp.McpServices.mcp#Handle
 ## LibreChat
 
 The retained LibreChat screen files are optional deployment assets, not part of the MCP protocol or its authorization model. `MoquiConf.xml` does not register LibreChat routes, root-level proxy paths, or menus. A deployment that uses these screens must add narrowly scoped proxy and screen configuration in its own runtime configuration and keep credentials outside source control.
+
+LibreChat `0.8.x` uses the legacy MCP `2025-11-25` `initialize` handshake and version `0.8.7` omits its protocol header during initialization. Requests using `X-Moqui-Mcp-Profile: librechat` receive a compatibility translation for that handshake, `notifications/initialized`, its post-initialize `ping` probe, and subsequent standard tools/resources/prompts calls. This adapter is only for the optional LibreChat test client; native clients should use `server/discover` with MCP `2026-07-28`.
 
 ## Development
 

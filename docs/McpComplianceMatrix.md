@@ -25,7 +25,7 @@ Qualification date: 2026-10-08. LibreChat is excluded from this qualification by
 | Standard Moqui identity is required | `McpServlet.ensureAuthenticated` | unauthenticated real HTTP request receives 401 | PASS |
 | No implicit localhost user | disabled-by-default service-account properties | unauthenticated and explicit-loopback fixture tests | PASS |
 | Complete results conform to the frozen official schema | all protocol providers | independent NetworkNT validation of all seven result definitions | PASS |
-| Legacy initialize, ping and notifications are not claimed | dispatcher capability map | `McpCoreUnitTests` | PASS |
+| Native MCP `2026-07-28` uses `server/discover`; scoped LibreChat `2025-11-25` initialize and `ping` compatibility is available | `McpServlet` legacy profile adapter | `McpServletIntegrationTests` | PASS |
 | Notification bridge and subscriptions are absent | removed registry/tool/capabilities | core and catalog tests | PASS |
 | First-page pagination, stable cursor and bounds | `McpPaginationSupport` | malformed, negative and overflow cursor tests | PASS |
 | Only concrete `allow-remote="true"` services become tools | `McpClient.getServiceToolList` | real service-definition catalog test | PASS |
