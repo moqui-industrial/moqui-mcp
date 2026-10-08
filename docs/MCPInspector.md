@@ -16,7 +16,9 @@ Use normal Moqui authentication:
 - `api_key: <login key>`
 - `login_key: <login key>`
 
-For trusted local development only, the servlet may log in the configured local service account fallback.
+The checked-in client configurations contain no credentials. Add an authentication header locally or launch Inspector with a credential-injection mechanism appropriate for the environment; do not commit it.
+
+For trusted local development only, the servlet may log in the configured local service account fallback. It is disabled by default and requires both `moqui.mcp.serviceAccountEnabled=true` and `moqui.mcp.serviceAccountUserId`.
 
 ## Importable Client Config
 

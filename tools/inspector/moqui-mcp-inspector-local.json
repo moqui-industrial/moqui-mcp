@@ -5,7 +5,7 @@
       "url": "http://localhost:8081/mcp",
       "protocolEra": "modern",
       "headers": {
-        "Authorization": "Basic am9obi5kb2U6bW9xdWk="
+        "MCP-Protocol-Version": "2026-07-28"
       }
     }
   }

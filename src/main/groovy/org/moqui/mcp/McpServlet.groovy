@@ -1,10 +1,23 @@
+/*
+ * This software is in the public domain under CC0 1.0 Universal plus a
+ * Grant of Patent License.
+ *
+ * To the extent possible under law, the author(s) have dedicated all
+ * copyright and related and neighboring rights to this software to the
+ * public domain worldwide. This software is distributed without any
+ * warranty.
+ *
+ * You should have received a copy of the CC0 Public Domain Dedication
+ * along with this software (see the LICENSE.md file). If not, see
+ * <http://creativecommons.org/publicdomain/zero/1.0/>.
+ */
 package org.moqui.mcp
 
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
+import java.util.Locale
 import org.moqui.impl.context.ExecutionContextFactoryImpl
 import org.moqui.impl.context.ExecutionContextImpl
-import org.moqui.impl.context.UserFacadeImpl
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -18,8 +31,10 @@ class McpServlet extends HttpServlet {
     protected final static Logger logger = LoggerFactory.getLogger(McpServlet.class)
 
     static final String PROTOCOL_VERSION = '2026-07-28'
-    static final Set<String> SUPPORTED_PROTOCOL_VERSIONS = ['2026-07-28', '2025-11-25'] as Set
+    static final Set<String> SUPPORTED_PROTOCOL_VERSIONS = ['2026-07-28'] as Set
     static final Map SERVER_INFO = [name: 'moqui-mcp', version: '4.0.0']
+    static final int MAX_BODY_CHARS = 1024 * 1024
+    static final String ALLOWED_ORIGINS_PROPERTY = 'moqui.mcp.allowedOrigins'
 
     private final JsonSlurper jsonSlurper = new JsonSlurper()
 
@@ -45,9 +60,11 @@ class McpServlet extends HttpServlet {
             return
         }
 
-        String requestBody = request.reader.text
         ExecutionContextImpl ec = ecfi.getEci()
+        Object errorId = null
         try {
+            validateContentHeaders(request)
+            String requestBody = readRequestBody(request)
             ec.initWebFacade(webappName, request, response)
             ensureAuthenticated(ec, request)
 
@@ -58,6 +75,8 @@ class McpServlet extends HttpServlet {
             }
 
             Map rpcRequest = (Map) payload
+            errorId = rpcRequest.id
+            validateJsonRpcEnvelope(rpcRequest)
             validateHttpHeaders(request, rpcRequest)
             validateRequestMeta(rpcRequest)
 
@@ -71,10 +90,10 @@ class McpServlet extends HttpServlet {
         } catch (McpProtocolException mpe) {
             writeError(response, mpe.httpStatus, mpe.id, mpe.code, mpe.message, mpe.data)
         } catch (IllegalArgumentException iae) {
-            writeError(response, HttpServletResponse.SC_BAD_REQUEST, null, -32602, iae.message ?: "Invalid params")
+            writeError(response, HttpServletResponse.SC_BAD_REQUEST, errorId, -32602, iae.message ?: "Invalid params")
         } catch (Throwable t) {
             logger.error("Error handling MCP request", t)
-            writeError(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, null, -32603, t.message ?: "Internal error")
+            writeError(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, errorId, -32603, "Internal error")
         } finally {
             ec.destroy()
         }
@@ -85,14 +104,22 @@ class McpServlet extends HttpServlet {
         boolean hasId = rpcRequest.containsKey('id')
         Object id = rpcRequest.id
         if (!hasId || id == null) {
-            if (method?.startsWith('notifications/')) return null
             throw new McpProtocolException(HttpServletResponse.SC_BAD_REQUEST, -32600, "Request id is required", null, null)
         }
 
+        if (rpcRequest.containsKey('params') && rpcRequest.params != null && !(rpcRequest.params instanceof Map)) {
+            throw new McpProtocolException(HttpServletResponse.SC_BAD_REQUEST, -32602, "params must be an object when present", id, null)
+        }
         Map params = rpcRequest.params instanceof Map ? (Map) rpcRequest.params : [:]
-        Map result = new McpClient(ec, [
-                clientProfile: resolveClientProfile(request)
-        ]).handle(method, params)
+        Map result
+        try {
+            result = new McpClient(ec).handle(method, params)
+        } catch (IllegalArgumentException e) {
+            if ((e.message ?: '').startsWith('Unsupported MCP method:')) {
+                throw new McpProtocolException(HttpServletResponse.SC_NOT_FOUND, -32601, e.message, id, null)
+            }
+            throw e
+        }
         Map resultMeta = (result._meta instanceof Map) ? new LinkedHashMap((Map) result._meta) : [:]
         resultMeta['io.modelcontextprotocol/serverInfo'] = SERVER_INFO
         result._meta = resultMeta
@@ -100,29 +127,24 @@ class McpServlet extends HttpServlet {
         return [jsonrpc: "2.0", id: id, result: result]
     }
 
+    private void validateJsonRpcEnvelope(Map rpcRequest) {
+        Object id = rpcRequest.id
+        if (rpcRequest.jsonrpc != '2.0') {
+            throw new McpProtocolException(HttpServletResponse.SC_BAD_REQUEST, -32600, "jsonrpc must be '2.0'", id, null)
+        }
+        if (!(rpcRequest.method instanceof String) || !rpcRequest.method) {
+            throw new McpProtocolException(HttpServletResponse.SC_BAD_REQUEST, -32600, "method is required", id, null)
+        }
+        if (rpcRequest.containsKey('id') && !(rpcRequest.id == null || rpcRequest.id instanceof String || rpcRequest.id instanceof Number)) {
+            throw new McpProtocolException(HttpServletResponse.SC_BAD_REQUEST, -32600, "id must be a string or number", null, null)
+        }
+    }
+
     private void validateRequestMeta(Map rpcRequest) {
-        String method = rpcRequest.method as String
         Map params = rpcRequest.params instanceof Map ? (Map) rpcRequest.params : [:]
         Map meta = params._meta instanceof Map ? (Map) params._meta : null
-        if (!meta) {
-            if (method == 'initialize') {
-                String initVersion = normalizeProtocolVersionValue(params.protocolVersion as String)
-                if (initVersion && !SUPPORTED_PROTOCOL_VERSIONS.contains(initVersion)) {
-                    throw new McpProtocolException(
-                            HttpServletResponse.SC_BAD_REQUEST,
-                            -32022,
-                            "Unsupported protocol version",
-                            rpcRequest.id,
-                            [supported: SUPPORTED_PROTOCOL_VERSIONS as List, requested: initVersion]
-                    )
-                }
-                if (params.capabilities != null && !(params.capabilities instanceof Map)) {
-                    throw new McpProtocolException(HttpServletResponse.SC_BAD_REQUEST, -32602, "initialize params.capabilities must be an object", rpcRequest.id, null)
-                }
-                return
-            }
-            return
-        }
+        if (!meta) throw new McpProtocolException(HttpServletResponse.SC_BAD_REQUEST, -32602,
+                "Missing params._meta", rpcRequest.id, null)
 
         String bodyVersion = normalizeProtocolVersionValue(meta['io.modelcontextprotocol/protocolVersion'] as String)
         if (!bodyVersion) throw new McpProtocolException(HttpServletResponse.SC_BAD_REQUEST, -32602, "Missing _meta.io.modelcontextprotocol/protocolVersion", rpcRequest.id, null)
@@ -158,25 +180,44 @@ class McpServlet extends HttpServlet {
 
         Map params = rpcRequest.params instanceof Map ? (Map) rpcRequest.params : [:]
         Map meta = params._meta instanceof Map ? (Map) params._meta : [:]
-        String bodyVersion = normalizeProtocolVersionValue((meta['io.modelcontextprotocol/protocolVersion'] ?: params.protocolVersion) as String)
+        String bodyVersion = normalizeProtocolVersionValue(meta['io.modelcontextprotocol/protocolVersion'] as String)
         if (bodyVersion && bodyVersion != headerVersion) {
             throw headerMismatch(id, "Header mismatch: MCP-Protocol-Version header value '${headerVersion}' does not match body value '${bodyVersion}'")
         }
 
         String headerMethod = request.getHeader('Mcp-Method')
-        if (headerMethod && headerMethod != bodyMethod) {
+        if (!headerMethod) throw headerMismatch(id, "Missing required header Mcp-Method")
+        if (headerMethod != bodyMethod) {
             throw headerMismatch(id, "Header mismatch: Mcp-Method header value '${headerMethod}' does not match body value '${bodyMethod}'")
         }
 
         String expectedName = getExpectedName(bodyMethod, params)
         String headerName = request.getHeader('Mcp-Name')
         if (expectedName != null) {
-            if (headerName) {
-                String decodedHeaderName = decodeHeaderValue(headerName)
-                if (decodedHeaderName != expectedName) {
-                    throw headerMismatch(id, "Header mismatch: Mcp-Name header value '${decodedHeaderName}' does not match body value '${expectedName}'")
-                }
+            if (!headerName) throw headerMismatch(id, "Missing required header Mcp-Name")
+            String decodedHeaderName
+            try {
+                decodedHeaderName = decodeHeaderValue(headerName)
+            } catch (IllegalArgumentException ignored) {
+                throw headerMismatch(id, 'Mcp-Name contains invalid base64 encoding')
             }
+            if (decodedHeaderName != expectedName) {
+                throw headerMismatch(id, "Header mismatch: Mcp-Name header value '${decodedHeaderName}' does not match body value '${expectedName}'")
+            }
+        }
+    }
+
+    private static void validateContentHeaders(HttpServletRequest request) {
+        String contentType = request.getContentType()
+        if (!contentType || !contentType.toLowerCase(Locale.ROOT).contains('application/json')) {
+            throw new McpProtocolException(HttpServletResponse.SC_UNSUPPORTED_MEDIA_TYPE, -32011,
+                    "Content-Type must be application/json", null, null)
+        }
+        String accept = request.getHeader('Accept')
+        String normalizedAccept = accept?.toLowerCase(Locale.ROOT)
+        if (!normalizedAccept || !normalizedAccept.contains('application/json') || !normalizedAccept.contains('text/event-stream')) {
+            throw new McpProtocolException(HttpServletResponse.SC_NOT_ACCEPTABLE, -32012,
+                    "Accept must allow application/json and text/event-stream", null, null)
         }
     }
 
@@ -191,7 +232,10 @@ class McpServlet extends HttpServlet {
         if (!value) return value
         if (value.startsWith('=?base64?') && value.endsWith('?=')) {
             String base64 = value.substring('=?base64?'.length(), value.length() - 2)
-            return new String(base64.decodeBase64(), 'UTF-8')
+            if (!base64 || !(base64 ==~ /[A-Za-z0-9+\/=]+/)) throw new IllegalArgumentException('Invalid base64 value')
+            byte[] decoded = Base64.decoder.decode(base64)
+            if (Base64.encoder.encodeToString(decoded) != base64) throw new IllegalArgumentException('Non-canonical base64 value')
+            return new String(decoded, 'UTF-8')
         }
         return value
     }
@@ -205,16 +249,16 @@ class McpServlet extends HttpServlet {
 
     private void ensureAuthenticated(ExecutionContextImpl ec, HttpServletRequest request) {
         if (ec.user?.userId) return
-        boolean serviceEnabled = (System.getProperty("moqui.mcp.serviceAccountEnabled", "true") ?: "true").toBoolean()
-        String serviceUserId = System.getProperty("moqui.mcp.serviceAccountUserId", "john.doe")?.trim()
+        boolean serviceEnabled = (System.getProperty("moqui.mcp.serviceAccountEnabled", "false") ?: "false").toBoolean()
+        String serviceUserId = System.getProperty("moqui.mcp.serviceAccountUserId", "")?.trim()
         if (serviceEnabled && serviceUserId && isLocalRequest(request)) {
-            UserFacadeImpl ufi = ec.userFacade
-            if (!ufi.internalLoginUser(serviceUserId, false)) {
+            if (!ec.userFacade.internalLoginUser(serviceUserId, false)) {
                 throw new IllegalStateException("Could not log in MCP service account ${serviceUserId}: ${ec.message.errorsString}")
             }
             return
         }
-        throw new IllegalStateException("MCP request is not authenticated. Use standard Moqui authentication (Basic Auth or api_key/login_key) or configure moqui.mcp.serviceAccountUserId for trusted local calls.")
+        throw new McpProtocolException(HttpServletResponse.SC_UNAUTHORIZED, -32001,
+                "MCP request is not authenticated. Use standard Moqui authentication.", null, null)
     }
 
     private static boolean isLocalRequest(HttpServletRequest request) {
@@ -222,29 +266,55 @@ class McpServlet extends HttpServlet {
         return remoteAddr == "127.0.0.1" || remoteAddr == "0:0:0:0:0:0:0:1" || remoteAddr == "::1" || remoteAddr == "localhost"
     }
 
-    private static String resolveClientProfile(HttpServletRequest request) {
-        String explicitProfile = request?.getHeader('X-Moqui-Mcp-Profile')?.trim()
-        if (explicitProfile) return explicitProfile
-
-        String userAgent = request?.getHeader('User-Agent') ?: ''
-        if (userAgent.toLowerCase().contains('librechat')) return 'librechat'
-        return 'default'
-    }
-
     private Object parseRequestBody(String bodyText) {
         if (!bodyText?.trim()) throw new IllegalArgumentException("Empty MCP request body")
-        return jsonSlurper.parseText(bodyText)
+        try {
+            return jsonSlurper.parseText(bodyText)
+        } catch (Throwable t) {
+            throw new McpProtocolException(HttpServletResponse.SC_BAD_REQUEST, -32700, "Parse error", null, null)
+        }
+    }
+
+    private static String readRequestBody(HttpServletRequest request) {
+        StringBuilder sb = new StringBuilder()
+        char[] buffer = new char[8192]
+        int read
+        while ((read = request.reader.read(buffer)) != -1) {
+            sb.append(buffer, 0, read)
+            if (sb.length() > MAX_BODY_CHARS) throw new McpProtocolException(HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE,
+                    -32010, "MCP request body is too large", null, null)
+        }
+        return sb.toString()
     }
 
     private boolean handleCors(HttpServletRequest request, HttpServletResponse response) {
-        response.setHeader("Access-Control-Allow-Origin", "*")
-        response.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, api_key, login_key, MCP-Protocol-Version, Mcp-Method, Mcp-Name, X-Moqui-Mcp-Profile")
-        response.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS")
+        String origin = request.getHeader('Origin')?.trim()
+        if (origin) {
+            Set<String> allowedOrigins = (System.getProperty(ALLOWED_ORIGINS_PROPERTY, '') ?: '')
+                    .split(',').collect { it.trim() }.findAll { it } as Set<String>
+            if (origin != getRequestOrigin(request) && !allowedOrigins.contains(origin)) {
+                response.sendError(HttpServletResponse.SC_FORBIDDEN, 'Origin is not allowed')
+                return true
+            }
+            response.setHeader('Access-Control-Allow-Origin', origin)
+            response.addHeader('Vary', 'Origin')
+            response.setHeader('Access-Control-Allow-Headers',
+                    'Content-Type, Authorization, api_key, login_key, MCP-Protocol-Version, Mcp-Method, Mcp-Name')
+            response.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        }
         if ("OPTIONS".equalsIgnoreCase(request.method)) {
             response.status = HttpServletResponse.SC_NO_CONTENT
             return true
         }
         return false
+    }
+
+    private static String getRequestOrigin(HttpServletRequest request) {
+        String host = request.getHeader('Host')
+        if (host) return "${request.scheme}://${host}"
+        int port = request.serverPort
+        boolean defaultPort = (request.scheme == 'http' && port == 80) || (request.scheme == 'https' && port == 443)
+        return "${request.scheme}://${request.serverName}${defaultPort ? '' : ':' + port}"
     }
 
     private void writeJson(HttpServletResponse response, Object payload) {

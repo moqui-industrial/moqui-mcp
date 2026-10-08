@@ -61,6 +61,72 @@ along with this software (see the LICENSE.md file). If not, see
         ]]></script></actions>
     </service>
 
+    <service verb="search" noun="AuthorizedDataDocuments" authenticate="true" allow-remote="true" transaction-timeout="120">
+        <description>Authorized MCP search facade for configured DataDocument scopes. Delegates to MantleFiltered when available.</description>
+        <in-parameters>
+            <parameter name="scope"/>
+            <parameter name="documentType"/>
+            <parameter name="queryString" required="true"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="documentList" type="List"/>
+            <parameter name="documentListCount" type="Long"/>
+            <parameter name="documentListPageIndex" type="Integer"/>
+            <parameter name="documentListPageSize" type="Integer"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            String safeScope = (scope ?: 'mantle') as String
+            if (safeScope != 'mantle') throw new IllegalArgumentException("Unsupported search scope ${safeScope}")
+            if (documentType && !(((String) documentType) in ['MantleParty', 'MantleProduct', '_NA_'])) {
+                throw new IllegalArgumentException("Unsupported or unauthorized documentType ${documentType}")
+            }
+            Integer safePageSize = pageSize != null ? ((Number) pageSize).intValue() : 20
+            if (safePageSize < 1 || safePageSize > 100) throw new IllegalArgumentException("pageSize must be between 1 and 100")
+            Integer safePageIndex = pageIndex != null ? ((Number) pageIndex).intValue() : 0
+            if (safePageIndex < 0) throw new IllegalArgumentException("pageIndex must be zero or greater")
+            String safeQueryString = org.moqui.mcp.McpSearchSupport.normalizePlainTextQuery((String) queryString)
+
+            String setupService = 'mantle.party.PartyServices.setup#UserOrganizationInfo'
+            if (ec.service.getServiceDefinition(setupService) != null) ec.service.sync().name(setupService).parameters([:]).call()
+
+            String searchService = 'mantle.GeneralServices.search#MantleFiltered'
+            if (ec.service.getServiceDefinition(searchService) == null) {
+                throw new IllegalStateException("MantleFiltered search is not available; install and configure mantle-usl")
+            }
+
+            String filterEntityName = documentType == 'MantleParty' ? 'mantle.party.Party' : 'mantle.product.Product'
+            List findFilters = ec.artifactExecution.getFindFiltersForUser(filterEntityName)
+            if (!findFilters && !documentType) {
+                findFilters = ec.artifactExecution.getFindFiltersForUser('mantle.party.Party')
+            }
+            String entityFilterSetId = findFilters ? findFilters[0].entityFilterSetId as String : null
+            if (!(entityFilterSetId in ['MANTLE_ACTIVE_ORG', 'MANTLE_USER_ORG'])) {
+                throw new IllegalArgumentException('Search scope is not authorized for the current user')
+            }
+            if (entityFilterSetId == 'MANTLE_ACTIVE_ORG' && !ec.user.context?.activeOrgId) {
+                throw new IllegalArgumentException('Search requires an active authorized organization')
+            }
+            if (entityFilterSetId == 'MANTLE_USER_ORG' && !(ec.user.context?.filterOrgIds)) {
+                throw new IllegalArgumentException('Search requires at least one authorized organization')
+            }
+
+            Map searchParams = [
+                    indexName  : 'mantle',
+                    queryString: safeQueryString,
+                    pageIndex  : safePageIndex,
+                    pageSize   : safePageSize
+            ]
+            if (documentType && documentType != '_NA_') searchParams.documentType = documentType
+            Map svcRes = ec.service.sync().name(searchService).parameters(searchParams).call()
+            documentList = svcRes.documentList ?: []
+            documentListCount = (svcRes.documentListCount ?: 0L) as Long
+            documentListPageIndex = svcRes.documentListPageIndex != null ? svcRes.documentListPageIndex as Integer : safePageIndex
+            documentListPageSize = svcRes.documentListPageSize != null ? svcRes.documentListPageSize as Integer : safePageSize
+        ]]></script></actions>
+    </service>
+
     <service verb="list" noun="Resources" authenticate="true" allow-remote="true">
         <description>List Moqui entity and DataDocument resources addressable through MCP.</description>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
