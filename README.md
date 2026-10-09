@@ -4,24 +4,16 @@ Minimal Model Context Protocol server for Moqui, targeting MCP `2026-07-28` nati
 
 The component maps Moqui artifacts to MCP without introducing a second application or authorization model:
 
-- concrete Moqui services become tools when explicitly enabled for remote use
+- concrete Moqui services become tools when the current user is artifact-authorized
 - entity and view-entity definitions, records, and DataDocument definitions become resources
 - published pages in the `MCP_PROMPTS` Wiki space become prompts
-
-It does not generate workflows from screens, expose screen transitions, orchestrate agents, or provide code execution.
-
-## Production Status
-
-The MCP core is production-ready for the tested stateless `/mcp` deployment model when deployed with standard Moqui authentication, HTTPS, artifact authorization, rate limiting, and operational monitoring. The qualification covers the frozen MCP `2026-07-28` wire contract, real HTTP handling, service authorization, entity/view resources, Wiki prompts, and Mantle organization-filtered search.
-
-OAuth discovery/authorization, LibreChat, subscriptions, and list-change notifications are intentionally outside this component's production qualification. TLS termination, IdP integration, secret rotation, rate limits, logging policy, vulnerability scanning, backup, sizing, and load testing remain deployment responsibilities.
 
 ## Requirements
 
 - a compatible `moqui-framework` checkout
 - Java 21
 - normal Moqui authentication for remote calls
-- `mantle-usl` and a configured search backend only when using `moqui_search_data_documents`
+- optional business components contribute their own services, entities, and DataDocuments through the standard Moqui facades
 
 Install the component under `runtime/component/moqui-mcp`, then build from the framework root:
 
@@ -65,11 +57,11 @@ The MCP OAuth extension is not implemented or advertised. Deployments requiring 
 
 ## Tools
 
-`tools/list` contains the built-in adapters and the service tools visible to the current user. Results are stable, sorted, and paginated; the default page size is 100 and the maximum is 1000.
+`tools/list` contains the built-in adapters and concrete service tools visible to the current user. Results are stable, sorted, and paginated; the default page size is 100 and the maximum is 1000.
 
 Built-in adapters:
 
-- `moqui_search_data_documents` calls `search#AuthorizedDataDocuments`, which accepts the `mantle` scope and delegates to Mantle's organization-aware `search#MantleFiltered`
+- `moqui_search_data_documents` calls `search#AuthorizedDataDocuments` when the deployment contributes an authorized DataDocument search implementation
 - `moqui_get_service_metadata` returns the effective Moqui service schemas after applying the same publication and authorization checks as invocation
 - `moqui_call_service` invokes a published service by its full Moqui service name
 
@@ -80,17 +72,16 @@ Direct service tools use deterministic MCP-safe aliases. The full service name r
 A service is published only when all of these conditions hold:
 
 1. its effective `ServiceDefinition` is concrete, not an interface
-2. it declares `allow-remote="true"`
-3. it is not an internal transport service of this component
-4. the current user is authorized for the service's effective Moqui action (`view`, `create`, `update`, `delete`, or `all`)
+2. it is not an internal transport service of this component
+3. the current user is authorized for the service's effective Moqui action (`view`, `create`, `update`, `delete`, or `all`)
 
-`allow-remote` is deliberately retained as the publication boundary. Artifact authorization answers whether a user may execute an artifact in the current call chain; it does not say that an internal service is a stable, safe, remotely supported API. Publishing every known service would expose implementation helpers, services with server-only assumptions, and contracts not designed for untrusted parameters.
+`allow-remote` is retained as service metadata but is not an MCP publication boundary. The same artifact-aware authorization that protects Moqui services decides both discovery and invocation on every request. Internal MCP transport services are excluded explicitly.
 
-To publish additional behavior, review the service contract and side effects, set `allow-remote="true"`, and configure normal Moqui artifact authorization. For an internal service that should remain internal, expose a small remote facade service instead of changing the original service.
+Grant users only the service artifacts and entity filters required for their role. For business search, grant the authorized search facade together with a supported entity filter set; do not grant arbitrary backend access.
 
 ### Search scope
 
-The search tool is present only when Mantle is installed and the caller may invoke the authorized search facade. It accepts only `MantleParty`, `MantleProduct`, or the configured any-type scope. Query text is trimmed, limited to 512 characters, escaped as one backend query clause, and combined with organization filters derived on the server. Client-supplied index names, cluster names, filter maps, organization IDs, and backend DSL are rejected.
+The search tool is present only when an authorized search facade is available to the caller. Its scopes are supplied by the installed application DataDocuments. Query text is trimmed, limited to 512 characters, escaped as one backend query clause, and combined with server-derived entity filters. Client-supplied index names, cluster names, filter maps, organization IDs, and backend DSL are rejected.
 
 ## Resources
 
@@ -151,7 +142,7 @@ Run the component tests from the framework root:
 
 The official MCP schema is downloaded once, verified against the SHA-256 in `docs/mcp-schema-manifest.json`, and then reused from the Gradle user cache. After a verified first download, the regular suite can run offline.
 
-Run the separate Mantle/OpenSearch security qualification against a disposable backend:
+Run the optional search security qualification against a disposable backend:
 
 ```bash
 ./gradlew :runtime:component:moqui-mcp:testMcpSearchBackend \

@@ -13,6 +13,20 @@ along with this software (see the LICENSE.md file). If not, see
 <https://creativecommons.org/publicdomain/zero/1.0/>.
 -->
 <entity-facade-xml type="seed">
+    <!-- The host screen is available to authenticated users; MCP tools remain artifact-authorized per user. -->
+    <moqui.security.ArtifactGroup artifactGroupId="MCP_AGENT" description="MCP Agent Chat screen"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MCP_AGENT"
+            artifactName="component://moqui-mcp/screen/agent.xml" artifactTypeEnumId="AT_XML_SCREEN" inheritAuthz="Y"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MCP_AGENT_ALL" userGroupId="ALL_USERS"
+            artifactGroupId="MCP_AGENT" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+
+    <moqui.security.ArtifactGroup artifactGroupId="MCP_SEARCH" description="MCP authorized data document search"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MCP_SEARCH"
+            artifactName="org.moqui.mcp.McpServices.search#AuthorizedDataDocuments" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MCP_SEARCH_ADMIN" userGroupId="ADMIN"
+            artifactGroupId="MCP_SEARCH" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthzFilter artifactAuthzId="MCP_SEARCH_ADMIN" entityFilterSetId="MANTLE_ACTIVE_ORG"/>
+
     <moqui.resource.wiki.WikiSpace wikiSpaceId="MCP_PROMPTS"
             description="Wiki space for MCP prompt definitions"
             rootPageLocation="dbresource://WikiSpace/mcp-prompts.md"

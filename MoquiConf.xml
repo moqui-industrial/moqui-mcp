@@ -16,4 +16,16 @@
         </webapp>
     </webapp-list>
 
+    <screen-facade>
+        <!-- Mount the optional LibreChat host screen in the standard authenticated applications menu. -->
+        <screen location="component://webroot/screen/webroot/apps.xml">
+            <subscreens-item name="agent" menu-title="Agent Chat" menu-index="95"
+                    location="component://moqui-mcp/screen/agent.xml"/>
+        </screen>
+        <screen location="component://webroot/screen/webroot/qapps.xml">
+            <subscreens-item name="agent" menu-title="Agent Chat" menu-index="95"
+                    location="component://moqui-mcp/screen/agent.xml"/>
+        </screen>
+    </screen-facade>
+
 </moqui-conf>

@@ -230,7 +230,6 @@ class McpClient {
             ServiceDefinition sd = ec.serviceFacade.getServiceDefinition(serviceName)
             if (sd == null) continue
             if (sd.serviceType == 'interface') continue
-            if (!sd.allowRemote) continue
             if (isMcpTransportService(sd.serviceName)) continue
             if (!isServiceVisible(sd)) continue
             if (seenNames.add(sd.serviceName)) serviceTools.add(makeServiceToolDescriptor(sd))
@@ -304,9 +303,6 @@ class McpClient {
 
     protected void assertServiceCallable(ServiceDefinition sd) {
         if (sd == null) throw new IllegalArgumentException('Service definition is required')
-        if (!sd.allowRemote) {
-            throw new IllegalArgumentException("Service ${sd.serviceName} is not available for remote invocation")
-        }
         if (!isServiceVisible(sd)) {
             throw new IllegalArgumentException("Service ${sd.serviceName} is not visible for the current user")
         }

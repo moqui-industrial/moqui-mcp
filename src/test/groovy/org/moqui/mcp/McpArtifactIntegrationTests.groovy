@@ -77,7 +77,7 @@ class McpArtifactIntegrationTests extends Specification {
         ec.entity.find('moqui.security.UserAccount').condition('userId', TEST_USER_ID).deleteAll()
     }
 
-    def 'tool catalog exposes only concrete remote services with stable safe aliases'() {
+    def 'tool catalog exposes concrete authorized services with stable safe aliases'() {
         given:
         String remoteService = 'org.moqui.impl.BasicServices.find#Enumeration'
         String nonRemoteService = 'org.moqui.impl.WikiServices.get#PublishedWikiPageText'
@@ -92,7 +92,7 @@ class McpArtifactIntegrationTests extends Specification {
         remoteTool.name ==~ /[A-Za-z0-9_-]{1,96}/
         remoteTool.inputSchema instanceof Map
         remoteTool.outputSchema instanceof Map
-        !tools.any { it._meta?.get('org.moqui/originalName') == nonRemoteService }
+        tools.any { it._meta?.get('org.moqui/originalName') == nonRemoteService }
         !tools.any { (it._meta?.get('org.moqui/originalName') as String)?.startsWith('org.moqui.mcp.McpServices.') }
     }
 
@@ -138,13 +138,14 @@ class McpArtifactIntegrationTests extends Specification {
         assert ((ExecutionContextImpl) ec).userFacade.internalLoginUser(TEST_USER_ID, false)
     }
 
-    def 'non remote metadata is denied and service validation becomes a tool error'() {
+    def 'non remote metadata is available and service validation becomes a tool error'() {
         when:
-        client.callTool('moqui_get_service_metadata',
+        Map metadata = client.callTool('moqui_get_service_metadata',
                 [serviceName: 'org.moqui.impl.WikiServices.get#PublishedWikiPageText'])
 
         then:
-        thrown(IllegalArgumentException)
+        !metadata.isError
+        metadata.structuredContent.serviceName == 'org.moqui.impl.WikiServices.get#PublishedWikiPageText'
 
         when:
         Map result = client.callTool(TestableMcpClient.alias('org.moqui.impl.BasicServices.find#Enumeration'), [:])

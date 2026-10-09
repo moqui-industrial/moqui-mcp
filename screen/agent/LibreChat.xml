@@ -17,113 +17,21 @@ along with this software (see the LICENSE.md file). If not, see
         require-authentication="true" menu-title="LibreChat">
 
     <actions>
-        <set field="librechatProxyUrl" value="/librechat/"/>
-        <set field="librechatDirectUrl" value="http://127.0.0.1:3081/librechat/"/>
+        <set field="librechatDirectUrl" value="http://localhost:3081/"/>
     </actions>
-
-    <transition name="bootstrap">
-        <actions><script><![CDATA[
-            String email = System.getProperty('librechat_auto_email', '')
-            String password = System.getProperty('librechat_auto_password', '')
-            if (!email || !password) {
-                ec.web.response.setStatus(500)
-                ec.web.response.setContentType('text/html;charset=UTF-8')
-                ec.web.response.writer.write('<!doctype html><html><body><h2>LibreChat autologin credentials are not configured</h2></body></html>')
-                return
-            }
-
-            String esc(String value) {
-                return value.replace("\\", "\\\\").replace("'", "\\'")
-            }
-            String emailJs = esc(email)
-            String passwordJs = esc(password)
-
-            ec.web.response.setHeader('Cache-Control', 'no-store')
-            ec.web.response.setContentType('text/html;charset=UTF-8')
-            ec.web.response.writer.write("""<!doctype html>
-                <html lang="en">
-                <head>
-                  <meta charset="utf-8">
-                  <meta name="viewport" content="width=device-width, initial-scale=1">
-                  <title>LibreChat bootstrap</title>
-                  <style>
-                    body { margin: 0; font-family: Arial, sans-serif; background: #111; color: #eee; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-                    .box { text-align: center; max-width: 34rem; padding: 2rem; }
-                    .muted { color: #aaa; }
-                    code { color: #7ee787; }
-                  </style>
-                </head>
-                <body>
-                  <div class="box">
-                    <h2>Connecting LibreChat</h2>
-                    <p class="muted">Signing in the technical user and opening <code>/librechat/</code>...</p>
-                    <pre id="status" class="muted"></pre>
-                  </div>
-                  <script>
-                    const statusEl = document.getElementById('status');
-                    const setStatus = (text) => { statusEl.textContent = text; };
-                    const postJson = async (path, payload) => {
-                      const response = await fetch(path, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        credentials: 'include',
-                        body: JSON.stringify(payload)
-                      });
-                      const text = await response.text();
-                      let json = null;
-                      try { json = text ? JSON.parse(text) : null; } catch (ignored) {}
-                      return { response, text, json };
-                    };
-
-                    (async () => {
-                      const email = '${emailJs}';
-                      const password = '${passwordJs}';
-                      let login = await postJson('/api/auth/login', { email, password });
-                      if (!login.response.ok) {
-                        setStatus('Login failed, trying registration...');
-                        const register = await postJson('/api/auth/register', {
-                          email,
-                          password,
-                          confirm_password: password,
-                          name: 'Moqui Agent',
-                          username: 'moquiagent'
-                        });
-                        const registerText = ((register.json && register.json.message) || register.text || '').toLowerCase();
-                        const alreadyExists = registerText.includes('email in use');
-                        if (!register.response.ok && !alreadyExists) {
-                          throw new Error('LibreChat register failed: ' + (register.text || register.response.status));
-                        }
-                        login = await postJson('/api/auth/login', { email, password });
-                        if (!login.response.ok) {
-                          throw new Error('LibreChat login failed: ' + (login.text || login.response.status));
-                        }
-                      }
-                      window.location.replace('/librechat/');
-                    })().catch((error) => {
-                      setStatus(error && error.message ? error.message : String(error));
-                      document.body.insertAdjacentHTML('beforeend', '<div class="box"><p>Autologin failed.</p></div>');
-                    });
-                  </script>
-                </body>
-                </html>
-            """)
-        ]]></script></actions>
-        <default-response type="none"/>
-    </transition>
 
     <widgets>
         <render-mode>
             <text type="html,vuet,qvt"><![CDATA[
                 <div style="padding:0 0 12px 0;">
-                    <a href="${sri.buildUrl('bootstrap').url}" target="_blank" rel="noopener">Open autologin LibreChat in a new tab</a>
+                    <a href="${librechatDirectUrl}" target="_blank" rel="noopener">Sign in to Agent Chat</a>
                     <span style="padding:0 8px; color:#999;">|</span>
-                    <a href="${librechatProxyUrl}" target="_blank" rel="noopener">Open proxied LibreChat</a>
-                    <span style="padding:0 8px; color:#999;">|</span>
-                    <a href="${librechatDirectUrl}" target="_blank" rel="noopener">Open direct LibreChat</a>
+                    <a href="#agent-chat" onclick="document.getElementById('agent-chat-frame').src='${librechatDirectUrl}'; return false;">Load embedded Agent Chat</a>
                 </div>
                 <div style="width:100%; height:calc(100vh - 152px);">
                     <iframe
-                        src="${sri.buildUrl('bootstrap').url}"
+                        id="agent-chat-frame"
+                        title="Agent Chat"
                         style="width:100%; height:100%; border:none; border-radius:8px; background:white;"
                         allow="clipboard-read; clipboard-write; microphone; camera">
                     </iframe>
