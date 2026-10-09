@@ -81,7 +81,7 @@ Grant users only the service artifacts and entity filters required for their rol
 
 ### Search scope
 
-The search tool is present only when an authorized search facade is available to the caller. Its scopes are supplied by the installed application DataDocuments. Query text is trimmed, limited to 512 characters, escaped as one backend query clause, and combined with server-derived entity filters. Client-supplied index names, cluster names, filter maps, organization IDs, and backend DSL are rejected.
+The search tool is present only when an authorized search facade is available to the caller. Its scopes are supplied by the installed application DataDocuments. An omitted or empty query lists one bounded page of the authorized scope. Non-empty query text is trimmed, limited to 512 characters, escaped as one backend query clause, and combined with server-derived entity filters. Client-supplied index names, cluster names, filter maps, organization IDs, and backend DSL are rejected.
 
 ## Resources
 

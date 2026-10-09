@@ -81,6 +81,8 @@ class McpCoreUnitTests extends Specification {
         expect:
         McpSearchSupport.normalizePlainTextQuery('name:test OR ownerPartyId:OTHER *') ==
                 '(name\\:test OR ownerPartyId\\:OTHER \\*)'
+        McpSearchSupport.normalizePlainTextQuery(null) == '*'
+        McpSearchSupport.normalizePlainTextQuery('   ') == '*'
 
         when:
         McpSearchSupport.normalizePlainTextQuery(query)
@@ -89,7 +91,7 @@ class McpCoreUnitTests extends Specification {
         thrown(IllegalArgumentException)
 
         where:
-        query << ['   ', 'x' * 513]
+        query << ['x' * 513]
     }
 
     static class TestableMcpClient extends McpClient {

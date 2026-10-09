@@ -17,10 +17,11 @@ import org.moqui.util.StringUtilities
 
 class McpSearchSupport {
     static final int MAX_QUERY_LENGTH = 512
+    static final String MATCH_ALL_QUERY = '*'
 
     static String normalizePlainTextQuery(String queryString) {
         String plainQuery = queryString?.trim()
-        if (!plainQuery) throw new IllegalArgumentException('queryString must not be empty')
+        if (!plainQuery) return MATCH_ALL_QUERY
         if (plainQuery.length() > MAX_QUERY_LENGTH) {
             throw new IllegalArgumentException("queryString must not exceed ${MAX_QUERY_LENGTH} characters")
         }

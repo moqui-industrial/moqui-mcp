@@ -111,11 +111,10 @@ class McpClient {
                                 properties : [
                                         scope : [type: 'string', enum: ['mantle'], description: 'Configured search scope. Currently supported: mantle.'],
                                         documentType : [type: 'string', description: 'Optional authorized DataDocument type, such as MantleParty or MantleProduct.'],
-                                        queryString : [type: 'string', description: 'Plain text search query. Server-side organization filters are always applied.'],
+                                        queryString : [type: 'string', description: 'Optional plain text search query. Omit or leave empty to list the authorized scope page by page. Server-side organization filters are always applied.'],
                                         pageIndex : [type: 'integer', minimum: 0],
                                         pageSize : [type: 'integer', minimum: 1, maximum: 100]
                                 ],
-                                required : ['queryString'],
                                 additionalProperties : false
                         ]
                 ])
