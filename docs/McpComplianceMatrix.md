@@ -47,7 +47,7 @@ Qualification date: 2026-10-08. LibreChat is excluded from this qualification by
 | Search parameters cannot override backend or organization filters | strict tool/service input contracts | scope/type/cluster/filter/organization negative tests | PASS |
 | Counts and pagination remain in authorized scope | transformed Mantle result | any-type count/page test | PASS |
 | OAuth is not falsely advertised | no OAuth capability or discovery endpoint | configuration and documentation review | PASS, optional feature not implemented |
-| LibreChat integration | optional files, no active routes in `MoquiConf.xml` | not executed | EXCLUDED |
+| LibreChat integration | legacy MCP compatibility only; UI is provided by `webroot` | not executed | EXCLUDED |
 
 ## Recorded Test Results
 
