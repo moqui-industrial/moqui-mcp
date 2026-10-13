@@ -5,7 +5,7 @@
 
     <webapp-list>
         <webapp name="webroot">
-            <filter name="McpAuthFilter" class="org.moqui.impl.webapp.MoquiAuthFilter" async-supported="true">
+            <filter name="McpAuthFilter" class="org.moqui.mcp.McpBearerAuthFilter" async-supported="true">
                 <url-pattern>/mcp</url-pattern>
                 <url-pattern>/mcp/*</url-pattern>
             </filter>
