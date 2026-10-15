@@ -72,13 +72,12 @@ The tools are built from the llm-client profile named by `moqui_mcp_llm_profile`
 | `request` | the profile has `allowed-path` entries or `allow-unprefixed-request` | GET/POST/PUT/PATCH/DELETE on a webroot path as the user: screen transitions and form-list JSON (`/qapps/.../actions/<form>`), service REST (`/rest/s1/...`) |
 | `browse` | `allow-browse` | finds screens (`q`), lists the catalog of screens, REST, services and entities (including view-entities, with `isView`) |
 | `run_service` | `allow-run-service` | calls a service that requires authentication, as the user, with artifact authorization on |
-| `find_skill` | always | searches the llm-client skills and returns their playbook |
-| `enter_sim` | `allow-enter-sim` | runs an llm-client sub-agent in a simulation overlay that does not commit |
 | `find_basic` | `allowed-basic-entity` entries | options of the allow-listed configuration entities |
 | `find_document` | mantle-usl and the search service are available to the user | text search over the Mantle DataDocuments in OpenSearch, inside the organizations of the user |
 
-Not offered: `screen_use` and `write_ui`, which run in the browser of a Moqui user, and `pin`, which keeps ids on a
-Moqui conversation.
+Not offered: `screen_use` and `write_ui`, which run in the browser of a Moqui user; `pin`, which keeps ids on a Moqui
+conversation; `find_skill` and `enter_sim`, which read and write the llm-client skills. Those skills belong to the
+Moqui assistant; an MCP client such as LibreChat brings its own.
 
 The tool results are the llm-client results. A result with an `error` or a `status` of 400 or more is returned as an
 MCP tool error. Screen hits and rows of `browse` get `url`, the address the user can open: it is built on
@@ -91,7 +90,6 @@ Known limits that come from llm-client:
   and view-entity rows are read through screen form-lists or service REST resources
 - the skill risk gate (confirm/irreversible) runs in the llm-client agent loop, so it does not apply to MCP calls;
   writes are limited only by Moqui authorization
-- `find_skill` with `select` has no conversation to activate the skill on; the playbook is still returned
 
 ### find_document
 

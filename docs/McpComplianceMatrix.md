@@ -29,7 +29,7 @@ Qualification date: 2026-10-15, after the move to the llm-client tools (the prev
 | Notification bridge and subscriptions are absent | removed registry/tool/capabilities | core and catalog tests | PASS |
 | First-page pagination, stable cursor and bounds | `McpPaginationSupport` | malformed, negative and overflow cursor tests | PASS |
 | Tools are the server-side llm-client tools of the profile, under their llm-client names | `McpClient.llmTools` | tool catalog test on the `assist` profile | PASS |
-| Browser and conversation tools are not offered (`screen_use`, `write_ui`, `pin`) | `McpClient.llmTools` | catalog and unknown-tool tests | PASS |
+| Browser, conversation and skill tools are not offered (`screen_use`, `write_ui`, `pin`, `find_skill`, `enter_sim`) | `McpClient.llmTools` | catalog and unknown-tool tests | PASS |
 | Resources and prompts are not offered | `McpClient.handle` | core unsupported-method tests | PASS |
 | The llm-client tools require the `LlmGateway` permission | `McpClient.hasGateway` | list/call test with a user without the permission | PASS |
 | Tool calls run as the user with Moqui authorization | llm-client `run_service`, `request` | real service engine and service REST tests | PASS |

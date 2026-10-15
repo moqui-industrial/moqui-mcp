@@ -29,8 +29,9 @@ import org.slf4j.LoggerFactory
 /**
  * MCP methods over the llm-client tools. The tools, their names, schemas and rules are the ones that llm-client attaches
  * for the configured profile (assist by default), so an MCP client gets what the Assist panel gets on the server side.
- * Tools that run in the browser of a Moqui user (screen_use, write_ui) and pin, which needs a Moqui conversation, are
- * not offered. find_document adds the OpenSearch DataDocument search, which llm-client does not have.
+ * Not offered: the tools that run in the browser of a Moqui user (screen_use, write_ui), pin, which needs a Moqui
+ * conversation, and the llm-client skills (find_skill, enter_sim).
+ * find_document adds the OpenSearch DataDocument search, which llm-client does not have.
  */
 class McpClient {
     protected static final Logger logger = LoggerFactory.getLogger(McpClient)
@@ -45,13 +46,16 @@ class McpClient {
 
     static final String FIND_DOCUMENT = 'find_document'
     static final String SEARCH_SERVICE = 'org.moqui.mcp.McpServices.search#AuthorizedDataDocuments'
-    /** pin keeps ids on a Moqui conversation, which an MCP client does not have */
-    static final Set<String> CONVERSATION_TOOLS = ['pin'] as Set
+    /**
+     * Not offered: pin keeps ids on a Moqui conversation, which an MCP client does not have; find_skill and enter_sim
+     * read and write the llm-client skills, which belong to the Moqui assistant. An MCP client brings its own skills.
+     */
+    static final Set<String> EXCLUDED_TOOLS = ['pin', 'find_skill', 'enter_sim'] as Set
 
     static final String INSTRUCTIONS = 'Moqui tools from llm-client. browse finds screens (q), services and entities; ' +
             'a screen hit carries url, a link the user can open: give that link instead of describing the data. ' +
             'request reads and writes through /rest/s1 (services) and /rest/e1 (entities and view-entities). ' +
-            'run_service calls a service as the user. find_skill looks up a playbook. find_basic lists options of ' +
+            'run_service calls a service as the user. find_basic lists options of ' +
             'configuration entities. find_document is a text search over the DataDocuments in OpenSearch. ' +
             'screen_use and write_ui are not available here.'
 
@@ -137,10 +141,8 @@ class McpClient {
         if (request != null) tools.add(request)
         if (profile.allowBrowse) tools.add(LlmTool.browse())
         if (profile.allowRunService) tools.add(LlmTool.runService())
-        tools.add(LlmTool.findSkill())
-        if (profile.allowEnterSim) tools.add(LlmTool.enterSim())
         if (profile.allowedBasicEntities) tools.add(new FindBasicTool(profile.allowedBasicEntities))
-        return tools.findAll { LlmTool t -> t.execution == LlmTool.Execution.SERVER && !(t.name in CONVERSATION_TOOLS) }
+        return tools.findAll { LlmTool t -> t.execution == LlmTool.Execution.SERVER && !(t.name in EXCLUDED_TOOLS) }
     }
 
     protected LlmFacadeImpl.ProfileState profileState() {

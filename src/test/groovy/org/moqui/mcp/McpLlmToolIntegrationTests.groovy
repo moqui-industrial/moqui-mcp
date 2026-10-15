@@ -79,13 +79,13 @@ class McpLlmToolIntegrationTests extends Specification {
         }
     }
 
-    def 'tools are the server-side llm-client tools of the assist profile under their own names'() {
+    def 'tools are the server-side llm-client tools of the assist profile under their own names, without the skills'() {
         when:
         List<Map> tools = client.listTools([pageSize: 100]).tools as List<Map>
 
         then:
-        tools*.name.containsAll(['request', 'browse', 'run_service', 'find_skill', 'find_basic'])
-        !tools*.name.any { it in ['screen_use', 'write_ui', 'pin'] }
+        tools*.name.containsAll(['request', 'browse', 'run_service', 'find_basic'])
+        !tools*.name.any { it in ['screen_use', 'write_ui', 'pin', 'find_skill', 'enter_sim'] }
         !tools*.name.any { it.startsWith('moqui_') }
         tools.every { it.inputSchema?.type == 'object' && it.description }
     }
@@ -157,7 +157,7 @@ class McpLlmToolIntegrationTests extends Specification {
         thrown(IllegalArgumentException)
 
         where:
-        name << ['moqui_call_service', 'screen_use', 'pin', 'no_such_tool']
+        name << ['moqui_call_service', 'screen_use', 'pin', 'find_skill', 'enter_sim', 'no_such_tool']
     }
 
     def 'without the LlmGateway permission no llm-client tool is listed or callable'() {

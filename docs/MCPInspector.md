@@ -39,10 +39,9 @@ runtime/component/moqui-mcp/tools/inspector/run-inspector-local.sh
 Recommended manual checks in Inspector:
 
 1. `server/discover`
-2. `tools/list`: the llm-client tools of the profile (`request`, `browse`, `run_service`, `find_skill`, ...) and `find_document`
+2. `tools/list`: the llm-client tools of the profile (`request`, `browse`, `run_service`, `find_basic`) and `find_document`
 3. `tools/call` `browse` with `{"q": "find product"}`: screen hits with `url`
-4. `tools/call` `find_skill` with `{"query": "create product"}`
 
 ## What This Component Does Not Expose
 
-Resources and prompts. Entity data is reached through the llm-client tools, and playbooks through `find_skill`.
+Resources, prompts and the llm-client skills. Entity data is reached through the llm-client tools.
