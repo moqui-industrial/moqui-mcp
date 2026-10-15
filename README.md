@@ -73,10 +73,11 @@ The tools are built from the llm-client profile named by `moqui_mcp_llm_profile`
 | `browse` | `allow-browse` | finds screens (`q`), lists the catalog of screens, REST, services and entities (including view-entities, with `isView`) |
 | `run_service` | `allow-run-service` | calls a service that requires authentication, as the user, with artifact authorization on |
 | `find_basic` | `allowed-basic-entity` entries | options of the allow-listed configuration entities |
+| `screen_use` | `allow-write-ui` | `navigate` only: llm-client checks the `/qapps` path and the user's view permission, then the Moqui page the user has open goes to that screen without reloading (a `LlmScreenNavigate` notification over the Moqui notification WebSocket, handled in `WebrootVue.qvt.js`); parameters and fields go in the URL |
 | `find_document` | mantle-usl and the search service are available to the user | text search over the Mantle DataDocuments in OpenSearch, inside the organizations of the user |
 
-Not offered: `screen_use` and `write_ui`, which run in the browser of a Moqui user; `pin`, which keeps ids on a Moqui
-conversation; `find_skill` and `enter_sim`, which read and write the llm-client skills. Those skills belong to the
+Not offered: `write_ui`, which draws in the Assist panel, and the other `screen_use` actions (snapshot, fill, ...),
+which read and change the rendered page; `pin`, which keeps ids on a Moqui conversation; `find_skill` and `enter_sim`, which read and write the llm-client skills. Those skills belong to the
 Moqui assistant; an MCP client such as LibreChat brings its own.
 
 The tool results are the llm-client results. A result with an `error` or a `status` of 400 or more is returned as an

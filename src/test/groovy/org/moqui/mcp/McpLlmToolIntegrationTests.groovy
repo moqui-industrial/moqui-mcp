@@ -84,8 +84,9 @@ class McpLlmToolIntegrationTests extends Specification {
         List<Map> tools = client.listTools([pageSize: 100]).tools as List<Map>
 
         then:
-        tools*.name.containsAll(['request', 'browse', 'run_service', 'find_basic'])
-        !tools*.name.any { it in ['screen_use', 'write_ui', 'pin', 'find_skill', 'enter_sim'] }
+        tools*.name.containsAll(['request', 'browse', 'run_service', 'find_basic', 'screen_use'])
+        !tools*.name.any { it in ['write_ui', 'pin', 'find_skill', 'enter_sim'] }
+        tools.find { it.name == 'screen_use' }.inputSchema.get('properties').action.get('enum') == ['navigate']
         !tools*.name.any { it.startsWith('moqui_') }
         tools.every { it.inputSchema?.type == 'object' && it.description }
     }
@@ -124,6 +125,29 @@ class McpLlmToolIntegrationTests extends Specification {
         hits.every { Map hit -> !(hit.path as String)?.startsWith('/qapps/') || (hit.url as String)?.endsWith(hit.path as String) }
     }
 
+    def 'screen_use navigate checks the screen with llm-client and returns the link it sent to the Moqui page'() {
+        when:
+        Map result = client.callTool('screen_use', [action: 'navigate', path: '/qapps/tools/Entity/DataEdit/EntityList',
+                parameters: [filterRegexp: 'Enumeration']])
+
+        then:
+        !result.isError
+        result.structuredContent.sent
+        (result.structuredContent.url as String).endsWith('/qapps/tools/Entity/DataEdit/EntityList?filterRegexp=Enumeration')
+    }
+
+    def 'screen_use refuses what llm-client refuses and every action but navigate'() {
+        when:
+        Map rest = client.callTool('screen_use', [action: 'navigate', path: '/rest/s1/moqui/dataDocuments'])
+        Map missing = client.callTool('screen_use', [action: 'navigate', path: '/qapps/no/such/Screen'])
+        Map snapshot = client.callTool('screen_use', [action: 'snapshot', path: '/qapps/tools'])
+
+        then:
+        rest.isError
+        missing.isError
+        snapshot.isError
+    }
+
     def 'llm-client refusals become tool errors'() {
         when:
         Map result = client.callTool('run_service', [serviceName: 'org.moqui.impl.NoSuchServices.do#Nothing'])
@@ -157,7 +181,7 @@ class McpLlmToolIntegrationTests extends Specification {
         thrown(IllegalArgumentException)
 
         where:
-        name << ['moqui_call_service', 'screen_use', 'pin', 'find_skill', 'enter_sim', 'no_such_tool']
+        name << ['moqui_call_service', 'write_ui', 'pin', 'find_skill', 'enter_sim', 'no_such_tool']
     }
 
     def 'without the LlmGateway permission no llm-client tool is listed or callable'() {

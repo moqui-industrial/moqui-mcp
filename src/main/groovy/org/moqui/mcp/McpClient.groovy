@@ -29,8 +29,9 @@ import org.slf4j.LoggerFactory
 /**
  * MCP methods over the llm-client tools. The tools, their names, schemas and rules are the ones that llm-client attaches
  * for the configured profile (assist by default), so an MCP client gets what the Assist panel gets on the server side.
- * Not offered: the tools that run in the browser of a Moqui user (screen_use, write_ui), pin, which needs a Moqui
- * conversation, and the llm-client skills (find_skill, enter_sim).
+ * Not offered: write_ui, which draws in the Assist panel, pin, which needs a Moqui conversation, and the llm-client
+ * skills (find_skill, enter_sim). screen_use is offered for navigate only: llm-client checks the path and the user's
+ * view permission, and the Moqui page of the user opens the screen when it gets the notification.
  * find_document adds the OpenSearch DataDocument search, which llm-client does not have.
  */
 class McpClient {
@@ -45,6 +46,9 @@ class McpClient {
     static final String PUBLIC_URL_PROPERTY = 'moqui_mcp_public_url'
 
     static final String FIND_DOCUMENT = 'find_document'
+    static final String SCREEN_USE = 'screen_use'
+    /** Notification topic that the Moqui page (WebrootVue) listens to and navigates on */
+    static final String NAVIGATE_TOPIC = 'LlmScreenNavigate'
     static final String SEARCH_SERVICE = 'org.moqui.mcp.McpServices.search#AuthorizedDataDocuments'
     /**
      * Not offered: pin keeps ids on a Moqui conversation, which an MCP client does not have; find_skill and enter_sim
@@ -54,10 +58,10 @@ class McpClient {
 
     static final String INSTRUCTIONS = 'Moqui tools from llm-client. browse finds screens (q), services and entities; ' +
             'a screen hit carries url, a link the user can open: give that link instead of describing the data. ' +
-            'request reads and writes through /rest/s1 (services) and /rest/e1 (entities and view-entities). ' +
+            'screen_use with action navigate opens that screen in the Moqui page the user has open; give the link too. ' +
+            'request reads and writes through screen form-lists (/qapps/.../actions/<form>) and service REST (/rest/s1). ' +
             'run_service calls a service as the user. find_basic lists options of ' +
-            'configuration entities. find_document is a text search over the DataDocuments in OpenSearch. ' +
-            'screen_use and write_ui are not available here.'
+            'configuration entities. find_document is a text search over the DataDocuments in OpenSearch.'
 
     protected final ExecutionContext ec
 
@@ -95,7 +99,11 @@ class McpClient {
     }
 
     Map listTools(Map params = [:]) {
-        List<Map> toolList = hasGateway() ? llmTools().collect { LlmTool tool -> toolDescriptor(tool) } : []
+        List<Map> toolList = []
+        if (hasGateway()) {
+            toolList.addAll(llmTools().collect { LlmTool tool -> toolDescriptor(tool) })
+            if (profileState()?.allowWriteUi) toolList.add(screenUseDescriptor())
+        }
         if (searchAvailable()) toolList.add(findDocumentDescriptor())
         Map page = McpPaginationSupport.paginate(toolList, params, 'tools')
         Map result = [
@@ -115,6 +123,7 @@ class McpClient {
 
         if (!hasGateway()) throw new IllegalArgumentException('The current user may not use the llm-client tools (LlmGateway permission)')
         LlmTool tool = llmTools().find { LlmTool t -> t.name == name }
+        if (tool == null && name == SCREEN_USE && profileState()?.allowWriteUi) return screenNavigate(args)
         if (tool == null) throw new IllegalArgumentException("Unknown MCP tool ${name}")
 
         Map callerMessages = captureMessages()
@@ -143,6 +152,39 @@ class McpClient {
         if (profile.allowRunService) tools.add(LlmTool.runService())
         if (profile.allowedBasicEntities) tools.add(new FindBasicTool(profile.allowedBasicEntities))
         return tools.findAll { LlmTool t -> t.execution == LlmTool.Execution.SERVER && !(t.name in EXCLUDED_TOOLS) }
+    }
+
+    /** The navigate action of the llm-client screen_use tool, with its schema reduced to what navigate reads. */
+    protected static Map screenUseDescriptor() {
+        Map props = (Map) normalizeJsonValue(LlmTool.screenUse().parametersSchema.get('properties'))
+        props.action = [type: 'string', 'enum': ['navigate'], description: 'navigate: open a /qapps screen in the Moqui page of the user.']
+        return [
+                name       : SCREEN_USE,
+                description: 'Open a screen in the Moqui page the user has open (the page with the chat panel), without reloading it. ' +
+                        'Use the /qapps path from browse q. parameters and fields (find fields too) go in the URL, so a find screen ' +
+                        'opens already filtered. Only navigate is available here. If the user has no Moqui page open nothing changes: ' +
+                        'also give the link.',
+                inputSchema: [type: 'object', required: ['action', 'path'],
+                              properties: props.subMap(['action', 'path', 'parameters', 'fields'])]
+        ]
+    }
+
+    protected Map screenNavigate(Map args) {
+        assertAllowedKeys(args, ['action', 'path', 'parameters', 'fields'] as Set, SCREEN_USE)
+        if (args.action != 'navigate') return makeToolError('Only action navigate is available here')
+        Map checked = LlmTool.screenUse().enrichForClient(args as Map<String, Object>, ec)
+        if (checked.error) return toolResult(checked)
+        Map query = [:]
+        if (checked.parameters instanceof Map) query.putAll((Map) checked.parameters)
+        if (checked.fields instanceof Map) query.putAll((Map) checked.fields)
+        String screenUrl = (String) checked.path
+        if (query) screenUrl += '?' + query.findAll { it.value != null }.collect { k, v ->
+            URLEncoder.encode(k as String, 'UTF-8') + '=' + URLEncoder.encode(v as String, 'UTF-8') }.join('&')
+        ec.makeNotificationMessage().topic(NAVIGATE_TOPIC).userId(ec.user.userId)
+                .message([path: checked.path, url: screenUrl]).send(false)
+        Map result = [action: 'navigate', path: checked.path, url: screenBaseUrl() + screenUrl, sent: true]
+        if (checked.ignored) result.ignored = checked.ignored
+        return toolResult(result)
     }
 
     protected LlmFacadeImpl.ProfileState profileState() {
