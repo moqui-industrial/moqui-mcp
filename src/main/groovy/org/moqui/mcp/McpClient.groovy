@@ -18,8 +18,8 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.security.MessageDigest
 import org.moqui.context.ExecutionContext
+import org.moqui.llm.LlmTool
 import org.moqui.impl.context.ArtifactExecutionFacadeImpl
-import org.moqui.impl.llm.tools.BrowseTool
 import org.moqui.impl.service.ServiceDefinition
 import org.moqui.impl.service.ServiceFacadeImpl
 import org.moqui.impl.util.RestSchemaUtil
@@ -201,8 +201,8 @@ class McpClient {
             String singular = query.split(/\s+/).collect { String w ->
                 (w.length() > 3 && w.endsWith('s') && !w.endsWith('ss')) ? w.substring(0, w.length() - 1) : w
             }.join(' ')
-            Map found = (Map) new BrowseTool().execute([q: singular] as Map<String, Object>, ec)
-            if (!found?.error && !found?.hits && singular != query) found = (Map) new BrowseTool().execute([q: query] as Map<String, Object>, ec)
+            Map found = (Map) LlmTool.browse().execute([q: singular] as Map<String, Object>, ec)
+            if (!found?.error && !found?.hits && singular != query) found = (Map) LlmTool.browse().execute([q: query] as Map<String, Object>, ec)
             if (found?.error) return makeToolError(found.error.toString())
             String base = screenBaseUrl()
             List<Map> screens = ((found?.hits ?: []) as List<Map>).collect { Map hit ->
