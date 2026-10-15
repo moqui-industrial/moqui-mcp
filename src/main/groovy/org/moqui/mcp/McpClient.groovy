@@ -19,6 +19,7 @@ import groovy.json.JsonSlurper
 import java.security.MessageDigest
 import org.moqui.context.ExecutionContext
 import org.moqui.impl.context.ArtifactExecutionFacadeImpl
+import org.moqui.impl.llm.tools.BrowseTool
 import org.moqui.impl.service.ServiceDefinition
 import org.moqui.impl.service.ServiceFacadeImpl
 import org.moqui.impl.util.RestSchemaUtil
@@ -121,6 +122,22 @@ class McpClient {
         }
         builtinTools.addAll([
                 [
+                        name : 'moqui_find_screens',
+                        title : 'Find Screens',
+                        description : 'Find the Moqui screens the current user may open for a request such as "find products". ' +
+                                'Returns a short ranked list with path, title and a ready-to-use link (url). ' +
+                                'Give the user the link of the best match instead of describing the data; ' +
+                                'append screen parameters as a query string (for example ?productName=chair) when the screen has a matching field.',
+                        inputSchema : [
+                                type : 'object',
+                                properties : [
+                                        query : [type: 'string', description: 'Plain words, for example "find products" or "sales order".']
+                                ],
+                                required : ['query'],
+                                additionalProperties: false
+                        ]
+                ],
+                [
                         name : 'moqui_get_service_metadata',
                         title : 'Get Service Metadata',
                         description : 'Return service definition metadata, including input and output JSON Schema derived from the Moqui service definition.',
@@ -151,6 +168,13 @@ class McpClient {
         return builtinTools
     }
 
+    /** Address the user's browser opens for screen links: moqui_mcp_public_url, else the address of this request. */
+    protected String screenBaseUrl() {
+        String configured = (System.getProperty('moqui_mcp_public_url') ?: System.getenv('moqui_mcp_public_url'))?.trim()
+        if (!configured) configured = ec.web?.getWebappRootUrl(true, null) ?: ''
+        return configured.endsWith('/') ? configured.substring(0, configured.length() - 1) : configured
+    }
+
     Map callTool(String name, Map arguments) {
         if (!name) throw new IllegalArgumentException('Tool name is required')
         Map args = arguments ?: [:]
@@ -167,6 +191,26 @@ class McpClient {
                         pageSize : svcRes.documentListPageSize
                 ]
             }
+        }
+
+        if (name == 'moqui_find_screens') {
+            assertAllowedKeys(args, ['query'] as Set, name)
+            String query = (args.query as String)?.trim()
+            if (!query) throw new IllegalArgumentException('query is required')
+            // the screen search matches whole words, so "products" misses "Find Product": try the singular form first
+            String singular = query.split(/\s+/).collect { String w ->
+                (w.length() > 3 && w.endsWith('s') && !w.endsWith('ss')) ? w.substring(0, w.length() - 1) : w
+            }.join(' ')
+            Map found = (Map) new BrowseTool().execute([q: singular] as Map<String, Object>, ec)
+            if (!found?.error && !found?.hits && singular != query) found = (Map) new BrowseTool().execute([q: query] as Map<String, Object>, ec)
+            if (found?.error) return makeToolError(found.error.toString())
+            String base = screenBaseUrl()
+            List<Map> screens = ((found?.hits ?: []) as List<Map>).collect { Map hit ->
+                Map screen = new LinkedHashMap(hit)
+                screen.url = base + hit.path
+                screen
+            }
+            return wrapToolResult([query: query, screens: screens, truncated: found?.truncated ?: false])
         }
 
         if (name == 'moqui_get_service_metadata') {
