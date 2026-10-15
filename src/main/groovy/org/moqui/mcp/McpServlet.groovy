@@ -240,13 +240,9 @@ class McpServlet extends HttpServlet {
     private static Map makeLibreChatInitializeResult() {
         return [
                 protocolVersion: LIBRECHAT_LEGACY_PROTOCOL_VERSION,
-                capabilities   : [
-                        tools    : [listChanged: false],
-                        resources: [subscribe: false, listChanged: false],
-                        prompts  : [listChanged: false]
-                ],
+                capabilities   : [tools: [listChanged: false]],
                 serverInfo     : new LinkedHashMap(SERVER_INFO),
-                instructions   : 'Moqui MCP compatibility endpoint for LibreChat.'
+                instructions   : McpClient.INSTRUCTIONS
         ]
     }
 
@@ -266,8 +262,6 @@ class McpServlet extends HttpServlet {
 
     private static String getExpectedName(String method, Map params) {
         if (method == 'tools/call') return params.name as String
-        if (method == 'resources/read') return params.uri as String
-        if (method == 'prompts/get') return params.name as String
         return null
     }
 

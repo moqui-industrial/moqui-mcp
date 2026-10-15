@@ -1,19 +1,19 @@
 # moqui-mcp
 
-Minimal Model Context Protocol server for Moqui, targeting MCP `2026-07-28` natively.
+Model Context Protocol server for Moqui, targeting MCP `2026-07-28` natively.
 
-The component maps Moqui artifacts to MCP without introducing a second application or authorization model:
+The component is a thin MCP layer over the llm-client of the Moqui framework. Its tools are the llm-client tools, with
+their names, schemas and rules, as llm-client attaches them for one profile; it adds only what llm-client does not
+have: a text search over the DataDocuments indexed in OpenSearch.
 
-- concrete Moqui services become tools when the current user is artifact-authorized
-- entity and view-entity definitions, records, and DataDocument definitions become resources
-- published pages in the `MCP_PROMPTS` Wiki space become prompts
+The previous design (one tool per service, entity resources, Wiki prompts) is kept on the `old-mcp` branch.
 
 ## Requirements
 
-- a compatible `moqui-framework` checkout
+- a `moqui-framework` checkout with llm-client (`ec.llm`, `org.moqui.llm.LlmTool`)
 - Java 21
 - normal Moqui authentication for remote calls
-- optional business components contribute their own services, entities, and DataDocuments through the standard Moqui facades
+- for `find_document`, mantle-usl and an OpenSearch-compatible backend
 
 Install the component under `runtime/component/moqui-mcp`, then build from the framework root:
 
@@ -38,96 +38,88 @@ MCP-Protocol-Version: 2026-07-28
 Mcp-Method: <JSON-RPC method>
 ```
 
-`tools/call`, `resources/read`, and `prompts/get` also require `Mcp-Name` matching the request name or URI. Non-ASCII or otherwise unsuitable values may use the canonical `=?base64?<value>?=` form defined by the frozen protocol schema.
+`tools/call` also requires `Mcp-Name` matching the tool name. Non-ASCII or otherwise unsuitable values may use the
+canonical `=?base64?<value>?=` form defined by the frozen protocol schema.
 
-The endpoint accepts normal Moqui authentication such as Basic Auth, `api_key`, or `login_key`. The optional local service-account fallback is disabled by default. It may be enabled only for trusted loopback calls with both JVM properties:
+The methods are `server/discover`, `tools/list` and `tools/call`. Resources and prompts are not offered.
+
+The endpoint accepts normal Moqui authentication such as Basic Auth, `api_key`, or `login_key`, and a Bearer token of
+the configured identity provider (see `McpBearerAuthFilter`). The optional local service-account fallback is disabled
+by default. It may be enabled only for trusted loopback calls with both JVM properties:
 
 ```text
 moqui.mcp.serviceAccountEnabled=true
 moqui.mcp.serviceAccountUserId=<userId>
 ```
 
-Browser cross-origin requests are denied by default. Same-origin requests are accepted; additional exact origins may be supplied as a comma-separated JVM property:
+Browser cross-origin requests are denied by default. Same-origin requests are accepted; additional exact origins may be
+supplied as a comma-separated JVM property:
 
 ```text
 moqui.mcp.allowedOrigins=https://agent.example.com,https://admin.example.com
 ```
 
-The MCP OAuth extension is not implemented or advertised. Deployments requiring OAuth should terminate authorization at a tested Moqui/IdP integration; Basic Auth and Moqui login/API keys are the supported endpoint authentication mechanisms in this component.
-
 ## Tools
 
-`tools/list` contains the built-in adapters and concrete service tools visible to the current user. Results are stable, sorted, and paginated; the default page size is 100 and the maximum is 1000.
+The llm-client tools require the `LlmGateway` permission, as the `/llm` endpoint does. A user without it sees only
+`find_document`, when that is available to them.
 
-Built-in adapters:
+The tools are built from the llm-client profile named by `moqui_mcp_llm_profile` (default `assist`), in the same way
+`LlmGateway.attachServletTools` builds them for that profile:
 
-- `moqui_search_data_documents` calls `search#AuthorizedDataDocuments` when the deployment contributes an authorized DataDocument search implementation
-- `moqui_get_service_metadata` returns the effective Moqui service schemas after applying the same publication and authorization checks as invocation
-- `moqui_call_service` invokes a published service by its full Moqui service name
+| Tool | When | What it does |
+|---|---|---|
+| `request` | the profile has `allowed-path` entries or `allow-unprefixed-request` | GET/POST/PUT/PATCH/DELETE on a webroot path as the user: screen transitions and form-list JSON (`/qapps/.../actions/<form>`), service REST (`/rest/s1/...`) |
+| `browse` | `allow-browse` | finds screens (`q`), lists the catalog of screens, REST, services and entities (including view-entities, with `isView`) |
+| `run_service` | `allow-run-service` | calls a service that requires authentication, as the user, with artifact authorization on |
+| `find_skill` | always | searches the llm-client skills and returns their playbook |
+| `enter_sim` | `allow-enter-sim` | runs an llm-client sub-agent in a simulation overlay that does not commit |
+| `find_basic` | `allowed-basic-entity` entries | options of the allow-listed configuration entities |
+| `find_document` | mantle-usl and the search service are available to the user | text search over the Mantle DataDocuments in OpenSearch, inside the organizations of the user |
 
-Direct service tools use deterministic MCP-safe aliases. The full service name remains available in `_meta.org.moqui/originalName`.
+Not offered: `screen_use` and `write_ui`, which run in the browser of a Moqui user, and `pin`, which keeps ids on a
+Moqui conversation.
 
-### Service publication policy
+The tool results are the llm-client results. A result with an `error` or a `status` of 400 or more is returned as an
+MCP tool error. Screen hits and rows of `browse` get `url`, the address the user can open: it is built on
+`moqui_mcp_public_url` (for example `http://localhost:8080`), or on the address of the request when that property is
+not set.
 
-A service is published only when all of these conditions hold:
+Known limits that come from llm-client:
 
-1. its effective `ServiceDefinition` is concrete, not an interface
-2. it is not an internal transport service of this component
-3. the current user is authorized for the service's effective Moqui action (`view`, `create`, `update`, `delete`, or `all`)
+- `request` renders the call with a `WebFacadeStub`, which does not handle the entity REST API (`/rest/e1`); entity
+  and view-entity rows are read through screen form-lists or service REST resources
+- the skill risk gate (confirm/irreversible) runs in the llm-client agent loop, so it does not apply to MCP calls;
+  writes are limited only by Moqui authorization
+- `find_skill` with `select` has no conversation to activate the skill on; the playbook is still returned
 
-`allow-remote` is retained as service metadata but is not an MCP publication boundary. The same artifact-aware authorization that protects Moqui services decides both discovery and invocation on every request. Internal MCP transport services are excluded explicitly.
+### find_document
 
-Grant users only the service artifacts and entity filters required for their role. For business search, grant the authorized search facade together with a supported entity filter set; do not grant arbitrary backend access.
-
-### Search scope
-
-The search tool is present only when an authorized search facade is available to the caller. Its scopes are supplied by the installed application DataDocuments. An omitted or empty query lists one bounded page of the authorized scope. Non-empty query text is trimmed, limited to 512 characters, escaped as one backend query clause, and combined with server-derived entity filters. Client-supplied index names, cluster names, filter maps, organization IDs, and backend DSL are rejected.
-
-## Resources
-
-Canonical templates:
-
-```text
-moqui://entity-def/{entityName}
-moqui://entity/{entityName}/{primaryKeyToken}
-moqui://data-document/{dataDocumentId}
-```
-
-The provider uses effective runtime entity definitions, including view-entities and extensions. Reads use the normal Entity Facade and artifact authorization; no authorization is disabled. Fields declared with `encrypt="true"` are omitted from record payloads. A DataDocument without an authorizable primary entity or manual data service is not published.
-
-For a single-field primary key, `primaryKeyToken` is its URL-encoded value. Composite keys use `field=value;field=value` and must contain every primary-key field exactly once.
-
-## Prompts
-
-Prompts are published only from `WikiPage` records in `MCP_PROMPTS` that have a published version. `${argumentName}` placeholders are required at retrieval time; missing and unknown arguments are rejected.
-
-No resource subscriptions or list-change notifications are advertised because this component does not currently deliver them.
+`find_document` calls `org.moqui.mcp.McpServices.search#AuthorizedDataDocuments`, which delegates to
+`mantle.GeneralServices.search#MantleFiltered` with the organization filters of the user (`MANTLE_ACTIVE_ORG` or
+`MANTLE_USER_ORG`). An omitted or empty query lists one bounded page. Query text is trimmed, limited to 512 characters
+and escaped as one backend query clause. Arguments other than `query`, `documentType`, `pageIndex` and `pageSize` are
+rejected.
 
 ## Security Model
 
-The MCP endpoint adds transport validation but delegates business security to Moqui:
+The MCP endpoint adds transport validation; business security stays with Moqui and llm-client:
 
-- service calls run through `ec.service.sync()` with standard authentication, authorization, validation, transactions, SECAs, and entity filters
-- service visibility is recalculated for each list or call; a previous `tools/list` result is not a grant
-- entity reads use standard artifact authorization and Entity Facade filters
-- the search adapter does not accept arbitrary index names, organization overrides, filter maps, or raw backend configuration
+- the tools run as the authenticated user, with the authorization rules of llm-client and of Moqui
+- the tool list and every call are recalculated per request; a previous `tools/list` result is not a grant
 - protocol errors returned to clients do not contain stack traces
-
-There is no MCP-specific permission table. Grant the endpoint permission and the underlying service/entity permissions independently.
 
 ## Moqui Service Entry Points
 
-The XML services in `org.moqui.mcp.McpServices` are thin wrappers for in-process Moqui callers. They are transport infrastructure and are not recursively listed as application tools.
-
-The generic dispatcher is:
-
-```text
-org.moqui.mcp.McpServices.mcp#Handle
-```
+The XML services in `org.moqui.mcp.McpServices` are thin wrappers for in-process Moqui callers. The generic dispatcher
+is `org.moqui.mcp.McpServices.mcp#Handle`.
 
 ## LibreChat
 
-LibreChat `0.8.x` uses the legacy MCP `2025-11-25` `initialize` handshake and version `0.8.7` omits its protocol header during initialization. Requests using `X-Moqui-Mcp-Profile: librechat` receive a compatibility translation for that handshake, `notifications/initialized`, its post-initialize `ping` probe, and subsequent standard tools/resources/prompts calls. This adapter is only for the optional LibreChat test client; native clients should use `server/discover` with MCP `2026-07-28`.
+LibreChat `0.8.x` uses the legacy MCP `2025-11-25` `initialize` handshake and version `0.8.7` omits its protocol header
+during initialization. Requests using `X-Moqui-Mcp-Profile: librechat` receive a compatibility translation for that
+handshake, `notifications/initialized`, its post-initialize `ping` probe, and subsequent standard tools calls. Native
+clients should use `server/discover` with MCP `2026-07-28`.
 
 ## Development
 
@@ -135,12 +127,13 @@ Run the component tests from the framework root:
 
 ```bash
 ./gradlew :runtime:component:moqui-mcp:test
-./gradlew :runtime:component:moqui-mcp:check
 ```
 
-The official MCP schema is downloaded once, verified against the SHA-256 in `docs/mcp-schema-manifest.json`, and then reused from the Gradle user cache. After a verified first download, the regular suite can run offline.
+The tests write to the database of the runtime, so stop a Moqui server that uses the same H2 database first. The
+official MCP schema is downloaded once, verified against the SHA-256 in `docs/mcp-schema-manifest.json`, and then
+reused from the Gradle user cache.
 
-Run the optional search security qualification against a disposable backend:
+Run the optional search qualification against a disposable runtime and backend:
 
 ```bash
 ./gradlew :runtime:component:moqui-mcp:testMcpSearchBackend \
@@ -148,15 +141,13 @@ Run the optional search security qualification against a disposable backend:
   -PmcpSearchUrl=http://127.0.0.1:9200
 ```
 
-This task creates and removes dedicated test users, authorization records, organization records, and three disposable indexes named `mantle`, `mantle_party`, and `mantle_product`. Do not point it at a backend containing indexes with those names.
-
-Inspector instructions are in `docs/MCPInspector.md`. The local helper is `tools/inspector/run-inspector-local.sh`.
-The requirement-to-test matrix and latest qualification are in `docs/McpComplianceMatrix.md`; the frozen schema and SHA-256 are in `docs/mcp-schema-manifest.json`.
+This task creates and removes dedicated test users, authorization records, organization records, and three disposable
+indexes named `mantle`, `mantle_party`, and `mantle_product`. Do not point it at a backend or a runtime whose Mantle
+data feed uses those names.
 
 Main implementation files:
 
-- `src/main/groovy/org/moqui/mcp/McpServlet.groovy` — HTTP and JSON-RPC boundary
-- `src/main/groovy/org/moqui/mcp/McpClient.groovy` — protocol dispatch and service tools
-- `src/main/groovy/org/moqui/mcp/MoquiResourceProvider.groovy` — resources and templates
-- `src/main/groovy/org/moqui/mcp/WikiPromptProvider.groovy` — Wiki-backed prompts
-- `service/org/moqui/mcp/McpServices.xml` — Moqui service wrappers and authorized search facade
+- `src/main/groovy/org/moqui/mcp/McpServlet.groovy`: HTTP and JSON-RPC boundary
+- `src/main/groovy/org/moqui/mcp/McpClient.groovy`: protocol methods and the llm-client tools
+- `src/main/groovy/org/moqui/mcp/McpBearerAuthFilter.groovy`: Bearer token login
+- `service/org/moqui/mcp/McpServices.xml`: Moqui service wrappers and the authorized search facade

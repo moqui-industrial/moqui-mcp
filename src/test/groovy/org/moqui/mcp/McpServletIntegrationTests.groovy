@@ -44,30 +44,35 @@ class McpServletIntegrationTests extends Specification {
         ec = Moqui.getExecutionContext()
         ec.artifactExecution.disableAuthz()
         cleanupFixtures()
-        ensureShared('moqui.basic.EnumerationType', [enumTypeId: 'ArtifactType', description: 'Artifact Type'])
-        ensureShared('moqui.basic.EnumerationType', [enumTypeId: 'AuthzType', description: 'Authorization Type'])
-        ensureShared('moqui.basic.EnumerationType', [enumTypeId: 'AuthzAction', description: 'Authorization Action'])
-        ensureShared('moqui.basic.Enumeration', [enumId: 'AT_ENTITY', enumTypeId: 'ArtifactType', description: 'Entity'])
-        ensureShared('moqui.basic.Enumeration', [enumId: 'AUTHZT_ALLOW', enumTypeId: 'AuthzType', description: 'Allow'])
-        ensureShared('moqui.basic.Enumeration', [enumId: 'AUTHZA_VIEW', enumTypeId: 'AuthzAction', description: 'View'])
-        if (!ec.entity.find('moqui.security.UserAccount').condition('userId', TEST_USER_ID).one()) {
-            ec.entity.makeValue('moqui.security.UserAccount')
-                    .setAll([userId: TEST_USER_ID, username: TEST_USER_ID, disabled: 'N']).create()
+        ec.transaction.runUseOrBegin(null, 'MCP test fixtures') {
+            ensureShared('moqui.basic.EnumerationType', [enumTypeId: 'ArtifactType', description: 'Artifact Type'])
+            ensureShared('moqui.basic.EnumerationType', [enumTypeId: 'AuthzType', description: 'Authorization Type'])
+            ensureShared('moqui.basic.EnumerationType', [enumTypeId: 'AuthzAction', description: 'Authorization Action'])
+            ensureShared('moqui.basic.Enumeration', [enumId: 'AT_ENTITY', enumTypeId: 'ArtifactType', description: 'Entity'])
+            ensureShared('moqui.basic.Enumeration', [enumId: 'AUTHZT_ALLOW', enumTypeId: 'AuthzType', description: 'Allow'])
+            ensureShared('moqui.basic.Enumeration', [enumId: 'AUTHZA_VIEW', enumTypeId: 'AuthzAction', description: 'View'])
+            if (!ec.entity.find('moqui.security.UserAccount').condition('userId', TEST_USER_ID).one()) {
+                ec.entity.makeValue('moqui.security.UserAccount')
+                        .setAll([userId: TEST_USER_ID, username: TEST_USER_ID, disabled: 'N']).create()
+            }
+            ec.entity.makeValue('moqui.security.UserGroup')
+                    .setAll([userGroupId: TEST_GROUP_ID, description: 'MCP HTTP test user']).create()
+            ec.entity.makeValue('moqui.security.UserGroupMember')
+                    .setAll([userGroupId: TEST_GROUP_ID, userId: TEST_USER_ID,
+                             fromDate: new java.sql.Timestamp(0)]).create()
+            ec.entity.makeValue('moqui.security.UserGroupPermission')
+                    .setAll([userGroupId: TEST_GROUP_ID, userPermissionId: 'LlmGateway',
+                             fromDate: new java.sql.Timestamp(0)]).create()
+            ec.entity.makeValue('moqui.security.ArtifactGroup')
+                    .setAll([artifactGroupId: TEST_ARTIFACT_GROUP_ID, description: 'MCP HTTP entity test']).create()
+            ec.entity.makeValue('moqui.security.ArtifactGroupMember')
+                    .setAll([artifactGroupId: TEST_ARTIFACT_GROUP_ID, artifactName: 'moqui.basic.Enumeration',
+                             artifactTypeEnumId: 'AT_ENTITY', inheritAuthz: 'Y']).create()
+            ec.entity.makeValue('moqui.security.ArtifactAuthz')
+                    .setAll([artifactAuthzId: TEST_AUTHZ_ID, userGroupId: TEST_GROUP_ID,
+                             artifactGroupId: TEST_ARTIFACT_GROUP_ID, authzTypeEnumId: 'AUTHZT_ALLOW',
+                             authzActionEnumId: 'AUTHZA_VIEW']).create()
         }
-        ec.entity.makeValue('moqui.security.UserGroup')
-                .setAll([userGroupId: TEST_GROUP_ID, description: 'MCP HTTP test user']).create()
-        ec.entity.makeValue('moqui.security.UserGroupMember')
-                .setAll([userGroupId: TEST_GROUP_ID, userId: TEST_USER_ID,
-                         fromDate: new java.sql.Timestamp(0)]).create()
-        ec.entity.makeValue('moqui.security.ArtifactGroup')
-                .setAll([artifactGroupId: TEST_ARTIFACT_GROUP_ID, description: 'MCP HTTP entity test']).create()
-        ec.entity.makeValue('moqui.security.ArtifactGroupMember')
-                .setAll([artifactGroupId: TEST_ARTIFACT_GROUP_ID, artifactName: 'moqui.basic.Enumeration',
-                         artifactTypeEnumId: 'AT_ENTITY', inheritAuthz: 'Y']).create()
-        ec.entity.makeValue('moqui.security.ArtifactAuthz')
-                .setAll([artifactAuthzId: TEST_AUTHZ_ID, userGroupId: TEST_GROUP_ID,
-                         artifactGroupId: TEST_ARTIFACT_GROUP_ID, authzTypeEnumId: 'AUTHZT_ALLOW',
-                         authzActionEnumId: 'AUTHZA_VIEW']).create()
         ec.cache.clearAllCaches()
 
         System.setProperty('moqui.mcp.serviceAccountEnabled', 'true')
@@ -92,8 +97,10 @@ class McpServletIntegrationTests extends Specification {
         System.clearProperty('moqui.mcp.serviceAccountUserId')
         ec?.artifactExecution?.disableAuthz()
         cleanupFixtures()
-        sharedRecordsCreated.reverseEach { Map record ->
-            ec.entity.find(record.entityName as String).condition(record.pkMap as Map).deleteAll()
+        ec.transaction.runUseOrBegin(null, 'MCP test fixtures') {
+            sharedRecordsCreated.reverseEach { Map record ->
+                ec.entity.find(record.entityName as String).condition(record.pkMap as Map).deleteAll()
+            }
         }
         ec?.destroy()
     }
@@ -111,14 +118,17 @@ class McpServletIntegrationTests extends Specification {
     private void cleanupFixtures() {
         if (ec == null) return
         ec.artifactExecution.disableAuthz()
-        ec.entity.find('moqui.security.ArtifactAuthz').condition('artifactAuthzId', TEST_AUTHZ_ID).deleteAll()
-        ec.entity.find('moqui.security.ArtifactGroupMember')
-                .condition('artifactGroupId', TEST_ARTIFACT_GROUP_ID).deleteAll()
-        ec.entity.find('moqui.security.ArtifactGroup')
-                .condition('artifactGroupId', TEST_ARTIFACT_GROUP_ID).deleteAll()
-        ec.entity.find('moqui.security.UserGroupMember').condition('userGroupId', TEST_GROUP_ID).deleteAll()
-        ec.entity.find('moqui.security.UserGroup').condition('userGroupId', TEST_GROUP_ID).deleteAll()
-        ec.entity.find('moqui.security.UserAccount').condition('userId', TEST_USER_ID).deleteAll()
+        ec.transaction.runUseOrBegin(null, 'MCP test fixtures') {
+            ec.entity.find('moqui.security.ArtifactAuthz').condition('artifactAuthzId', TEST_AUTHZ_ID).deleteAll()
+            ec.entity.find('moqui.security.ArtifactGroupMember')
+                    .condition('artifactGroupId', TEST_ARTIFACT_GROUP_ID).deleteAll()
+            ec.entity.find('moqui.security.ArtifactGroup')
+                    .condition('artifactGroupId', TEST_ARTIFACT_GROUP_ID).deleteAll()
+            ec.entity.find('moqui.security.UserGroupPermission').condition('userGroupId', TEST_GROUP_ID).deleteAll()
+            ec.entity.find('moqui.security.UserGroupMember').condition('userGroupId', TEST_GROUP_ID).deleteAll()
+            ec.entity.find('moqui.security.UserGroup').condition('userGroupId', TEST_GROUP_ID).deleteAll()
+            ec.entity.find('moqui.security.UserAccount').condition('userId', TEST_USER_ID).deleteAll()
+        }
     }
 
     def 'real HTTP discover request returns a schema-shaped complete result'() {
@@ -151,6 +161,7 @@ class McpServletIntegrationTests extends Specification {
         initializeResponse.statusCode() == 200
         initializeBody.result.protocolVersion == '2025-11-25'
         initializeBody.result.serverInfo.name == 'moqui-mcp'
+        initializeBody.result.capabilities.keySet() == ['tools'] as Set
         notificationResponse.statusCode() == 202
     }
 
@@ -205,8 +216,8 @@ class McpServletIntegrationTests extends Specification {
                 standardHeaders('server/discover') + ['Accept': 'application/json']).statusCode() == 406
         rawPost(JsonOutput.toJson(requestMap('server/discover', [:], 1)),
                 standardHeaders('server/discover') + ['Mcp-Method': 'tools/list']).statusCode() == 400
-        rawPost(JsonOutput.toJson(requestMap('resources/read', [uri: 'moqui://entity-def/moqui.basic.Enumeration'], 1)),
-                standardHeaders('resources/read') + ['Mcp-Name': '=?base64?not canonical!?=']).statusCode() == 400
+        rawPost(JsonOutput.toJson(requestMap('tools/call', [name: 'browse', arguments: [q: 'enumeration']], 1)),
+                standardHeaders('tools/call') + ['Mcp-Name': '=?base64?not canonical!?=']).statusCode() == 400
     }
 
     def 'real HTTP boundary rejects unknown method origin and oversized body'() {
@@ -237,12 +248,12 @@ class McpServletIntegrationTests extends Specification {
 
     def 'name-bearing request accepts canonical base64 and OPTIONS is transport-only'() {
         given:
-        String uri = 'moqui://entity-def/moqui.basic.Enumeration'
-        String encodedName = '=?base64?' + Base64.encoder.encodeToString(uri.getBytes('UTF-8')) + '?='
+        String encodedName = '=?base64?' + Base64.encoder.encodeToString('browse'.getBytes('UTF-8')) + '?='
 
         when:
-        HttpResponse<String> readResponse = rawPost(JsonOutput.toJson(requestMap('resources/read', [uri: uri], 51)),
-                standardHeaders('resources/read') + ['Mcp-Name': encodedName])
+        HttpResponse<String> readResponse = rawPost(JsonOutput.toJson(requestMap('tools/call',
+                [name: 'browse', arguments: [q: 'enumeration']], 51)),
+                standardHeaders('tools/call') + ['Mcp-Name': encodedName])
         HttpResponse<String> optionsResponse = httpClient.send(HttpRequest.newBuilder(endpoint)
                 .method('OPTIONS', HttpRequest.BodyPublishers.noBody()).build(),
                 HttpResponse.BodyHandlers.ofString())

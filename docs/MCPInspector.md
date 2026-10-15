@@ -39,19 +39,10 @@ runtime/component/moqui-mcp/tools/inspector/run-inspector-local.sh
 Recommended manual checks in Inspector:
 
 1. `server/discover`
-2. `tools/list`
-3. `resources/list`
-4. `resources/read` on a known entity definition
-5. `prompts/list`
-6. `prompts/get` on a wiki-backed prompt
+2. `tools/list`: the llm-client tools of the profile (`request`, `browse`, `run_service`, `find_skill`, ...) and `find_document`
+3. `tools/call` `browse` with `{"q": "find product"}`: screen hits with `url`
+4. `tools/call` `find_skill` with `{"query": "create product"}`
 
-## What This Minimal Component Does Not Test
+## What This Component Does Not Expose
 
-This minimal component does not expose:
-
-- screen-derived prompts
-- lookup transition resources
-- prompt completion workflows
-- prompt catalogs in OpenSearch
-
-Those experiments were intentionally removed from the component.
+Resources and prompts. Entity data is reached through the llm-client tools, and playbooks through `find_skill`.

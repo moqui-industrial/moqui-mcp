@@ -49,23 +49,6 @@ class McpCoreUnitTests extends Specification {
         McpPaginationSupport.paginate(items, [cursor: '5'], 'tools').tools == []
     }
 
-    def 'service tool alias is deterministic safe and keeps already safe names'() {
-        expect:
-        TestableMcpClient.alias('safe_service-name_1') == 'safe_service-name_1'
-
-        when:
-        String alias = TestableMcpClient.alias('org.moqui.impl.UserServices.create#UserAccount')
-
-        then:
-        alias == TestableMcpClient.alias('org.moqui.impl.UserServices.create#UserAccount')
-        alias ==~ /[A-Za-z0-9_-]+/
-        alias != 'org.moqui.impl.UserServices.create#UserAccount'
-
-        and:
-        TestableMcpClient.alias('a#b') != TestableMcpClient.alias('a.b')
-        TestableMcpClient.alias('x' * 200).length() <= 96
-    }
-
     def 'legacy handshake and ping methods are not silently accepted'() {
         when:
         new TestableMcpClient().handle(method, [:])
@@ -75,6 +58,27 @@ class McpCoreUnitTests extends Specification {
 
         where:
         method << ['initialize', 'ping', 'notifications/initialized']
+    }
+
+    def 'resources and prompts are not offered: llm-client tools replace them'() {
+        when:
+        new TestableMcpClient().handle(method, [:])
+
+        then:
+        IllegalArgumentException e = thrown()
+        e.message.startsWith('Unsupported MCP method:')
+
+        where:
+        method << ['resources/list', 'resources/read', 'resources/templates/list', 'prompts/list', 'prompts/get']
+    }
+
+    def 'llm-client errors become MCP tool errors and plain values are wrapped'() {
+        expect:
+        TestableMcpClient.result([error: 'no such service']).isError
+        TestableMcpClient.result([status: 403, error: 'denied']).isError
+        TestableMcpClient.result([status: 404]).isError
+        !TestableMcpClient.result([ok: true, result: [a: 1]]).isError
+        TestableMcpClient.result('text').structuredContent == [result: 'text']
     }
 
     def 'search input is forced into one escaped plain text clause'() {
@@ -96,6 +100,6 @@ class McpCoreUnitTests extends Specification {
 
     static class TestableMcpClient extends McpClient {
         TestableMcpClient() { super(null) }
-        static String alias(String serviceName) { serviceToolName(serviceName) }
+        static Map result(Object value) { toolResult(value) }
     }
 }

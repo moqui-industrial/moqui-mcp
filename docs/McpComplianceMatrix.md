@@ -1,6 +1,6 @@
 # MCP 2026-07-28 Compliance Matrix
 
-Qualification date: 2026-10-08. LibreChat is excluded from this qualification by explicit scope decision.
+Qualification date: 2026-10-15, after the move to the llm-client tools (the previous design and its matrix are on the `old-mcp` branch). LibreChat is excluded from this qualification by explicit scope decision.
 
 ## Frozen Inputs
 
@@ -28,44 +28,37 @@ Qualification date: 2026-10-08. LibreChat is excluded from this qualification by
 | Native MCP `2026-07-28` uses `server/discover`; scoped LibreChat `2025-11-25` initialize and `ping` compatibility is available | `McpServlet` legacy profile adapter | `McpServletIntegrationTests` | PASS |
 | Notification bridge and subscriptions are absent | removed registry/tool/capabilities | core and catalog tests | PASS |
 | First-page pagination, stable cursor and bounds | `McpPaginationSupport` | malformed, negative and overflow cursor tests | PASS |
-| Only concrete `allow-remote="true"` services become tools | `McpClient.getServiceToolList` | real service-definition catalog test | PASS |
-| Service aliases are stable, collision-resistant and MCP-safe | `McpClient.serviceToolName` | alias collision, length and determinism tests | PASS |
-| Service visibility and invocation use effective Moqui authorization | `isServiceVisible`, `assertServiceCallable`, `ec.service.sync()` | list/call/revoke tests through real service engine | PASS |
-| Helper and direct service tools have equivalent controls | `moqui_call_service`, metadata helper | direct/helper and non-remote denial tests | PASS |
-| Business errors are tool errors without stack traces | `invokeService` | validation and search rejection tests | PASS |
+| Tools are the server-side llm-client tools of the profile, under their llm-client names | `McpClient.llmTools` | tool catalog test on the `assist` profile | PASS |
+| Browser and conversation tools are not offered (`screen_use`, `write_ui`, `pin`) | `McpClient.llmTools` | catalog and unknown-tool tests | PASS |
+| Resources and prompts are not offered | `McpClient.handle` | core unsupported-method tests | PASS |
+| The llm-client tools require the `LlmGateway` permission | `McpClient.hasGateway` | list/call test with a user without the permission | PASS |
+| Tool calls run as the user with Moqui authorization | llm-client `run_service`, `request` | real service engine and service REST tests | PASS |
+| llm-client refusals are tool errors without stack traces | `McpClient.toolResult` | refusal and status tests | PASS |
 | Caller messages survive nested dispatch | message snapshot/restore | real service invocation test | PASS |
-| Entity and view metadata use effective runtime definitions | `MoquiResourceProvider` | entity/view aliases, members, relationships and functions | PASS |
-| Record reads are deterministic and read-only | Entity Facade read path | special/composite PK and view-without-PK tests | PASS |
-| Encrypted entity fields are not exported | field projection in resource provider | `SystemMessageRemote` fixture | PASS |
-| DataDocument without an authorizable source fails closed | resource visibility rules | provider integration coverage | PASS |
-| Wiki prompt list/get visibility is consistent | `WikiPromptProvider`, `CompositePromptProvider` | real WikiSpace/WikiPage ACL fixtures with two users | PASS |
-| Prompt substitution is exact and non-evaluating | `WikiPromptProvider.makePromptResult` | missing/extra/non-recursive placeholder tests | PASS |
+| Screen hits carry a link for the user | `McpClient.addScreenLinks` | `browse` test | PASS |
+| Entity REST (`/rest/e1`) through `request` | llm-client `WebFacadeStub` | test records that llm-client refuses it | KNOWN LIMIT |
 | Search is unavailable without Mantle | conditional builtin registration | minimal upstream runtime suite without Mantle | PASS |
-| Search delegates through authorized Moqui/Mantle services | `search#AuthorizedDataDocuments` | real Moqui service engine plus OpenSearch | PASS |
-| USER_ORG and ACTIVE_ORG are server-derived | Mantle setup service and entity filters | two users, two organizations, active-organization switch | PASS |
-| Search query syntax cannot escape organization scope | `McpSearchSupport` and Mantle conjunction | OR, wildcard, field and `_exists_` queries on OpenSearch | PASS |
-| Search parameters cannot override backend or organization filters | strict tool/service input contracts | scope/type/cluster/filter/organization negative tests | PASS |
-| Counts and pagination remain in authorized scope | transformed Mantle result | any-type count/page test | PASS |
+| Search delegates through authorized Moqui/Mantle services | `search#AuthorizedDataDocuments` | real Moqui service engine plus OpenSearch | NOT RE-RUN |
+| USER_ORG and ACTIVE_ORG are server-derived | Mantle setup service and entity filters | two users, two organizations, active-organization switch | NOT RE-RUN |
+| Search query syntax cannot escape organization scope | `McpSearchSupport` and Mantle conjunction | OR, wildcard, field and `_exists_` queries on OpenSearch | NOT RE-RUN |
+| Search parameters cannot override backend or organization filters | strict `find_document`/service input contracts | scope/type/cluster/filter/organization negative tests | NOT RE-RUN |
+| Counts and pagination remain in authorized scope | transformed Mantle result | any-type count/page test | NOT RE-RUN |
 | OAuth is not falsely advertised | no OAuth capability or discovery endpoint | configuration and documentation review | PASS, optional feature not implemented |
 | LibreChat integration | legacy MCP compatibility only; UI is provided by `webroot` | not executed | EXCLUDED |
 
 ## Recorded Test Results
 
-Minimal upstream runtime, without Mantle or LibreChat:
+Runtime with Mantle (H2), 2026-10-15:
 
 ```text
 :runtime:component:moqui-mcp:test
 34 executed, 34 passed, 0 failed, 0 skipped
 ```
 
-Mantle/OpenSearch security qualification:
-
-```text
-:runtime:component:moqui-mcp:testMcpSearchBackend
-13 executed, 13 passed, 0 failed, 0 skipped
-```
-
-The two suites execute 47 test iterations in total. The search suite is intentionally separate because it requires a live disposable OpenSearch-compatible backend; its absence is not converted into a skipped test.
+The search suite (`testMcpSearchBackend`, 13 iterations, passed on 2026-10-08 with the previous tool name) was not
+re-run after the rename to `find_document`: it needs a runtime whose Mantle data feed does not own the `mantle`,
+`mantle_party` and `mantle_product` indexes, and the only runtime at hand has that feed. The search service it covers
+did not change; the tool name and the `query` argument did.
 
 ## Operational Boundary
 

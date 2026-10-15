@@ -62,9 +62,13 @@ class McpSearchBackendTests extends Specification {
         ec = Moqui.getExecutionContext()
         ec.artifactExecution.disableAuthz()
         assert ec.service.getServiceDefinition('mantle.GeneralServices.search#MantleFiltered') != null
-        cleanupUniqueFixtures()
-        createSecurityFixtures()
-        createOrganizationFixtures()
+        // the fixtures would otherwise be pushed by the real-time Mantle data feed into the indexes the test builds
+        ((ExecutionContextImpl) ec).artifactExecutionFacade.disableEntityDataFeed()
+        ec.transaction.runUseOrBegin(null, 'MCP search fixtures') {
+            cleanupUniqueFixtures()
+            createSecurityFixtures()
+            createOrganizationFixtures()
+        }
         indexDocuments()
         ec.cache.clearAllCaches()
         client = new McpClient(ec)
@@ -73,15 +77,17 @@ class McpSearchBackendTests extends Specification {
     def cleanupSpec() {
         ec?.user?.logoutUser()
         ec?.artifactExecution?.disableAuthz()
-        cleanupUniqueFixtures()
-        sharedRecordsCreated.reverseEach { Map record ->
-            ec.entity.find(record.entityName as String).condition(record.pkMap as Map).deleteAll()
-        }
-        if (filterSetCreated) {
-            ec.entity.find('moqui.security.EntityFilterSet').condition('entityFilterSetId', FILTER_SET_ID).deleteAll()
-        }
-        if (activeFilterSetCreated) {
-            ec.entity.find('moqui.security.EntityFilterSet').condition('entityFilterSetId', ACTIVE_FILTER_SET_ID).deleteAll()
+        ec.transaction.runUseOrBegin(null, 'MCP search fixtures') {
+            cleanupUniqueFixtures()
+            sharedRecordsCreated.reverseEach { Map record ->
+                ec.entity.find(record.entityName as String).condition(record.pkMap as Map).deleteAll()
+            }
+            if (filterSetCreated) {
+                ec.entity.find('moqui.security.EntityFilterSet').condition('entityFilterSetId', FILTER_SET_ID).deleteAll()
+            }
+            if (activeFilterSetCreated) {
+                ec.entity.find('moqui.security.EntityFilterSet').condition('entityFilterSetId', ACTIVE_FILTER_SET_ID).deleteAll()
+            }
         }
         deleteIndex('mantle_product')
         deleteIndex('mantle_party')
@@ -145,18 +151,18 @@ class McpSearchBackendTests extends Specification {
         login(USER_DENIED)
 
         when:
-        client.callTool('moqui_search_data_documents', [queryString: 'needle'])
+        client.callTool('find_document', [query: 'needle'])
 
         then:
         thrown(IllegalArgumentException)
     }
 
-    def 'unsupported scopes and types return tool execution errors'() {
+    def 'unsupported types return tool execution errors'() {
         given:
         login(USER_A)
 
         when:
-        Map result = client.callTool('moqui_search_data_documents', arguments)
+        Map result = client.callTool('find_document', arguments)
 
         then:
         result.isError
@@ -165,8 +171,7 @@ class McpSearchBackendTests extends Specification {
 
         where:
         arguments << [
-                [scope: 'other', queryString: 'needle'],
-                [documentType: 'CustomDocument', queryString: 'needle']
+                [documentType: 'CustomDocument', query: 'needle']
         ]
     }
 
@@ -175,16 +180,17 @@ class McpSearchBackendTests extends Specification {
         login(USER_A)
 
         when:
-        client.callTool('moqui_search_data_documents', arguments)
+        client.callTool('find_document', arguments)
 
         then:
         thrown(IllegalArgumentException)
 
         where:
         arguments << [
-                [queryString: 'needle', activeOrgId: ORG_B],
-                [queryString: 'needle', nestedQueryMap: [ownerPartyId: ORG_B]],
-                [queryString: 'needle', clusterName: 'other']
+                [query: 'needle', activeOrgId: ORG_B],
+                [query: 'needle', nestedQueryMap: [ownerPartyId: ORG_B]],
+                [query: 'needle', clusterName: 'other'],
+                [query: 'needle', scope: 'other']
         ]
     }
 
@@ -194,8 +200,8 @@ class McpSearchBackendTests extends Specification {
 
     private Map searchResultAs(String userId, String documentType, String query, int pageIndex, int pageSize) {
         login(userId)
-        Map result = client.callTool('moqui_search_data_documents', [
-                scope: 'mantle', documentType: documentType, queryString: query,
+        Map result = client.callTool('find_document', [
+                documentType: documentType, query: query,
                 pageIndex: pageIndex, pageSize: pageSize
         ])
         assert !result.isError: result.content

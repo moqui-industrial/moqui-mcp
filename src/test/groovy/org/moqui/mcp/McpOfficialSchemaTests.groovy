@@ -25,6 +25,7 @@ import spock.lang.Shared
 import spock.lang.Specification
 
 class McpOfficialSchemaTests extends Specification {
+    static final String TEST_USER_ID = 'mcp-schema-test'
     static final String SCHEMA_LOCATION = 'https://modelcontextprotocol.io/schema/2026-07-28/schema.json'
 
     @Shared ExecutionContext ec
@@ -39,10 +40,14 @@ class McpOfficialSchemaTests extends Specification {
         }
 
         ec = Moqui.getExecutionContext()
-        ec.artifactExecution.disableAuthz()
+        McpTestUsers.create(ec, TEST_USER_ID)
+        McpTestUsers.login(ec, TEST_USER_ID)
     }
 
     def cleanupSpec() {
+        ec?.user?.logoutUser()
+        ec?.artifactExecution?.disableAuthz()
+        if (ec) McpTestUsers.delete(ec, TEST_USER_ID)
         ec?.destroy()
     }
 
@@ -51,20 +56,16 @@ class McpOfficialSchemaTests extends Specification {
         McpClient client = new McpClient(ec)
         Map<String, Map> resultByDefinition = [
                 DiscoverResult             : client.serverDiscover(),
-                ListToolsResult            : client.listTools([pageSize: 5]),
-                ListResourcesResult        : client.resourceProvider.listResources([pageSize: 5]),
-                ListResourceTemplatesResult: client.resourceProvider.listResourceTemplates([pageSize: 5]),
-                ReadResourceResult         : client.resourceProvider.readResource(
-                        'moqui://entity-def/moqui.basic.Enumeration', [:]),
-                ListPromptsResult          : client.promptProvider.listPrompts([pageSize: 5]),
-                GetPromptResult            : TestableWikiPromptProvider.result(),
-                CallToolResult             : TestableMcpClient.completeResult(ec, [ok: true])
+                ListToolsResult            : client.listTools([pageSize: 50]),
+                CallToolResult             : TestableMcpClient.completeResult([ok: true]),
+                CallToolResult_error       : TestableMcpClient.completeResult([status: 403, error: 'denied']),
+                CallToolResult_browse      : client.callTool('browse', [q: 'enumeration'])
         ]
 
         expect:
         resultByDefinition.each { String definitionName, Map result ->
             Schema resultSchema = schemaRegistry.getSchema(
-                    SchemaLocation.of("${SCHEMA_LOCATION}#/\$defs/${definitionName}"))
+                    SchemaLocation.of("${SCHEMA_LOCATION}#/\$defs/${definitionName.tokenize('_')[0]}"))
             List errors = resultSchema.validate(JsonOutput.toJson(result), InputFormat.JSON)
             assert errors.isEmpty(): "${definitionName}: ${errors.join('\n')}"
         }
@@ -84,11 +85,6 @@ class McpOfficialSchemaTests extends Specification {
 
     static class TestableMcpClient extends McpClient {
         TestableMcpClient(ExecutionContext ec) { super(ec) }
-        static Map completeResult(ExecutionContext ec, Object value) { new TestableMcpClient(ec).wrapToolResult(value) }
-    }
-
-    static class TestableWikiPromptProvider extends WikiPromptProvider {
-        TestableWikiPromptProvider(ExecutionContext ec) { super(ec) }
-        static Map result() { makePromptResult('schema-test', 'Hello ${name}', [name: 'Moqui']) }
+        static Map completeResult(Object value) { toolResult(value) }
     }
 }
