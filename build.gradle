@@ -32,6 +32,7 @@ tasks.withType(GroovyCompile) { options.compilerArgs << "-proc:none" }
 
 dependencies {
     implementation project(':framework')
+    implementation 'com.github.jsqlparser:jsqlparser:5.3'
     runtimeOnly 'jakarta.servlet:jakarta.servlet-api:6.0.0'
     testImplementation project(':framework').configurations.testImplementation.allDependencies
     testImplementation 'com.networknt:json-schema-validator:2.0.4'

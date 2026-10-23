@@ -126,4 +126,25 @@ along with this software (see the LICENSE.md file). If not, see
             documentListPageSize = svcRes.documentListPageSize != null ? svcRes.documentListPageSize as Integer : safePageSize
         ]]></script></actions>
     </service>
+
+    <service verb="run" noun="Sql" authenticate="true" allow-remote="true" transaction-timeout="30">
+        <description>Execute one read-only SQL statement against individually authorized Moqui DataDocument OpenSearch indices.</description>
+        <in-parameters>
+            <parameter name="sql" required="true"/>
+            <parameter name="maxRows" type="Integer" default-value="100"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="analysis" type="Map"/>
+            <parameter name="dataDocumentIds" type="List"/>
+            <parameter name="maxRows" type="Integer"/>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            Map sqlResult = org.moqui.mcp.McpBiSqlExecutor.execute(ec, sql as String, maxRows as Integer)
+            analysis = sqlResult.analysis
+            dataDocumentIds = sqlResult.dataDocumentIds
+            maxRows = sqlResult.maxRows
+            result = sqlResult.result
+        ]]></script></actions>
+    </service>
 </services>

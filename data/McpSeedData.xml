@@ -19,4 +19,51 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.security.ArtifactAuthz artifactAuthzId="MCP_SEARCH_ADMIN" userGroupId="ADMIN"
             artifactGroupId="MCP_SEARCH" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
     <moqui.security.ArtifactAuthzFilter artifactAuthzId="MCP_SEARCH_ADMIN" entityFilterSetId="MANTLE_ACTIVE_ORG"/>
+    <moqui.security.ArtifactGroup artifactGroupId="MCP_SQL" description="MCP read-only SQL analysis"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MCP_SQL"
+            artifactName="org.moqui.mcp.McpServices.run#Sql" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MCP_SQL_ADMIN" userGroupId="ADMIN"
+            artifactGroupId="MCP_SQL" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.UserGroup userGroupId="MCP_BI_SQL_USERS" description="Users allowed to analyze and query authorized BI DataDocuments through MCP"/>
+    <moqui.security.ArtifactGroup artifactGroupId="MCP_BI_SQL" description="MCP BI SQL and DataDocument access"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MCP_BI_SQL"
+            artifactName="org.moqui.mcp.McpServices.run#Sql" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MCP_BI_SQL"
+            artifactName="bi.datadocument.MantleParty" artifactTypeEnumId="AT_OTHER"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MCP_BI_SQL"
+            artifactName="bi.datadocument.MantleCommunicationEvent" artifactTypeEnumId="AT_OTHER"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MCP_BI_SQL"
+            artifactName="bi.datadocument.MantleProduct" artifactTypeEnumId="AT_OTHER"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MCP_BI_SQL"
+            artifactName="bi.datadocument.MantleFacility" artifactTypeEnumId="AT_OTHER"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MCP_BI_SQL"
+            artifactName="bi.datadocument.MantleWikiPage" artifactTypeEnumId="AT_OTHER"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MCP_BI_SQL"
+            artifactName="bi.datadocument.MantleSalesOrderPart" artifactTypeEnumId="AT_OTHER"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MCP_BI_SQL"
+            artifactName="bi.datadocument.MantleSalesOrderItem" artifactTypeEnumId="AT_OTHER"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MCP_BI_SQL"
+            artifactName="bi.datadocument.MantleSalesInvoice" artifactTypeEnumId="AT_OTHER"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MCP_BI_SQL"
+            artifactName="bi.datadocument.MantleSalesInvoiceItem" artifactTypeEnumId="AT_OTHER"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MCP_BI_SQL"
+            artifactName="bi.datadocument.MantleInventoryAsset" artifactTypeEnumId="AT_OTHER"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MCP_BI_SQL"
+            artifactName="bi.datadocument.MantleInventoryOrderItem" artifactTypeEnumId="AT_OTHER"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MCP_BI_SQL"
+            artifactName="bi.datadocument.MantleInventoryRunConsume" artifactTypeEnumId="AT_OTHER"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MCP_BI_SQL"
+            artifactName="bi.datadocument.MantleInventoryRunProduce" artifactTypeEnumId="AT_OTHER"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MCP_BI_SQL"
+            artifactName="bi.datadocument.MantleInventoryProdEstimate" artifactTypeEnumId="AT_OTHER"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MCP_BI_SQL"
+            artifactName="bi.datadocument.MantleProject" artifactTypeEnumId="AT_OTHER"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MCP_BI_SQL"
+            artifactName="bi.datadocument.MantleTask" artifactTypeEnumId="AT_OTHER"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MCP_BI_SQL"
+            artifactName="bi.datadocument.MantleEvent" artifactTypeEnumId="AT_OTHER"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MCP_BI_SQL"
+            artifactName="bi.datadocument.MantleRequest" artifactTypeEnumId="AT_OTHER"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MCP_BI_SQL_USERS" userGroupId="MCP_BI_SQL_USERS"
+            artifactGroupId="MCP_BI_SQL" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
 </entity-facade-xml>

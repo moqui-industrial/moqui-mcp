@@ -25,6 +25,7 @@ class McpLlmToolIntegrationTests extends Specification {
     static final String PLAIN_USER_ID = 'mcp-tool-plain'
     static final String TEST_GROUP_ID = 'MCP_TOOL_TEST'
     static final String SERVICE_NAME = 'org.moqui.impl.BasicServices.find#Enumeration'
+    static final String SQL_SERVICE_NAME = 'org.moqui.mcp.McpServices.run#Sql'
 
     @Shared ExecutionContext ec
     @Shared McpClient client
@@ -43,6 +44,8 @@ class McpLlmToolIntegrationTests extends Specification {
             ec.entity.makeValue('moqui.security.ArtifactGroup').setAll([artifactGroupId: TEST_GROUP_ID, description: 'MCP tool test']).create()
             ec.entity.makeValue('moqui.security.ArtifactGroupMember').setAll([artifactGroupId: TEST_GROUP_ID,
                     artifactName: SERVICE_NAME, artifactTypeEnumId: 'AT_SERVICE', inheritAuthz: 'Y']).create()
+            ec.entity.makeValue('moqui.security.ArtifactGroupMember').setAll([artifactGroupId: TEST_GROUP_ID,
+                    artifactName: SQL_SERVICE_NAME, artifactTypeEnumId: 'AT_SERVICE', inheritAuthz: 'Y']).create()
             ec.entity.makeValue('moqui.security.ArtifactAuthz').setAll([artifactAuthzId: TEST_GROUP_ID, userGroupId: TEST_GROUP_ID,
                     artifactGroupId: TEST_GROUP_ID, authzTypeEnumId: 'AUTHZT_ALWAYS', authzActionEnumId: 'AUTHZA_ALL']).create()
         }
@@ -89,6 +92,20 @@ class McpLlmToolIntegrationTests extends Specification {
         tools.find { it.name == 'screen_use' }.inputSchema.get('properties').action.get('enum') == ['navigate']
         !tools*.name.any { it.startsWith('moqui_') }
         tools.every { it.inputSchema?.type == 'object' && it.description }
+    }
+
+    def 'run_sql is published and analyzes SQL through the authorized Moqui service'() {
+        when:
+        List<Map> tools = client.listTools([pageSize: 100]).tools as List<Map>
+        Map result = client.callTool('run_sql', [sql: 'SELECT enum_id FROM moqui_basic_enumeration'])
+
+        then:
+        tools.find { it.name == 'run_sql' }.inputSchema.required == ['sql']
+        !result.isError
+        result.structuredContent.analysis.statementType == 'SELECT'
+        result.structuredContent.analysis.tables == ['moqui_basic_enumeration']
+        result.structuredContent.analysis.columns == ['enum_id']
+        result.structuredContent.analysis.analysisOnly
     }
 
     def 'run_service calls a service as the user through the real service engine'() {

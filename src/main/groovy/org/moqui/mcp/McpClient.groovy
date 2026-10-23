@@ -46,10 +46,12 @@ class McpClient {
     static final String PUBLIC_URL_PROPERTY = 'moqui_mcp_public_url'
 
     static final String FIND_DOCUMENT = 'find_document'
+    static final String RUN_SQL = 'run_sql'
     static final String SCREEN_USE = 'screen_use'
     /** Notification topic that the Moqui page (WebrootVue) listens to and navigates on */
     static final String NAVIGATE_TOPIC = 'LlmScreenNavigate'
     static final String SEARCH_SERVICE = 'org.moqui.mcp.McpServices.search#AuthorizedDataDocuments'
+    static final String SQL_SERVICE = 'org.moqui.mcp.McpServices.run#Sql'
     /**
      * Not offered: pin keeps ids on a Moqui conversation, which an MCP client does not have; find_skill and enter_sim
      * read and write the llm-client skills, which belong to the Moqui assistant. An MCP client brings its own skills.
@@ -61,7 +63,8 @@ class McpClient {
             'screen_use with action navigate opens that screen in the Moqui page the user has open; give the link too. ' +
             'request reads and writes through screen form-lists (/qapps/.../actions/<form>) and service REST (/rest/s1). ' +
             'run_service calls a service as the user. find_basic lists options of ' +
-            'configuration entities. find_document is a text search over the DataDocuments in OpenSearch.'
+            'configuration entities. find_document is a text search over the DataDocuments in OpenSearch. ' +
+            'run_sql analyzes one read-only SQL statement and reports its tables and columns; it does not execute SQL.'
 
     protected final ExecutionContext ec
 
@@ -105,6 +108,7 @@ class McpClient {
             if (profileState()?.allowWriteUi) toolList.add(screenUseDescriptor())
         }
         if (searchAvailable()) toolList.add(findDocumentDescriptor())
+        if (sqlAvailable()) toolList.add(runSqlDescriptor())
         Map page = McpPaginationSupport.paginate(toolList, params, 'tools')
         Map result = [
                 resultType: 'complete',
@@ -120,6 +124,7 @@ class McpClient {
         if (!name) throw new IllegalArgumentException('Tool name is required')
         Map args = arguments ?: [:]
         if (name == FIND_DOCUMENT) return findDocument(args)
+        if (name == RUN_SQL) return runSql(args)
 
         if (!hasGateway()) throw new IllegalArgumentException('The current user may not use the llm-client tools (LlmGateway permission)')
         LlmTool tool = llmTools().find { LlmTool t -> t.name == name }
@@ -235,6 +240,11 @@ class McpClient {
                 ec.serviceFacade.getServiceDefinition('mantle.GeneralServices.search#MantleFiltered') != null
     }
 
+    protected boolean sqlAvailable() {
+        ServiceDefinition sd = ec.serviceFacade.getServiceDefinition(SQL_SERVICE)
+        return sd != null && isServiceVisible(sd)
+    }
+
     protected static Map findDocumentDescriptor() {
         return [
                 name       : FIND_DOCUMENT,
@@ -273,6 +283,45 @@ class McpClient {
         } catch (Throwable t) {
             logger.warn("MCP ${FIND_DOCUMENT} failed", t)
             return makeToolError('Search failed')
+        } finally {
+            ec.message.clearAll()
+            restoreMessages(callerMessages)
+        }
+    }
+
+    protected static Map runSqlDescriptor() {
+        return [
+                name       : RUN_SQL,
+                description: 'Execute one read-only SQL SELECT/CTE against authorized Moqui DataDocument OpenSearch indices. ' +
+                        'Use lower_snake_case DataDocument index names such as mantle_product. Returns rows and schema, at most maxRows.',
+                inputSchema: [
+                        type                : 'object',
+                        required            : ['sql'],
+                        properties          : [
+                                sql    : [type: 'string', minLength: 1, maxLength: 20000],
+                                maxRows: [type: 'integer', minimum: 1, maximum: 500, default: 100]
+                        ],
+                        additionalProperties: false
+                ]
+        ]
+    }
+
+    protected Map runSql(Map args) {
+        assertAllowedKeys(args, ['sql', 'maxRows'] as Set, RUN_SQL)
+        ServiceDefinition sd = ec.serviceFacade.getServiceDefinition(SQL_SERVICE)
+        if (sd == null || !isServiceVisible(sd)) throw new IllegalArgumentException("${RUN_SQL} is not available for the current user")
+        Map callerMessages = captureMessages()
+        ec.message.clearAll()
+        try {
+            Map svcRes = ec.service.sync().name(SQL_SERVICE).parameters([sql: args.sql, maxRows: args.maxRows]).call()
+            if (ec.message.hasError()) return makeToolError(ec.message.errorsString?.trim() ?: 'SQL execution failed')
+            return toolResult([analysis: svcRes.analysis ?: [:], dataDocumentIds: svcRes.dataDocumentIds ?: [],
+                    maxRows: svcRes.maxRows, result: svcRes.result ?: [:]])
+        } catch (IllegalArgumentException e) {
+            return makeToolError(e.message ?: 'SQL execution failed')
+        } catch (Throwable t) {
+            logger.warn("MCP ${RUN_SQL} failed", t)
+            return makeToolError('SQL execution failed')
         } finally {
             ec.message.clearAll()
             restoreMessages(callerMessages)

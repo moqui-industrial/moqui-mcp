@@ -3,8 +3,8 @@
 Model Context Protocol server for Moqui, targeting MCP `2026-07-28` natively.
 
 The component is a thin MCP layer over the llm-client of the Moqui framework. Its tools are the llm-client tools, with
-their names, schemas and rules, as llm-client attaches them for one profile; it adds only what llm-client does not
-have: a text search over the DataDocuments indexed in OpenSearch.
+their names, schemas and rules, as llm-client attaches them for one profile; it adds a text search over DataDocuments
+indexed in OpenSearch and a read-only SQL analysis tool.
 
 The previous design (one tool per service, entity resources, Wiki prompts) is kept on the `old-mcp` branch.
 
@@ -75,6 +75,7 @@ The tools are built from the llm-client profile named by `moqui_mcp_llm_profile`
 | `find_basic` | `allowed-basic-entity` entries | options of the allow-listed configuration entities |
 | `screen_use` | `allow-write-ui` | `navigate` only: llm-client checks the `/qapps` path and the user's view permission, then the Moqui page the user has open goes to that screen without reloading (a `LlmScreenNavigate` notification over the Moqui notification WebSocket, handled in `WebrootVue.qvt.js`); parameters and fields go in the URL |
 | `find_document` | mantle-usl and the search service are available to the user | text search over the Mantle DataDocuments in OpenSearch, inside the organizations of the user |
+| `run_sql` | the user is authorized for the service and every referenced `bi.datadocument.<DataDocumentId>` artifact | executes one bounded read-only OpenSearch SQL query against authorized DataDocument indices |
 
 Not offered: `write_ui`, which draws in the Assist panel, and the other `screen_use` actions (snapshot, fill, ...),
 which read and change the rendered page; `pin`, which keeps ids on a Moqui conversation; `find_skill` and `enter_sim`, which read and write the llm-client skills. Those skills belong to the
@@ -99,6 +100,23 @@ Known limits that come from llm-client:
 `MANTLE_USER_ORG`). An omitted or empty query lists one bounded page. Query text is trimmed, limited to 512 characters
 and escaped as one backend query clause. Arguments other than `query`, `documentType`, `pageIndex` and `pageSize` are
 rejected.
+
+### run_sql
+
+`run_sql` calls `org.moqui.mcp.McpServices.run#Sql`. It accepts exactly one `SELECT` statement, including CTEs, against
+the lower-snake-case physical index of a DataDocument, for example `mantle_product`. It rejects writes, multiple
+statements, qualified relations, and a query without a final `LIMIT`. The `LIMIT` must not exceed `maxRows` (default 100,
+maximum 500). Before OpenSearch receives the query, Moqui resolves every referenced index to its `DataDocumentId` and
+pushes `bi.datadocument.<DataDocumentId>` as an `AT_OTHER`/`VIEW` artifact with authorization required. The result
+contains the parser analysis, the authorized DataDocument ids, and the native OpenSearch SQL result.
+
+The target OpenSearch node must include the version-matched `opensearch-sql` plugin. The service fails closed if the SQL
+endpoint is not available; it never falls back to JDBC or the Moqui transactional database.
+
+The `MCP_BI_SQL` artifact group contains the Mantle DataDocuments as explicit `AT_OTHER` artifacts named
+`bi.datadocument.<dataDocumentId>`. Deployments assign this group to BI users through `MCP_BI_SQL_USERS`; demo data
+assigns it to the `john.doe` account (`EX_JOHN_DOE`). The current analysis-only service does not yet check these
+artifacts. The execution service will require every SQL relation to resolve to one of them.
 
 ## Security Model
 
