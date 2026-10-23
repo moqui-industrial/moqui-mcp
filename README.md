@@ -115,8 +115,8 @@ endpoint is not available; it never falls back to JDBC or the Moqui transactiona
 
 The `MCP_BI_SQL` artifact group contains the Mantle DataDocuments as explicit `AT_OTHER` artifacts named
 `bi.datadocument.<dataDocumentId>`. Deployments assign this group to BI users through `MCP_BI_SQL_USERS`; demo data
-assigns it to the `john.doe` account (`EX_JOHN_DOE`). The current analysis-only service does not yet check these
-artifacts. The execution service will require every SQL relation to resolve to one of them.
+assigns it to the `john.doe` account (`EX_JOHN_DOE`). The execution service requires every SQL relation to resolve to
+one of these artifacts and evaluates authorization in the current execution context.
 
 ## Security Model
 
