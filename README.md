@@ -76,6 +76,7 @@ The tools are built from the llm-client profile named by `moqui_mcp_llm_profile`
 | `screen_use` | `allow-write-ui` | `navigate` only: llm-client checks the `/qapps` path and the user's view permission, then the Moqui page the user has open goes to that screen without reloading (a `LlmScreenNavigate` notification over the Moqui notification WebSocket, handled in `WebrootVue.qvt.js`); parameters and fields go in the URL |
 | `find_document` | mantle-usl and the search service are available to the user | text search over the Mantle DataDocuments in OpenSearch, inside the organizations of the user |
 | `run_sql` | the user is authorized for the service and every referenced `bi.datadocument.<DataDocumentId>` artifact | executes one bounded read-only OpenSearch SQL query against authorized DataDocument indices |
+| service tools | a service is a member of the artifact group `MCP_SERVICE_TOOLS` and the user may run it | one tool per service, named `verb_noun` in snake case (`get#NormTree` is `get_norm_tree`), described by the service description, with the JSON schema of its in-parameters |
 
 Not offered: `write_ui`, which draws in the Assist panel, and the other `screen_use` actions (snapshot, fill, ...),
 which read and change the rendered page; `pin`, which keeps ids on a Moqui conversation; `find_skill` and `enter_sim`, which read and write the llm-client skills. Those skills belong to the
@@ -117,6 +118,23 @@ The `MCP_BI_SQL` artifact group contains the Mantle DataDocuments as explicit `A
 `bi.datadocument.<dataDocumentId>`. Deployments assign this group to BI users through `MCP_BI_SQL_USERS`; demo data
 assigns it to the `john.doe` account (`EX_JOHN_DOE`). The execution service requires every SQL relation to resolve to
 one of these artifacts and evaluates authorization in the current execution context.
+
+### Service tools
+
+A component offers read services of its own to MCP clients without code in this component: its seed data lists them
+in the artifact group `MCP_SERVICE_TOOLS` (`moqui.security.ArtifactGroupMember`, `AT_SERVICE`, exact names):
+
+```xml
+<moqui.security.ArtifactGroup artifactGroupId="MCP_SERVICE_TOOLS" description="Services offered as MCP tools">
+    <artifacts artifactTypeEnumId="AT_SERVICE" artifactName="compliance.NormSearchServices.get#NormTree" nameIsPattern="N"/>
+</moqui.security.ArtifactGroup>
+```
+
+The group grants nothing: a tool is listed only for a user the service's own authorization lets run it (its verb's
+authz action), and it runs as that user through the llm-client service tool, which accepts only services that require
+authentication and drops login keys from the arguments. The service description is the tool description, so write it
+for the model: what it returns and when to use it. A tool name that another service or tool already has falls back to
+the llm-client encoding of the full service name (`s_...`).
 
 ## Security Model
 

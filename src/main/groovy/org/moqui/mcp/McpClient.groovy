@@ -33,6 +33,9 @@ import org.slf4j.LoggerFactory
  * skills (find_skill, enter_sim). screen_use is offered for navigate only: llm-client checks the path and the user's
  * view permission, and the Moqui page of the user opens the screen when it gets the notification.
  * find_document adds the OpenSearch DataDocument search, which llm-client does not have.
+ * Service tools: a component offers read services of its own as tools by listing them in the artifact group
+ * MCP_SERVICE_TOOLS in its seed data; each becomes a tool named verb_noun, described by the service, for the users
+ * authorized to run it.
  */
 class McpClient {
     protected static final Logger logger = LoggerFactory.getLogger(McpClient)
@@ -50,6 +53,8 @@ class McpClient {
     static final String SCREEN_USE = 'screen_use'
     /** Notification topic that the Moqui page (WebrootVue) listens to and navigates on */
     static final String NAVIGATE_TOPIC = 'LlmScreenNavigate'
+    /** Artifact group whose AT_SERVICE members (exact names) are offered as tools, one per service */
+    static final String SERVICE_TOOLS_GROUP = 'MCP_SERVICE_TOOLS'
     static final String SEARCH_SERVICE = 'org.moqui.mcp.McpServices.search#AuthorizedDataDocuments'
     static final String SQL_SERVICE = 'org.moqui.mcp.McpServices.run#Sql'
     /**
@@ -64,7 +69,8 @@ class McpClient {
             'request reads and writes through screen form-lists (/qapps/.../actions/<form>) and service REST (/rest/s1). ' +
             'run_service calls a service as the user. find_basic lists options of ' +
             'configuration entities. find_document is a text search over the DataDocuments in OpenSearch. ' +
-            'run_sql analyzes one read-only SQL statement and reports its tables and columns; it does not execute SQL.'
+            'run_sql analyzes one read-only SQL statement and reports its tables and columns; it does not execute SQL. ' +
+            'The other tools call services of the installed components; their descriptions say what they return.'
 
     protected final ExecutionContext ec
 
@@ -109,6 +115,7 @@ class McpClient {
         }
         if (searchAvailable()) toolList.add(findDocumentDescriptor())
         if (sqlAvailable()) toolList.add(runSqlDescriptor())
+        serviceTools().each { String name, ServiceTool st -> toolList.add(st.descriptor()) }
         Map page = McpPaginationSupport.paginate(toolList, params, 'tools')
         Map result = [
                 resultType: 'complete',
@@ -125,6 +132,8 @@ class McpClient {
         Map args = arguments ?: [:]
         if (name == FIND_DOCUMENT) return findDocument(args)
         if (name == RUN_SQL) return runSql(args)
+        ServiceTool serviceTool = serviceTools().get(name)
+        if (serviceTool != null) return callServiceTool(serviceTool, args)
 
         if (!hasGateway()) throw new IllegalArgumentException('The current user may not use the llm-client tools (LlmGateway permission)')
         LlmTool tool = llmTools().find { LlmTool t -> t.name == name }
@@ -322,6 +331,74 @@ class McpClient {
         } catch (Throwable t) {
             logger.warn("MCP ${RUN_SQL} failed", t)
             return makeToolError('SQL execution failed')
+        } finally {
+            ec.message.clearAll()
+            restoreMessages(callerMessages)
+        }
+    }
+
+    /** A service offered as a tool: the llm-client service tool (schema from the in-parameters, login keys dropped,
+     * authenticated services only) with the name and the description of the service. */
+    static class ServiceTool {
+        final String name
+        final String description
+        final LlmTool tool
+
+        ServiceTool(String name, String description, LlmTool tool) {
+            this.name = name
+            this.description = description
+            this.tool = tool
+        }
+
+        Map descriptor() {
+            Map schema = tool.parametersSchema ? new LinkedHashMap(tool.parametersSchema) : [:]
+            schema.type = 'object'
+            return [name: name, description: description, inputSchema: normalizeJsonValue(schema)]
+        }
+    }
+
+    /** verb_noun in snake case: get#NormTree is get_norm_tree. */
+    static String serviceToolName(String verb, String noun) {
+        String n = (noun ?: '').replaceAll(/([a-z0-9])([A-Z])/, '$1_$2').replaceAll(/[^A-Za-z0-9_]/, '_')
+        return ((verb ?: '') + (n ? '_' + n : '')).toLowerCase()
+    }
+
+    /** The services of the artifact group MCP_SERVICE_TOOLS the user may run, by tool name. A name that two services
+     * would share, or that another tool has, falls back to the llm-client encoding of the full service name. */
+    protected Map<String, ServiceTool> serviceTools() {
+        Map<String, ServiceTool> out = new LinkedHashMap<>()
+        List members = ec.entity.find('moqui.security.ArtifactGroupMember')
+                .condition([artifactGroupId: SERVICE_TOOLS_GROUP, artifactTypeEnumId: 'AT_SERVICE'])
+                .orderBy('artifactName').useCache(true).disableAuthz().list()
+        Set<String> reserved = [FIND_DOCUMENT, RUN_SQL, SCREEN_USE] as Set
+        for (member in members) {
+            if (member.nameIsPattern == 'Y') continue
+            ServiceDefinition sd = ec.serviceFacade.getServiceDefinition((String) member.artifactName)
+            if (sd == null || sd.authenticate != 'true' || !isServiceVisible(sd)) continue
+            String name = serviceToolName(sd.verb, sd.noun)
+            if (!name || name in reserved || out.containsKey(name) || name.length() > 64) name = null
+            try {
+                LlmTool tool = LlmTool.service(sd.serviceName, name)
+                String description = (sd.serviceNode.first('description')?.text ?: "Moqui service ${sd.serviceName}")
+                        .replaceAll(/\s+/, ' ').trim()
+                out.put(tool.name, new ServiceTool(tool.name, description, tool))
+            } catch (Throwable t) {
+                logger.warn("MCP service tool ${sd.serviceName} not offered: ${t.message}")
+            }
+        }
+        return out
+    }
+
+    protected Map callServiceTool(ServiceTool st, Map args) {
+        Map callerMessages = captureMessages()
+        ec.message.clearAll()
+        try {
+            Object result = st.tool.execute(args as Map<String, Object>, ec)
+            if (ec.message.hasError()) return makeToolError(ec.message.errorsString?.trim() ?: "${st.name} failed")
+            return toolResult(result)
+        } catch (Throwable t) {
+            logger.warn("MCP tool ${st.name} failed", t)
+            return makeToolError("${st.name} failed: ${t.message ?: t.class.simpleName}")
         } finally {
             ec.message.clearAll()
             restoreMessages(callerMessages)

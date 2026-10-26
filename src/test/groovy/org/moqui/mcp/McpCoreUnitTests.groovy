@@ -49,6 +49,19 @@ class McpCoreUnitTests extends Specification {
         McpPaginationSupport.paginate(items, [cursor: '5'], 'tools').tools == []
     }
 
+    def 'a service tool is named verb_noun in snake case'() {
+        expect:
+        McpClient.serviceToolName(verb, noun) == name
+
+        where:
+        verb     | noun               || name
+        'get'    | 'NormTree'         || 'get_norm_tree'
+        'find'   | 'NormsForProduct'  || 'find_norms_for_product'
+        'search' | 'Norms'            || 'search_norms'
+        'get'    | 'ItemReferences'   || 'get_item_references'
+        'run'    | null               || 'run'
+    }
+
     def 'legacy handshake and ping methods are not silently accepted'() {
         when:
         new TestableMcpClient().handle(method, [:])
