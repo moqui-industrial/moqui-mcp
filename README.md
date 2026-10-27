@@ -126,7 +126,7 @@ in the artifact group `MCP_SERVICE_TOOLS` (`moqui.security.ArtifactGroupMember`,
 
 ```xml
 <moqui.security.ArtifactGroup artifactGroupId="MCP_SERVICE_TOOLS" description="Services offered as MCP tools">
-    <artifacts artifactTypeEnumId="AT_SERVICE" artifactName="compliance.NormSearchServices.get#NormTree" nameIsPattern="N"/>
+    <artifacts artifactTypeEnumId="AT_SERVICE" artifactName="mantle.compliance.NormSearchServices.get#NormTree" nameIsPattern="N"/>
 </moqui.security.ArtifactGroup>
 ```
 
